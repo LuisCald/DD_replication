@@ -1,0 +1,242 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+   "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head>
+<title>Rout_log.html</title>
+<meta name="keywords"  content="seasonal adjustment, X-13ARIMA-SEATS, regARIMA modeling">  
+<meta name="description"  content="X-13ARIMA-SEATS Log File (Rout_log.html)">  
+<meta name="generator"  content="X-13ARIMA-SEATS">  
+<meta name="author"  content="Time Series Research Staff, CSRM, US Census Bureau">  
+<meta http-equiv="Content-Type"  content="text/html; charset=ISO-8859-1">  
+<style type="text/css">
+  p,ul,h1,h2,h3,h4,h5 {margin-left : 5%; margin-right : 5%;}
+  .indent {  margin-left : 7.5%;  margin-right : 7.5%;  }
+  .indentnav {  margin-left : 7.5%;  margin-right : 7.5%; font-size: 75%; }
+  .bold {   font-weight: bold;   }
+  .em {   font-style:italic;   }
+  .center { text-align : center; }
+  .left {   text-align: left;    }
+  .right {   text-align: right;    }
+  pre {margin-left : 5%; margin-right : 5%;}
+  ul.nob { list-style:none }
+  .ub {text-decoration:underline; font-weight: bold; }
+  table {
+    border-width: thin thin thin thin;
+    border-spacing: 0px;
+    border-color: black black black black;
+    border-collapse: collapse;
+    background-color: white;
+    font-size: 80%;
+  }
+  th {
+    border-width: thin thin thin thin;
+    padding: 3px 3px 3px 3px;
+    border-style: inset inset inset inset;
+    border-color: gray gray gray gray;
+    background-color: #BDBDBD;
+  }
+  td {
+    border-width: thin thin thin thin;
+    padding: 3px 3px 3px 3px;
+    border-style: inset inset inset inset;
+    border-color: gray gray gray gray;
+    background-color: white;
+    text-align: right;
+  }
+  table.x11 {
+    margin-left : 7.5%;
+    margin-right : 7.5%;
+    width : 85%;
+  }
+  td.nowrap {  white-space: nowrap;  }
+  td.nowrapcenter {
+    white-space: nowrap;
+    text-align : center;
+  }
+  td.head {
+    background-color: #BDBDBD;
+    text-align : center;
+    font-weight: bold;
+  }
+  td.headleft {
+    background-color: #BDBDBD;
+    text-align : left;
+    font-weight: bold;
+  }
+  table td:hover,th:hover {
+    background:#FFCC99; cursor: crosshair;
+    font-weight:bold; font-size:1.5em;
+  }
+ .w65 {  margin-left : 17.5%;  margin-right : 17.5%;  width : 65%  }
+  th.iter {  width : 35%;  text-align: left;  }
+ .w90 {  margin-left : 5%;  margin-right : 5%;  width : 90%  }
+ .w80 {  margin-left : 10%;  margin-right : 10%;  width : 80%  }
+ .w70 {  margin-left : 15%;  margin-right : 15%;  width : 70%  }
+ .w60 {  margin-left : 20%;  margin-right : 20%;  width : 60%  }
+ .w50 {  margin-left : 25%;  margin-right : 25%;  width : 50%  }
+ .w40 {  margin-left : 30%;  margin-right : 30%;  width : 40%  }
+ .w30 {  margin-left : 35%;  margin-right : 35%;  width : 30%  }
+ .w20 {  margin-left : 40%;  margin-right : 40%;  width : 20%  }
+  a.skiplinks {color: #FFFFFF; font-size: xx-small;}
+  a.longdesc {
+    position : absolute; left : -1010em; 
+    width : 900em; font-size : 10%;
+  }
+  dl#content-footnotes {
+    position : absolute; left : -9999px;
+  }
+  dt {
+    clear : both; padding : .5em 0 0 0;
+    margin : 0; font-weight : bold; 
+    font-size : 10%; 
+  }
+  dd {
+    padding : 0; margin : 0; font-size : 10%; 
+  }
+</style>
+</head>
+<body>
+
+<h1 class="center">Log for X-13ARIMA-SEATS program (Version 1.1 Build 57)</h1>
+
+<h2 class="center"> Nov 22, 2023  18.07.33 </h2>
+
+<p>&nbsp;</p>
+
+<a name="pos00001"></a>
+
+<h2>Log Entry for the quarterly series Rout</h2>
+
+<h3>R Output for x12a                                                               </h3>
+
+<p>&nbsp;</p>
+<div id="lgidd000001">
+<table class="w60"
+  summary ="Results of Unit Root Test for identifying orders of differencing" >
+<caption><strong>Orders of Differencing Identified</strong></caption>
+<tr>
+<th scope="row">Regular difference order</th>
+<td class="center">  1</td>
+<th scope="row">Seasonal difference order</th>
+<td class="center">  0</td>
+</tr>
+</table></div>
+
+<p>&nbsp;</p>
+<div id="lgb5m000002">
+<table class="w60"
+  summary ="Best Five ARIMA Models" >
+<caption><strong>Best Five ARIMA Models</strong></caption>
+<tr>
+<td class="head">&nbsp;</td>
+<th scope="col">ARIMA Model</th>
+<th scope="col"><abbr title="Bayesian information criterion 2">BIC2</abbr></th>
+</tr>
+<tr><th scope="row">Model  1</th><td class="center">(0 1 1)</td><td class="center">    -6.135</td></tr>
+<tr><th scope="row">Model  2</th><td class="center">(1 1 0)</td><td class="center">    -6.108</td></tr>
+<tr><th scope="row">Model  3</th><td class="center">(0 1 0)</td><td class="center">    -6.055</td></tr>
+<tr><th scope="row">Model  4</th><td class="center">(0 1 1)(1 0 0)</td><td class="center">    -6.046</td></tr>
+<tr><th scope="row">Model  5</th><td class="center">(0 1 1)(0 0 1)</td><td class="center">    -6.043</td></tr>
+</table></div>
+
+<p>&nbsp;</p>
+
+<p class="center"><strong>Constant Term :</strong> Not Significant</p>
+<p class="center"><strong>Automatic model chosen :</strong> (0 1 1)(0 1 1)</p>
+<div id="lgf3000003">
+<table class="w60"
+  summary ="X-11 Seasonal Adjustment Diagnostics" >
+<caption><strong>X-11 Seasonal Adjustment Diagnostics</strong></caption>
+<tr>
+<th scope="row">Moving seasonality ratio</th>
+<td>      7.612</td>
+</tr>
+<tr>
+<th scope="row"><abbr title="I over C">I/C</abbr> Ratio</th>
+<td>      0.995</td>
+</tr>
+<tr>
+<th scope="row">Stable Seasonal F, B1 table</th>
+<td>      2.828</td>
+</tr>
+<tr>
+<th scope="row">Stable Seasonal F, D8 table</th>
+<td>      3.711</td>
+</tr>
+<tr>
+<th scope="row">Moving Seasonal F, D8 table</th>
+<td>      1.713</td>
+</tr>
+<tr>
+<th scope="row">Identifiable seasonality</th>
+<td>no </td>
+</tr>
+</table></div>
+
+<p>&nbsp;</p>
+<div id="lgf3000004">
+<table class="w60"
+  summary ="M and Q Quality Control Diagnostics" >
+<caption><strong>M and Q Quality Control Diagnostics</strong></caption>
+<tr>
+<th scope="row">M01</th>
+<td class="center">    3.0000</td>
+</tr>
+<tr>
+<th scope="row">M02</th>
+<td class="center">    0.9549</td>
+</tr>
+<tr>
+<th scope="row">M03</th>
+<td class="center">    0.9925</td>
+</tr>
+<tr>
+<th scope="row">M04</th>
+<td class="center">    0.8792</td>
+</tr>
+<tr>
+<th scope="row">M05</th>
+<td class="center">    0.9719</td>
+</tr>
+<tr>
+<th scope="row">M06</th>
+<td class="center">    1.4449</td>
+</tr>
+<tr>
+<th scope="row">M07</th>
+<td class="center">    1.2789</td>
+</tr>
+<tr>
+<th scope="row">M08</th>
+<td class="center">    0.5697</td>
+</tr>
+<tr>
+<th scope="row">M09</th>
+<td class="center">    0.2798</td>
+</tr>
+<tr>
+<th scope="row">M10</th>
+<td class="center">    0.4183</td>
+</tr>
+<tr>
+<th scope="row">M11</th>
+<td class="center">    0.3509</td>
+</tr>
+<tr>
+<th scope="row"> Q </th>
+<td class="center">    1.1133</td>
+</tr>
+<tr>
+<th scope="row"> Q2 </th>
+<td class="center">    1.1353</td>
+</tr>
+</table></div>
+
+<p>&nbsp;</p>
+
+<a name="pos00002"></a>
+
+<p><strong>NOTE:</strong> The diagnostic files produced by the -s option are stored in the
+ directory specified by the graphics (-g) option.</p>
+</body>
+</html>
