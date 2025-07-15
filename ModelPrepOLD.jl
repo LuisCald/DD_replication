@@ -1,51 +1,120 @@
-function X13_seasonality_adjustment!(df, time_dict; over_what="rows")
+function X13_seasonality_adjustment!(df_to_des, periods)
     # Find rows with at least one observation 
-    condition_axes = findall(row -> !all(isnan, row), eachrow(df))
+    condition_axes = findall(row -> !all(isnan, row), eachrow(df_to_des))
+
+    qd_vec = [QuarterlyDate(y, q)
+              for y in sort(collect(keys(periods)))     # sort so the vector is chronological
+              for q in periods[y]]
+
+
+    yr = minimum(year.(qd_vec))
+    qr = periods[yr][1]  # first quarter of the first year
 
     # Loop over these rows
-    for (j, i) in enumerate(condition_axes)
+    for i in condition_axes
         indexing = tuple(i, :)
 
+        df_row = df_to_des[indexing...]
+
         # Find indices of NaNs across columns
-        nan_ids = findall(isnan, df[indexing...])
-        date_of_period = time_dict[j]
-        yr = year(date_of_period)
-        qr = quarter(date_of_period)
+        nan_ids = findall(isnan, df_row)
 
-        # Fails for immutable row, makes sense 
-        R"""
-        library(x12)
-        library(seasonal)    # install.packages("seasonal") once if needed
+        # Since x12 cannot handle NaNs, we fill them with linear interpolation. We do not use these values anyway, so, its completely fine.
+        df_row = fill_between_mean!(df_row)
 
-        ts_obj <- ts($(df[indexing...]),
-                    frequency = 4,
-                    start = c($(yr), $(qr)))
+        # R"""
+        # library(x12)          # make sure x13binary is installed too
 
-        an.error.occured <- FALSE
-        tryCatch({
-            adjusted <- seas(ts_obj,
-                            na.action = na.x13
-                            )
-        print("success")
-            d <- final(adjusted)                   # == X-11 d11 series
-        }, error = function(e) {
-            an.error.occured <<- TRUE
-        })
+        # # 1  Build an R ts object
+        # ts_obj <- ts(
+        #     $(df_row),             # only the non-NaN observations
+        #     frequency = 4,
+        #     start = c($(yr), $(qr))
+        # )
 
-        print(an.error.occured)
-        print($i)
-        """
-        @rget d
+        # # 2  Run X-13ARIMA/SEATS via x12()
+        # #    `x11 = ""` asks for the default X-11 adjustment (same slot names as before)
+        # an.error.occured <- FALSE
+        # tryCatch({
+        #     adjusted <- x12(ts_obj)
+        #     print("success")
+        #     # 3  Extract the seasonally-adjusted component (d11)
+        #     d <- adjusted@d11               # x12() returns an x12Output object:contentReference[oaicite:0]{index=0}
+        # }, error = function(e) {
+        #     an.error.occured <<- TRUE
+        #     print(e$message)
+        # })
+
+        # print(an.error.occured)
+        # print($i)
+        # """
+
+        # @rget d
         try
-            df[i, :] = d
-            df[i, nan_ids...] .= NaN
+            Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
+            Plots.plot!(df_row, label="Original series", linestyle=:dash)
+            Plots.savefig("x11_adjusted_series_$i.pdf")
+            df_to_des[i, :] = d
+            df_to_des[i, nan_ids] .= NaN
         catch ee
             println(i)
         end
     end
 
-    return df
+    return df_to_des
 end
+
+"""
+    fill_between_mean!(y)
+
+In-place linear interpolation of **NaN** gaps in a numeric vector `y`.
+
+* Each contiguous run of `NaN`s is replaced by values on the straight line
+  joining the last observed point **before** the gap and the first observed
+  point **after** it.
+* If the gap touches the start (or end) of the series, that block is
+  filled by carrying forward (or backward) the nearest observed value.
+"""
+function fill_between_mean!(y)
+    n = length(y)
+    i = 1
+    while i ≤ n
+        if isnan(y[i])
+            # ── start of a NaN block ───────────────────────────────────────────
+            start_idx = i
+            while i ≤ n && isnan(y[i])
+                i += 1
+            end
+            end_idx = i - 1                     # last NaN position
+
+            # neighbours
+            prev_idx = start_idx - 1
+            next_idx = i ≤ n ? i : nothing
+
+            prev_val = (prev_idx ≥ 1) ? y[prev_idx] : NaN
+            next_val = (next_idx !== nothing) ? y[next_idx] : NaN
+
+            if !isnan(prev_val) && !isnan(next_val)
+                # linear interpolation across the gap
+                gap_len = end_idx - start_idx + 2      # segments = gap+1
+                for (k, idx) in enumerate(start_idx:end_idx)
+                    y[idx] = prev_val +
+                             (next_val - prev_val) * k / gap_len
+                end
+            elseif !isnan(prev_val)
+                # gap at the end → carry last value forward
+                fill!(view(y, start_idx:end_idx), prev_val)
+            elseif !isnan(next_val)
+                # gap at the beginning → carry first value backward
+                fill!(view(y, start_idx:end_idx), next_val)
+            end
+        else
+            i += 1
+        end
+    end
+    return y
+end
+
 
 # x12_object <- new("x12Single", ts = ts($(df[indexing...]), frequency=4, start=c($(time_dict["year"][i]), $(time_dict["quarter"][i]))))
 
@@ -70,6 +139,7 @@ function find_meas_indices(measures, meas, grid)
     return [pcf_id...]
 end
 
+
 function remove_seasonality_from_quarterly_data!(dfs, names, time_dict)
     sim_data = filter(x -> occursin("SimData", x), names)
     datasets_that_need_adjustment = ["SIPP1", "SIPP2", sim_data..., "CEX"]
@@ -85,11 +155,6 @@ function remove_seasonality_from_quarterly_data!(dfs, names, time_dict)
         end
         # sipp2_id = findall(x -> x == "SIPP2", names)[1]
     end
-
-
-    # for j in [sipp1_id, sipp2_id]
-    # end
-
 end
 
 

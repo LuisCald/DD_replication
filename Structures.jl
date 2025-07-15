@@ -27,15 +27,15 @@ function retrieve_data_files()
         )
     elseif pwd()[1:2] == "/U"
         files = Dict(
-            "SCF" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF.csv",
+            # "SCF" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF.csv",
             "PSID" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID.csv",
             # "CEX" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX_all.csv", # batching all to 4th quarter
             # "CEX_all_q" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX_all_q.csv",
-            "CEX" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX.csv",
-            "CPS" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CPS.csv",
-            "CPS2" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CPS2.csv",
-            "SIPP1" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP1.csv",
-            "SIPP2" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP2.csv",
+            # "CEX" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX.csv",
+            # "CPS" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CPS.csv",
+            # "CPS2" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CPS2.csv",
+            # "SIPP1" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP1.csv",
+            # "SIPP2" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP2.csv",
         )
     else
         # Windows
@@ -138,7 +138,7 @@ struct FakeKernelEstimator <: FakeEstimator end # for confidence_intervals
     # prior::AP                   = Minnesota(hyperparameters = [0.2, 0.3, .001, 5, 2.0, 0.9])
     prior::AP = Minnesota(hyperparameters=[0.05, 0.1, 0.5, 0.1, 2.0, 0.9, 0.9]) # We use: 1,2,4,6
     measures::VS = sort(["consum", "income", "wealth"]) # sort(["income", "consum", "liquid"])
-    number_of_dfs::I = 7
+    number_of_dfs::I = 1
     plot_proof::B = false # to plot the proof of concept
     case::S = "A non-diag" # ["diag", "A non-diag", "A, Σ non-diag"]  
     blind_to::D = Dict() #Dict("PSID" => ["wealth"])
