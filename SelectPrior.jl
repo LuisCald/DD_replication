@@ -56,7 +56,7 @@ function estimate_prior(model_elements::StateSpaceModel, time_p::TimeParams, mod
 
     # Construct prior hyperparameters
     @unpack hyperparameters = prior
-    prior_mean, A_prior, B_prior, D_prior, V_prior = minnesota_prior(hyperparameters, pcs, u, lags, estimator)  # TODO: assumes aggs only have 1 lag
+    prior_mean, A_prior, B_prior, C_prior, D_prior, V_prior = minnesota_prior(hyperparameters, pcs, u, lags, estimator)  # TODO: assumes aggs only have 1 lag
 
     # For measurement error
     n_objs = (dimension + 1)
@@ -101,7 +101,7 @@ function estimate_prior(model_elements::StateSpaceModel, time_p::TimeParams, mod
     Ω_prior, Σ_prior = set_shock_priors(priors, n_states, n_param)
 
     # Final parameter vector
-    param_vector = [A_prior, B_prior, D_prior, Ω_prior, Σ_prior]
+    param_vector = [A_prior, B_prior, C_prior, D_prior, Ω_prior, Σ_prior]
 
     # Getting indices for measurement error 
     meas_ind = extract_meas_ind(estimator, dimension)  # TODO: no need to worry about this 
@@ -447,8 +447,9 @@ function minnesota_prior(minn_params, pcs, controls, lags, estimator)
     # Set mean
     A_mean = diagm([ones(n_factors)..., zeros(n_factors * (lags - 1))...]) .* κ_5
     B_mean = zeros(n_factors, n_aggs) # β_aggs .* .10 #(sign.(β_aggs) .* abs.(β_aggs).^(1/8)) .* .01 # zeros(state_count, exo_count + c) #.+ β_aggs .* .1
+    C_mean = zeros(n_aggs, n_factors)
     D_mean = ones(n_aggs) .* κ_6
-    prior_mean = vcat(A_mean[:], B_mean[:], D_mean[:])
+    prior_mean = vcat(A_mean[:], B_mean[:], C_mean[:], D_mean[:])
 
     # Prior variance matrix (Minnesota logic) 
     # ----------------   prior variances for endogenous lags   ----------------
@@ -470,10 +471,26 @@ function minnesota_prior(minn_params, pcs, controls, lags, estimator)
         end
     end
 
+    # V_prior for C
+    VC_prior = zeros(n_aggs, total_state * lags)
+    for row in n_factors+1:n_factors+n_aggs
+        s = 1
+        for col in 1:(total_state*lags)
+            scaling_factor = var_Ω[row] / var_Ω[col]
+            if scaling_factor == 1.0
+                VC_prior[row-n_factors, s:s+lags-1] = [(κ_0 / l^κ_4) for l in 1:lags]
+            else
+                # println(scaling_factor)
+                VC_prior[row-n_factors, s:s+lags-1] = [(κ_0 * κ_1 / l^κ_4) * scaling_factor for l in 1:lags]
+            end
+            s += lags
+        end
+    end
+
     # V_prior just for D
     # ----------------   prior variances for aggregates   ----------------
     VD_prior = [κ_0 for _ in 1:n_aggs]
-    V_all = vcat(vec(int_mat), VD_prior)
+    V_all = vcat(vec(int_mat), vec(VC_prior), VD_prior)
     V_prior = diagm(V_all)
 
     # Create prior variances for control variables 
@@ -491,7 +508,7 @@ function minnesota_prior(minn_params, pcs, controls, lags, estimator)
     # full_mat = hcat(int_mat, det_mat)  # deterministic/control variables come last 
     # V_prior = diagm(full_mat[:])
 
-    return prior_mean, A_mean, B_mean, D_mean, V_prior
+    return prior_mean, A_mean, B_mean, C_mean, D_mean, V_prior
 end
 
 function hyper_prioreval(par, priors)
@@ -526,11 +543,11 @@ function prioreval(par, priors)
     σ²_Ω = diag(par[2])
     σ²_Σ = diag(par[3])
 
-    ABD_cond = all(insupport(priors[1], par[1]))
+    ABCD_cond = all(insupport(priors[1], par[1]))
     Ω_cond = all([insupport(priors[2], σ²_Ω[i]) for i in eachindex(σ²_Ω)])
     Σ_cond = all([insupport(priors[2+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
 
-    if ABD_cond && Ω_cond && Σ_cond
+    if ABCD_cond && Ω_cond && Σ_cond
         # split covariance matrices into standard deviations and correlation matrices
         log_priorval = 0.0
         alarm = false

@@ -311,6 +311,7 @@ mutable struct StateSpaceModel{A<:Array{Float64},V<:Vector{Float64},VV<:Vector{V
     MV::VM            # Vector of measurements, split by dataset 
     y::M              # Matrix of all measurements 
     G::VM             # Vector of selection matrices, one per period
+    Gⱼ::VM             # Selection matrix for the j-th measurement
     u::M
     pcs::M
     means::VV

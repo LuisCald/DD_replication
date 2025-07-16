@@ -154,7 +154,7 @@ function get_hyperprior(model_elements, model_options, hyperparams, hyperpriors)
     dimension = length(measures)
 
     # Construct prior hyperparameters  
-    prior_mean, A_prior, B_prior, D_prior, V_prior = minnesota_prior(hyperparameters, pcs, u, lags, estimator)  # using minnesota to define hyperparameters in normal dist. 
+    prior_mean, A_prior, B_prior, C_prior, D_prior, V_prior = minnesota_prior(hyperparameters, pcs, u, lags, estimator)  # using minnesota to define hyperparameters in normal dist. 
     n_objs = (dimension + 1)
     alarm = false
 
@@ -192,7 +192,7 @@ function get_hyperprior(model_elements, model_options, hyperparams, hyperpriors)
     n_states = factor_count + agg_count
     n_param = number_of_dfs * n_objs + agg_count
     Ω_prior, Σ_prior = set_shock_priors(priors, n_states, n_param)
-    param_vector = [A_prior, B_prior, D_prior, Ω_prior, Σ_prior]
+    param_vector = [A_prior, B_prior, C_prior, D_prior, Ω_prior, Σ_prior]
 
     # Getting indices for measurement error 
     meas_ind = extract_meas_ind(estimator, dimension)  # TODO: no need to worry about this 

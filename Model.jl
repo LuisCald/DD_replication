@@ -172,9 +172,10 @@ function define_parameter_space(model_elements, model_options, prior_objects)
 
     A = param_vector[1]
     B = param_vector[2]
-    D = param_vector[3] # already a vector
-    Ω = diag(param_vector[4])
-    Σ = diag(param_vector[5])
+    C = param_vector[3]
+    D = param_vector[4] # already a vector
+    Ω = diag(param_vector[5])
+    Σ = diag(param_vector[6])
 
     # Set elements in Σ to NaN if the measure is never observed 
     Σ_ids = Float64.(collect(1:length(Σ)))
@@ -191,14 +192,14 @@ function define_parameter_space(model_elements, model_options, prior_objects)
     short_Σ = Σ[cond]
 
     new_param_sizes = Vector(undef, length(param_vector))
-    for (m, mat) in enumerate([A, B, D, Ω, short_Σ])
+    for (m, mat) in enumerate([A, B, C, D, Ω, short_Σ])
         new_param_sizes[m] = size(mat)
     end
 
     # Remove elements from the vector of priors that we don't want to estimate
     priors = [priors[1], priors[2], priors[2 .+ cond]...]
 
-    return [A[:]; B[:]; D[:]; Ω[:]; short_Σ[:]], new_param_sizes, Σ_ids, priors # [lb, ub]
+    return [A[:]; B[:]; C[:]; D[:]; Ω[:]; short_Σ[:]], new_param_sizes, Σ_ids, priors # [lb, ub]
 end
 
 
@@ -266,21 +267,23 @@ function matrisize(param_vector, param_sizes)
 
     A = zeros(eltype(param_vector), param_sizes[1][1], param_sizes[1][1])
     B = zeros(eltype(param_vector), param_sizes[2][1], param_sizes[2][2])
-    D = zeros(eltype(param_vector), param_sizes[3][1], param_sizes[3][1])
-    Ω = zeros(eltype(param_vector), param_sizes[4][1], param_sizes[4][1])
-    Σ = zeros(eltype(param_vector), param_sizes[5][1], param_sizes[5][1])
+    C = zeros(eltype(param_vector), param_sizes[3][1], param_sizes[3][2])
+    D = zeros(eltype(param_vector), param_sizes[4][1], param_sizes[4][1])
+    Ω = zeros(eltype(param_vector), param_sizes[5][1], param_sizes[5][1])
+    Σ = zeros(eltype(param_vector), param_sizes[6][1], param_sizes[6][1])
 
     # Change parameter space based on :case
     A .= reshape(view(param_vector, 1:prod(param_sizes[1])), param_sizes[1])
     B .= reshape(view(param_vector, 1+length(A):length(A)+prod(param_sizes[2])), param_sizes[2])
-    D .= diagm(view(param_vector, length(A)+length(B)+1:length(A)+length(B)+param_sizes[3][1]))
-    Ω .= diagm(view(param_vector, length(A)+length(B)+param_sizes[3][1]+1:length(A)+length(B)+param_sizes[3][1]+param_sizes[4][1]))
+    C .= reshape(view(param_vector, length(A)+length(B)+1:length(A)+length(B)+prod(param_sizes[3])), param_sizes[3])
+    D .= diagm(view(param_vector, length(A)+length(B)+prod(param_sizes[3])+1:length(A)+length(B)+prod(param_sizes[3])+param_sizes[4][1]))
+    Ω .= diagm(view(param_vector, length(A)+length(B)+prod(param_sizes[3])+param_sizes[4][1]+1:length(A)+length(B)+prod(param_sizes[3])+param_sizes[4][1]+param_sizes[5][1]))
 
     # Creating Σ, adding zeros for aggregates (perfectly measured)
     # Σ_vec = vcat(view(param_vector, length(A)+length(B)+param_sizes[3][1]+param_sizes[4][1]+1:length(param_vector)), zeros(n_aggs))
-    Σ .= diagm(view(param_vector, length(A)+length(B)+param_sizes[3][1]+param_sizes[4][1]+1:length(param_vector)))
+    Σ .= diagm(view(param_vector, length(A)+length(B)+prod(param_sizes[3])+param_sizes[4][1]+param_sizes[5][1]+1:length(param_vector)))
 
-    return A, B, D, Hermitian(Ω), Hermitian(Σ)  # they need to be positive semi-def. 
+    return A, B, C, D, Hermitian(Ω), Hermitian(Σ)  # they need to be positive semi-def. 
 end
 
 function variance_check!(Ω, Σ)
@@ -309,10 +312,10 @@ function likeli(model_elements, param_vector, param_sizes, priors, meas_ind, Σ_
     @unpack number_of_dfs = model_options
     @unpack y, G, u, agg_count = model_elements
 
-    A, B, D, Ω, Σ = matrisize(param_vector, param_sizes)
+    A, B, C, D, Ω, Σ = matrisize(param_vector, param_sizes)
 
     # Reparametization
-    log_P, alarm = prioreval([[A..., B..., diag(D)...], Matrix(Ω), Matrix(Σ)], priors)
+    log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Matrix(Ω), Matrix(Σ)], priors)
 
     if alarm
         # println("not in support")
@@ -331,15 +334,19 @@ function likeli(model_elements, param_vector, param_sizes, priors, meas_ind, Σ_
     Σ[.!cond] .= log.(exp.(Σ[.!cond]) .+ 1) # Basically, for large numbers, it does not matter if we use log(exp(x) + 1) or log(x + 1)
     Ω[diagind(Ω)] = log.(exp.(Ω[diagind(Ω)]) .+ 1)  # softplus transformation
 
+    # Create the separate Ω_f, Ω_y
+    Ω_f = Ω[1:size(A, 1), 1:size(A, 1)]
+    Ω_y = Ω[size(A, 1)+1:end, size(A, 1)+1:end]
+
     # Filter-smoother estimates
     if smooth
         # Generate likelihood of data and smoother output 
-        smoother_output, log_D, alarm = recurse_kalman_filter(A, B, D, Ω, Σ, G, y, u, smooth)
+        smoother_output, log_D, alarm = recurse_kalman_filter(A, B, C, D, Ω_f, Ω_y, Σ, G, y, u, smooth)
         tot_log_like = log_P + log_D         # Total likelihood 
         return smoother_output, tot_log_like, alarm
 
     else
-        log_D, alarm = recurse_kalman_filter(A, B, D, Ω, Σ, G, y, u, smooth)
+        log_D, alarm = recurse_kalman_filter(A, B, C, D, Ω_f, Ω_y, Σ, G, y, u, smooth)
         # log_D, alarm         = recurse_kalman_filter(A,B,Ω,VΣ̂V,Ĝ,ŷ,u,smooth)
 
         tot_log_like = log_P + log_D         # Total likelihood 
@@ -349,7 +356,7 @@ function likeli(model_elements, param_vector, param_sizes, priors, meas_ind, Σ_
 end
 
 
-function recurse_kalman_filter(A, B, D, Ω, Σ, G, y, u, smooth)
+function recurse_kalman_filter(A, B, C, D, Ω_f, Ω_y, Σ, G, y, u, smooth)
     """Performs kalman filter recursively, performing a filtering step and updating step thereafter.
     Assumption is: measurements are uncorrelated.
 
@@ -358,9 +365,18 @@ function recurse_kalman_filter(A, B, D, Ω, Σ, G, y, u, smooth)
     """
     # Types for auto-differentiation
     r, q = size(B) # number of factors and controls
-    nₛ = r + q
-    L = [A B;
-        zeros(q, r) D]               # (r+q) × (r+q)
+    big_zero = zero(eltype(A), size(A))
+    big_zero_y = zero(eltype(B), size(B))
+
+    L = [A big_zero big_zero big_zero B;
+        I big_zero big_zero big_zero big_zero;
+        big_zero I big_zero big_zero big_zero;
+        big_zero big_zero I big_zero big_zero;
+        C big_zero_y big_zero_y big_zero_y D]               # (r+q) × (r+q)
+
+    big_Ω = blockdiag(Ω_f, big_zero, big_zero, big_zero, Ω_y)
+
+    nₛ = size(L, 1)  # number of states
 
     # Data + Parameters 
     T = size(y, 2)
@@ -374,7 +390,7 @@ function recurse_kalman_filter(A, B, D, Ω, Σ, G, y, u, smooth)
     # P_F = lyapd(A, Ω)
     # P_F = lyapd(A, B * B' + Ω) # Assumes covariances are zero or small, cov(u; dims=2) = 1
     # P_F = lyapd(A, B * B' + A * C_FY * B' + B * C_FY' * A' + Ω)
-    P_F = lyapd(L, Ω)                    # solves  P = L P L' + Q
+    P_F = lyapd(L, big_Ω)                    # solves  P = L P L' + Q
 
     # Filtered containers  
     x_filtered = zeros(eltype(A), nₛ, T)
@@ -406,7 +422,7 @@ function recurse_kalman_filter(A, B, D, Ω, Σ, G, y, u, smooth)
 
         mul!(sigma_filtered_r, P_F, L')
         mul!(sigma_filtered_l, L, sigma_filtered_r)
-        sigma_filtered[t] .= sigma_filtered_l .+ Ω
+        sigma_filtered[t] .= sigma_filtered_l .+ big_Ω
 
         # Update step (also called the forward pass)   
         # logL += @views kalman_update!(x_updated, sigma_updated, y[:, t], t, G[t], x_filtered[:, t], sigma_filtered[t], Σ)
@@ -426,7 +442,7 @@ function recurse_kalman_filter(A, B, D, Ω, Σ, G, y, u, smooth)
     # Gibbs requires a likelihood over a multivariate dist.
     local smoother_results
     if smooth
-        smoother_results = run_smoother(A, B, D, u, x_filtered, sigma_filtered, x_updated, sigma_updated, T)
+        smoother_results = run_smoother(L, x_filtered, sigma_filtered, x_updated, sigma_updated, T)
         # smoother_results = perform_backward_pass_DK(A, B, D, Ω, Σ, G, y, u, x_filtered, sigma_filtered, x_updated, sigma_updated, T)
         return smoother_results, logL, alarm
     else
@@ -517,15 +533,12 @@ function apply_measurement_criteria(Σ, Σ_ids, model_options, agg_count)
 end
 
 
-function run_smoother(A, B, D, u, x_filtered, sigma_filtered, x_updated, sigma_updated, T)
+function run_smoother(L, x_filtered, sigma_filtered, x_updated, sigma_updated, T)
     x_smoothed = copy(x_updated)
     sigma_smoothed = copy(sigma_updated)
     dε_smoothed = zeros(size(x_filtered))
 
     cross_covariances = [zeros(size(sigma_filtered[1])) for _ in 1:(T-1)]
-
-    L = [A B;
-        zeros(size(D, 1), size(A, 1)) D]  # (r+q) × (r+q)
 
     for t in (T-1):-1:1
         x_smoothed[:, t], sigma_smoothed[t], cross_covariances[t] = perform_backward_pass(L,
@@ -966,7 +979,7 @@ remain effectively noise-free or carry their own tiny measurement variance.
 The function modifies `y` and `G` in place and also returns them for
 convenience.
 """
-function pre_multiply_part!(y, G, Σ̂⁻¹², factor_count)
+function pre_multiply_part!(y, G, Σ̂⁻¹², factor_count_with_lags)
     T = size(y, 2)
     N = size(y, 1)                       #  N_dist + q
     n_dist = size(Σ̂⁻¹², 1)
@@ -987,12 +1000,12 @@ function pre_multiply_part!(y, G, Σ̂⁻¹², factor_count)
                 Σ̂⁻¹²[obs_dist, obs_dist] * y[dist_idx[obs_dist], t]
 
             # --------   scale the corresponding rows of G[t]
-            Ĝ[t][dist_idx[obs_dist], 1:factor_count] =
-                Σ̂⁻¹²[obs_dist, obs_dist] * G[t][dist_idx[obs_dist], 1:factor_count]
+            Ĝ[t][dist_idx[obs_dist], 1:factor_count_with_lags] =
+                Σ̂⁻¹²[obs_dist, obs_dist] * G[t][dist_idx[obs_dist], 1:factor_count_with_lags]
             # rows for the control columns (factor_count+1 : end) are zeros anyway
         else
             ŷ[dist_idx, t] .= NaN
-            Ĝ[t][dist_idx, 1:factor_count] .= 0
+            Ĝ[t][dist_idx, 1:factor_count_with_lags] .= 0
         end
         # control rows (n_dist+1 : N) remain unchanged
     end

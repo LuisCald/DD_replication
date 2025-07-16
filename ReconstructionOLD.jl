@@ -2,7 +2,7 @@ function reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, mode
     """Reverse all steps taken in the data preparation."""
 
     @unpack lags, blind_to, case, pre_multiply, estimator, tag = model_options
-    @unpack factor_count, n_less_than_one, u, pcs, βs, trend = model_elements
+    @unpack factor_count, n_less_than_one, u, pcs, βs, trend, Gⱼ = model_elements
 
     @unpack gdp_series, df_vec = obs_data
     @unpack tot_periods, tmin, tmax = time_params
@@ -52,10 +52,41 @@ function reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, mode
     # condition = isnan.(means[1])
     # means[1][condition] .= 0 #TODO: maybe take the mean from PSID?
 
-    # Reconstruct dataset by dataset and then average  
-    ΓF = (proj * x_smoothed[1:end-agg_count, :])
+    # # ------------------------------------------------------------------
+    # # 0.  Convenient indices into the 32-dim vector
+    # # ------------------------------------------------------------------
+    # K = factor_count                  # 8
+    # idx0 = 1:K                           # F_t
+    # idx1 = K+1:2K                      # F_{t-1}
+    # idx2 = 2K+1:3K                     # F_{t-2}
+    # idx3 = 3K+1:4K                     # F_{t-3}
+
+    # F_curr = x_smoothed[idx0, :]
+    # F_lag1 = x_smoothed[idx1, :]
+    # F_lag2 = x_smoothed[idx2, :]
+    # F_lag3 = x_smoothed[idx3, :]
+
+    # # ------------------------------------------------------------------
+    # # 1.  Quarterly reconstructions  (SIPP, CEX, instantaneous wealth)
+    # # ------------------------------------------------------------------
+    # ΓF_quarter = proj * F_curr              # 1002 × T  (or 970 × T for copula)
+
+    # # ------------------------------------------------------------------
+    # # 2.  Annual (PSID / SCF) reconstructions  – ¼·avg of four quarters
+    # # ------------------------------------------------------------------
+    # F_ann = 0.25 .* (F_curr + F_lag1 + F_lag2 + F_lag3)
+    # ΓF_annual = proj * F_ann                # same dimension as ΓF_quarter
+
+    # # ------------------------------------------------------------------
+    # # 3.  Wealth stock rows need only F_curr
+    # # ------------------------------------------------------------------
+    # ΓW_quarter = proj_wealth * F_curr       # if wealth has its own Γ
+
     X = Vector{Matrix{Float64}}(undef, number_of_dfs)
-    T = size(ΓF, 2)
+    T = size(x_smoothed, 2)
+    for i in eachindex(Gⱼ)
+        X[i] = (Gⱼ[i] * x_smoothed[1:end-agg_count, :])
+    end
 
     # Split by object, multiply by stds, reform object 
     ΓF_σ = add_variance(estimator, ΓF, stds, measures)

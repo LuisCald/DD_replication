@@ -22,34 +22,35 @@ function X13_seasonality_adjustment!(df_to_des, periods)
         # Since x12 cannot handle NaNs, we fill them with linear interpolation. We do not use these values anyway, so, its completely fine.
         df_row = fill_between_mean!(df_row)
 
-        # R"""
-        # library(x12)          # make sure x13binary is installed too
+        # TODO: does not work on my machine due to the R installed on my machine being rosetta based i think
+        R"""
+        library(x12)          # make sure x13binary is installed too
 
-        # # 1  Build an R ts object
-        # ts_obj <- ts(
-        #     $(df_row),             # only the non-NaN observations
-        #     frequency = 4,
-        #     start = c($(yr), $(qr))
-        # )
+        # 1  Build an R ts object
+        ts_obj <- ts(
+            $(df_row),             # only the non-NaN observations
+            frequency = 4,
+            start = c($(yr), $(qr))
+        )
 
-        # # 2  Run X-13ARIMA/SEATS via x12()
-        # #    `x11 = ""` asks for the default X-11 adjustment (same slot names as before)
-        # an.error.occured <- FALSE
-        # tryCatch({
-        #     adjusted <- x12(ts_obj)
-        #     print("success")
-        #     # 3  Extract the seasonally-adjusted component (d11)
-        #     d <- adjusted@d11               # x12() returns an x12Output object:contentReference[oaicite:0]{index=0}
-        # }, error = function(e) {
-        #     an.error.occured <<- TRUE
-        #     print(e$message)
-        # })
+        # 2  Run X-13ARIMA/SEATS via x12()
+        #    `x11 = ""` asks for the default X-11 adjustment (same slot names as before)
+        an.error.occured <- FALSE
+        tryCatch({
+            adjusted <- x12(ts_obj)
+            print("success")
+            # 3  Extract the seasonally-adjusted component (d11)
+            d <- adjusted@d11               # x12() returns an x12Output object:contentReference[oaicite:0]{index=0}
+        }, error = function(e) {
+            an.error.occured <<- TRUE
+            print(e$message)
+        })
 
-        # print(an.error.occured)
-        # print($i)
-        # """
+        print(an.error.occured)
+        print($i)
+        """
 
-        # @rget d
+        @rget d
         try
             Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
             Plots.plot!(df_row, label="Original series", linestyle=:dash)
@@ -725,7 +726,10 @@ function perform_standardization(dfs, estimator, dimension, measures; for_interv
         dfs[j] .= dfs[j] .- means[j]
     end
 
+    # Subset to columns where everything is observed
     pool = hcat(dfs...)
+    pool = pool[:, mapslices(col -> all((!isnan).(col)), pool, dims=1)[:]]  # Only complete data 
+
 
     # Compute standard deviations for each object 
     cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
@@ -1139,24 +1143,63 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
     # ----------------------------------------------
     factor_count = size(proj, 2)                                 # # factors
     q = size(controls, 1)                             # # controls
-    N_dist = size(vcat(MV...), 1)                     # distributional measurements
-    meas_count = N_dist + q
+
+    # First, for each MV, I want to define a G
+    Gⱼ = [zeros(size(proj, 1), factor_count * 4) for _ in 1:n_dfs]  # each Gⱼ is (meas × state)
+
+    # Now, depending on the df name and measure, we multiply it by 1/4, 1/2, or 1
+    cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
+    cop_rows = cop_part - imm_part
+    id_dict = Dict(measures[i] => (cop_rows+1)+10*(i-1):(cop_rows)+i*10 for i in eachindex(measures))  # mapping measures to their ids
+    id_dict["copula"] = 1:cop_rows  # copula rows are always the first rows
+    cop_proj = proj[id_dict["copula"], :]
+
+    for (j, df_name) in enumerate(df_vec.df_names)
+        if df_name == "SCF" || df_name == "PSID" || occursin("CPS", df_name)
+            # For these, income, consumption, wealth  is annual --- we have a timestamp for wealth
+            for m in measures
+                id_tup = tuple(id_dict[m], :)
+                sub_proj = proj[id_tup...]
+                if m == "consum" || m == "income"
+                    Gⱼ[j][id_tup...] .= 1 / 4 .* hcat(sub_proj, [sub_proj for _ in 1:3]...)  # Each row has the projection, zeros for the lags, and zeros for the controls
+                elseif m == "wealth"
+                    Gⱼ[j][id_tup...] .= hcat(sub_proj, [zeros(size(sub_proj)) for _ in 1:3]...)  # Each row has the projection, zeros for the lags, and zeros for the controls
+                end
+            end
+            # Dealing with copula
+            Gⱼ[j][1:cop_rows, :] .= 1 / 4 .* hcat(cop_proj, [cop_proj for _ in 1:3]...)  # Copula rows are scaled by 1/4
+
+        elseif occursin("SIPP", df_name) || occursin("CEX", df_name)
+            # These datasets are quarterly
+            for m in measures
+                id_tup = tuple(id_dict[m], :)
+                sub_proj = proj[id_tup...]
+                if m == "consum" || m == "income"
+                    Gⱼ[j][id_dict[m], :] .= hcat(sub_proj, [zeros(size(sub_proj)) for _ in 1:3]...)  # Each row has the projection, zeros for the lags, and zeros for the controls
+                elseif m == "wealth"
+                    Gⱼ[j][id_dict[m], :] .= hcat(sub_proj, [zeros(size(sub_proj)) for _ in 1:3]...)  # Each row has the projection, zeros for the lags, and zeros for the controls
+                end
+            end
+            Gⱼ[j][1:cop_rows, :] .= hcat(cop_proj, [zeros(size(cop_proj)) for _ in 1:3]...)  # Copula rows are scaled by 1/4
+        end
+    end
 
     # Defining components of the measurement equation
     y = vcat(MV...)
+    N_dist = size(y, 1)                     # distributional measurements
     y = vcat(y, controls) # TODO: timing?
+    meas_count = N_dist + q
 
     # ───────────────────────────────────────────────
     # 1.  Stacked projection Γ̃
     # ----------------------------------------------
-    proj_dist = repeat(proj, n_dfs)                   # N_dist × r   (distributional loadings)
-    proj_ctrl = zeros(q, factor_count)                           # controls do not load on factors
-    Γ̃ = vcat(proj_dist, proj_ctrl)                   # meas_count × r
+    # proj_dist = repeat(proj, n_dfs)                   # N_dist × r   (distributional loadings)
+    proj_dist = vcat(Gⱼ...)
 
     # ───────────────────────────────────────────────
     # 2.  Pre–allocate measurement matrices
     # ----------------------------------------------
-    G = [zeros(meas_count, factor_count + q) for _ in 1:tot_periods]  # each G[t] is (meas × state)
+    G = [zeros(meas_count, factor_count * 4 + q) for _ in 1:tot_periods]  # each G[t] is (meas × state)
 
     # ───────────────────────────────────────────────
     # 3.  Fill each G[t]
@@ -1167,11 +1210,11 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
         H_dist = Diagonal(mask_dist)                 # N_dist × N_dist
 
         # 3b. Upper block: H_t * proj_dist     (loads on F_t, zeros on Y_t)
-        G[t][1:N_dist, 1:factor_count] .= H_dist * proj_dist[1:N_dist, :]
+        G[t][1:N_dist, :] .= H_dist * proj_dist
 
         # 3c. Lower block: I_q on the Y-columns (columns factor_count+1 : factor_count+q)
         for i in 1:q
-            G[t][N_dist+i, factor_count+i] = 1.0            # pick out Y_t element i exactly
+            G[t][N_dist+i, factor_count*4+i] = 1.0            # pick out Y_t element i exactly
         end
     end
 
@@ -1190,10 +1233,10 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
     # end
 
     if pre_multiply
-        ŷ, Ĝ = pre_multiply_part!(y, G, Σ̂⁻¹², factor_count)
-        return StateSpaceModel(MV, ŷ, Ĝ, controls, pcs, means, stds, proj, u_proj, factor_count, agg_count, n_less_than_one, βs, trend, Σ̂⁻¹²)
+        ŷ, Ĝ = pre_multiply_part!(y, G, Σ̂⁻¹², factor_count * 4)
+        return StateSpaceModel(MV, ŷ, Ĝ, Gⱼ, controls, pcs, means, stds, proj, u_proj, factor_count, agg_count, n_less_than_one, βs, trend, Σ̂⁻¹²)
     else
-        return StateSpaceModel(MV, y, G, controls, pcs, means, stds, proj, u_proj, factor_count, agg_count, n_less_than_one, βs, trend, Σ̂⁻¹²)
+        return StateSpaceModel(MV, y, G, Gⱼ, controls, pcs, means, stds, proj, u_proj, factor_count, agg_count, n_less_than_one, βs, trend, Σ̂⁻¹²)
     end
 end
 
@@ -1238,19 +1281,18 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
 
     elseif type == :functional_data
         # Only complete data
-        data_matrix = pool[:, mapslices(col -> all((!isnan).(col)), pool, dims=1)[:]]  # Only complete data 
         pr = variation_selector(measures, tag)
         local M
         if tag == " 6 factors"
-            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=6, method=:svd) # mean=0
+            M = MultivariateStats.fit(PCA, pool; maxoutdim=6, method=:svd) # mean=0
         elseif tag == " 7 factors"
-            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=7, method=:svd) # mean=0
+            M = MultivariateStats.fit(PCA, pool; maxoutdim=7, method=:svd) # mean=0
         else
-            M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
+            M = MultivariateStats.fit(PCA, pool; pratio=pr, method=:svd) # mean=0
         end
         # Why do I do this? X = P * F, but if we want F = pcs to have unit variance, we must divide it by the square root of the eigenvalues of the covariance matrix of X.
         # But to maintain equality of the two sides, we must multiply P by the square root of the eigenvalues of the covariance matrix of X.
-        pcs = MultivariateStats.transform(M, data_matrix) # predict() produces the same
+        pcs = MultivariateStats.transform(M, pool) # predict() produces the same
         λ = sqrt.(principalvars(M))
         proj = projection(M) * diagm(λ)
         pcs_s = pcs ./ λ
