@@ -189,9 +189,9 @@ function get_hyperprior(model_elements, model_options, hyperparams, hyperpriors)
         return [], [], alarm, -1e10
     end
 
-    n_states = factor_count + agg_count
+
     n_param = number_of_dfs * n_objs + agg_count
-    Ω_prior, Σ_prior = set_shock_priors(priors, n_states, n_param)
+    Ω_prior, Σ_prior = set_shock_priors(priors, factor_count, agg_count, n_param)
     param_vector = [A_prior, B_prior, C_prior, D_prior, Ω_prior, Σ_prior]
 
     # Getting indices for measurement error 

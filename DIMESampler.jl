@@ -17,8 +17,8 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
 
     # First run tenative optimization
     BBO(par) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
-    par_final = run_black_box_opt(BBO, param_vector, param_sizes, priors, measures)
-
+    # par_final = run_black_box_opt(BBO, param_vector, param_sizes, priors, measures)
+    par_final = param_vector
     # A_new,B_new,Ω_new,Δ_new,G_new, likeli_vec, Δ_log = run_EM_algorithm(param_vector, param_sizes, meas_ind, Σ_ids, model_elements, model_options)
     # @unpack G = model_elements
     # old_G = deepcopy(G)
