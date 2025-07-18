@@ -216,7 +216,7 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
     end
 
     # Standardization
-    pool, means, stds = perform_standardization(dfs, estimator, dimension, measures)
+    pooled_data, means, stds = perform_standardization(dfs, estimator, dimension, measures)
 
     # For the perturbation of the projection
     additional_data_blocks = false
@@ -232,17 +232,17 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
         end
 
         # Find the dataset in the pool
-        additional_data_blocks = find_data_blocks(dfs, pool, ids_of_df)
+        additional_data_blocks = find_data_blocks(dfs, pooled_data, ids_of_df)
     end
 
     # Dimensionality reduction 
-    proj, pcs, _, n_less_than_one = perform_pca(pool, measures, :functional_data, tag; additional_data_blocks)
+    proj, pcs, _, n_less_than_one = perform_pca(pooled_data, measures, :functional_data, tag; additional_data_blocks)
 
     # Equation Objects
     MV = Vector{Matrix{Float64}}(undef, number_of_dfs)         # MV = measurement vector.
 
     # Fill Equation Objects 
-    return func_struct, time_p, set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, time_p, freq_type, time_dict, model_options, n_less_than_one, βs, trend, Σ̂⁻¹², data_to_mute, agg_lags, df_vec, gdp_series)
+    return func_struct, time_p, set_measurements(MV, pcs, means, stds, agg_data, pooled_data, proj, files, time_p, freq_type, time_dict, model_options, n_less_than_one, βs, trend, Σ̂⁻¹², data_to_mute, agg_lags, df_vec, gdp_series)
 end
 
 
@@ -543,7 +543,8 @@ function transform_DCT_boot(DCT_boot, time_p, year_vec, freq, freq_type, time_di
     # STEP 1: detrend 
     n_bootstraps = axes(DCT_boot, 3)
 
-    Threads.@threads for b in n_bootstraps
+    # Threads.@threads for b in n_bootstraps
+    for b in n_bootstraps
         DCT_boot[:, :, b] = perform_detrending(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
         DCT_boot[:, :, b] = perform_standardization([DCT_boot[:, :, b]], estimator, dimension, measures)[1]
     end
@@ -710,7 +711,7 @@ function retrieve_cop_and_imm_part(estimator, dimension)
     return cop_part, imm_part
 end
 
-function perform_standardization(dfs, estimator, dimension, measures; for_intervals=false)
+function perform_standardization(dfs, estimator, dimension, measures)
     """We demean the data at the grid point level, but divide by σₒ,
     which only varies at the object level (copulae, percentile functions).
     """
@@ -728,8 +729,6 @@ function perform_standardization(dfs, estimator, dimension, measures; for_interv
 
     # Subset to columns where everything is observed
     pool = hcat(dfs...)
-    pool = pool[:, mapslices(col -> all((!isnan).(col)), pool, dims=1)[:]]  # Only complete data 
-
 
     # Compute standard deviations for each object 
     cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
@@ -1092,8 +1091,9 @@ end
 
 
 function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, time_p, freq_type, time_dict, model_options, n_less_than_one, βs, trend, Σ̂⁻¹², data_to_mute, agg_lags, df_vec, gdp_series)
-    @unpack freq, agg_freq, number_of_dfs, lags, case, measures, pre_multiply, pca_perspective, tag, plot_proof, best_aggs = model_options
+    @unpack freq, agg_freq, number_of_dfs, lags, case, measures, pre_multiply, pca_perspective, tag, plot_proof, best_aggs, estimator = model_options
     @unpack tot_years, year_vec, tmin, tmax, tot_periods = time_p
+    @unpack integral_pcf_grid, integral_cop_grid = estimator
 
 
     # Order Measures
@@ -1148,9 +1148,10 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
     Gⱼ = [zeros(size(proj, 1), factor_count * 4) for _ in 1:n_dfs]  # each Gⱼ is (meas × state)
 
     # Now, depending on the df name and measure, we multiply it by 1/4, 1/2, or 1
+    dimension = length(measures)  # number of objects, e.g., 1 for copula, 2 for copula and pcf, etc.
     cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
     cop_rows = cop_part - imm_part
-    id_dict = Dict(measures[i] => (cop_rows+1)+10*(i-1):(cop_rows)+i*10 for i in eachindex(measures))  # mapping measures to their ids
+    id_dict = Dict(measures[i] => (cop_rows+1)+integral_pcf_grid*(i-1):(cop_rows)+i*integral_pcf_grid for i in eachindex(measures))  # mapping measures to their ids
     id_dict["copula"] = 1:cop_rows  # copula rows are always the first rows
     cop_proj = proj[id_dict["copula"], :]
 
@@ -1210,7 +1211,7 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
         H_dist = Diagonal(mask_dist)                 # N_dist × N_dist
 
         # 3b. Upper block: H_t * proj_dist     (loads on F_t, zeros on Y_t)
-        G[t][1:N_dist, :] .= H_dist * proj_dist
+        G[t][1:N_dist, 1:factor_count*4] .= H_dist * proj_dist
 
         # 3c. Lower block: I_q on the Y-columns (columns factor_count+1 : factor_count+q)
         for i in 1:q
@@ -1242,7 +1243,6 @@ end
 
 
 function perform_pca(pool, measures, type, tag; additional_data_blocks=false, best_aggs=false)
-
     local M, proj, pcs
     # if pca_perspective == "bayesian"
     #     M = MultivariateStats.fit(PPCA, data_matrix; maxiter=3000, method=:bayes)  # probabilistic PCA 
@@ -1280,19 +1280,21 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         return proj, pcs_s, M
 
     elseif type == :functional_data
+        data_matrix = pool[:, mapslices(col -> all((!isnan).(col)), pool, dims=1)[:]]  # Only complete data
+
         # Only complete data
         pr = variation_selector(measures, tag)
         local M
         if tag == " 6 factors"
-            M = MultivariateStats.fit(PCA, pool; maxoutdim=6, method=:svd) # mean=0
+            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=6, method=:svd) # mean=0
         elseif tag == " 7 factors"
-            M = MultivariateStats.fit(PCA, pool; maxoutdim=7, method=:svd) # mean=0
+            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=7, method=:svd) # mean=0
         else
-            M = MultivariateStats.fit(PCA, pool; pratio=pr, method=:svd) # mean=0
+            M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
         end
         # Why do I do this? X = P * F, but if we want F = pcs to have unit variance, we must divide it by the square root of the eigenvalues of the covariance matrix of X.
         # But to maintain equality of the two sides, we must multiply P by the square root of the eigenvalues of the covariance matrix of X.
-        pcs = MultivariateStats.transform(M, pool) # predict() produces the same
+        pcs = MultivariateStats.transform(M, data_matrix) # predict() produces the same
         λ = sqrt.(principalvars(M))
         proj = projection(M) * diagm(λ)
         pcs_s = pcs ./ λ
