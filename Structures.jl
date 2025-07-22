@@ -11,6 +11,7 @@ function retrieve_data_files()
             "CPS2" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/CPS2.csv",
             "SIPP1" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SIPP1.csv",
             "SIPP2" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SIPP2.csv",
+            "SIPP3" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SIPP3.csv",
 
             # "Test3000_100" => raw"/home/luisc/Distributional_Dynamics/SimData_3000_100.csv",
             # "Test3000_30" => raw"/home/luisc/Distributional_Dynamics/SimData_3000_30.csv",
@@ -133,7 +134,7 @@ struct FakeKernelEstimator <: FakeEstimator end # for confidence_intervals
 
 # order for copula is 'grid_cop' + 1
 @with_kw mutable struct ModelOptions{AE<:AbstractEstimator,AP<:AbstractPrior,B<:Bool,S<:String,I<:Integer,VS<:Vector{String},D<:Dict,DS<:Dict{String,String}} #,
-    estimator::AE = SeriesEstimator(grid_pcf=9 + 1, grid_cop=9 + 1, integral_pcf_grid=10, integral_cop_grid=10) # or "KDE" or "series" ,     
+    estimator::AE = SeriesEstimator(grid_pcf=11 + 1, grid_cop=11 + 1, integral_pcf_grid=10, integral_cop_grid=10) # 11 + 1 = order 11
     # estimator::AE               = SeriesEstimator(grid_pcf = 14+1, grid_cop = 14+1, integral_pcf_grid = 10, integral_cop_grid = 10) # or "KDE" or "series" ,     
     # prior::AP                   = Minnesota(hyperparameters = [0.2, 0.3, .001, 5, 2.0, 0.9])
     prior::AP = Minnesota(hyperparameters=[0.05, 0.1, 0.5, 0.1, 2.0, 0.9, 0.9]) # We use: 1,2,4,6
@@ -211,7 +212,7 @@ end
 end
 
 @with_kw mutable struct Minnesota{VF<:Vector{Float64}} <: AbstractPrior
-    hyperparameters::VF = [0.2, 0.3, 0.01, 5, 2.0, 0.90] # trying [0.2, 0.3, .01, 5, 2.0, 0.95]
+    hyperparameters::VF = [0.2, 0.3, 0.01, 5, 2.0, 0.90, 0.90] # trying [0.2, 0.3, .01, 5, 2.0, 0.95]
 end
 
 

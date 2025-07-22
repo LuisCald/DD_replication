@@ -8,6 +8,7 @@ label = "3D_A non-diag"
 m_label = measures_folder(measures)
 
 const func_data, time_params, model_elements = estimation_prep(obs_data, model_options);
+println("finished prepping data")
 const (param_vector, param_sizes, priors, meas_ind, Σ_ids) = set_params(model_elements, time_params, model_options)
 println("finished setting priors")
 SSM(par) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
@@ -35,7 +36,7 @@ smoother_res, logV, alarm = likeli(model_elements, par_final, param_sizes, prior
 X_choice = x_smoothed
 # --- 1.  VAR(1) residuals and their covariance -----------------------------
 # e = X_choice[:, 2:end] .- L * X_choice[:, 1:end-1]     # (r+q) × (T-1)
-A, B, D, Ω, _ = matrisize(par_final, param_sizes)
+A, B, C, D, Ω, _ = matrisize(par_final, param_sizes)
 Ω[diagind(Ω)] = log.(exp.(Ω[diagind(Ω)]) .+ 1)
 Ω_full = Ω # Diagonal(diag(cov(e; dims = 2)))                               # (r+q) × (r+q)
 
@@ -47,7 +48,6 @@ nq = size(D, 1)                         # = q  (idiosyncratic AR processes)
 # (cross blocks are zero in most DSGE/FA set-ups; grab them too if not)
 
 # --- 2.  Reduced-form factor VAR -------------------------------------------
-C = zeros(nq, nx)                       # still zero under your spec
 A_star = A + B * ((I - D) \ C)          # == A here because C == 0
 IA = inv(I - A_star)                   # (I - A*)^{-1}
 
