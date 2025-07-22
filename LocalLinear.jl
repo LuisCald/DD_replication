@@ -61,7 +61,7 @@ function series_estimator_with_coefs(data, weights, order, p_values)
     return quants, coefficients
 end
 
-function local_series(data, weights; order=10, bandwidth=0.1, grid=0.0:0.01:1.0)
+function local_series(data, weights, grid; order=10, bandwidth=0.01)
     n = length(data)
     s_weights = cumsum(weights) / sum(weights)
     Qm = (j, u) -> Q_m(j, u)                    # your Legendre routine
@@ -86,56 +86,110 @@ function local_series(data, weights; order=10, bandwidth=0.1, grid=0.0:0.01:1.0)
 
         β[:, g] = (Phi_w' * Phi_w) \ (Phi_w' * y_w)       # local coefficients
         q_hat[g] = sum(β[j+1, g] * Qm(j, p) for j in 0:m)
-        # d = vec(sum(Phi_w .^ 2; dims=1))     # column-wise sums
-        # β[:, g] = β[:, g] ./ sqrt.(d)          # element-wise
-        # G = (Phi_w' * Phi_w) / sum(kvec)   # (m+1)×(m+1)
-        # L = cholesky(G).L                  # lower-triangular
-        # β[:, g] = L * β[:, g]
     end
+
     return q_hat, β
 end
 
 
 # for measure_of_choice in [:wealth] #, :income, :consum]
-measure_of_choice = :wealth
-some_df = copy(df_3D)
+for measure_of_choice in [:wealth, :income, :consum]
+    some_df = copy(df_3D)
 
-# Get the data
-sort!(some_df, measure_of_choice)
-data = some_df[!, measure_of_choice][:]
-weights2 = some_df[!, :weight][:]
+    # Get the data
+    sort!(some_df, measure_of_choice)
+    data = some_df[!, measure_of_choice][:]
+    weights2 = some_df[!, :weight][:]
 
-# Get the aggregate data
-@unpack gdp_series = obs_data
-gdp_series[!, "date"] = QuarterlyDate.(gdp_series[!, "time"])
-a = filter(x -> x.date == QuarterlyDate(2019, 4), gdp_series)
-correction = a[1, "$(String(measure_of_choice))_per_hh"]
-data_trans = inverse_hyperbolic_sine(data ./ correction)
+    # Get the aggregate data
+    @unpack gdp_series = obs_data
+    gdp_series[!, "date"] = QuarterlyDate.(gdp_series[!, "time"])
+    a = filter(x -> x.date == QuarterlyDate(2019, 4), gdp_series)
+    correction = a[1, "$(String(measure_of_choice))_per_hh"]
+    data_trans = inverse_hyperbolic_sine(data ./ correction)
 
-# Estimate the CDF
-p_values = collect(0.01:0.01:1.0)
-p_values[end] = 0.9999
-s_weights = cumsum(weights2) / sum(weights2)
+    # Estimate the CDF
+    p_values = collect(0.01:0.01:1.0)
+    p_values[end] = 0.995
+    s_weights = cumsum(weights2) / sum(weights2)
+    Δp = 0.01                      # same for every g
+    weights = fill(Δp, length(p_values))
 
-# Plot the results    
-O = 10
-q_est, coefs = series_estimator_with_coefs(data_trans, weights2, O, p_values)
-q_est2, coefs2 = local_series(data_trans, weights2; order=O, bandwidth=0.1, grid=p_values)
-coefs2 = coefs2 ./ sum(abs.(coefs2), dims=1)
-mean_coefs2 = abs.(mean(coefs2, dims=2))
-Plots.plot()
-Plots.plot!(axes(q_est), q_est, color=:black, ls=:dash, xlabel="x", ylabel="PCF", label="Series")
-Plots.plot!(axes(q_est2), q_est2, color=:red, ls=:dot, label="LL")
-Plots.savefig("/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/$(String(measure_of_choice))_LLseries_est.pdf")
+    # the data Transformed
+    emp_est_trans = zeros(length(p_values))
+    for (pp, p) in enumerate(p_values)
+        # est = [meas for (meas, cdf) in zip(b_sample[!, measure_of_choice], s_weights) if cdf >= p][1]
+        try
+            emp_est_trans[pp] = [meas for (meas, cdf) in zip(data_trans, s_weights) if cdf >= p][1]
+        catch e
+            println(p)
+        end
+    end
 
-Plots.plot()
-Plots.plot!(axes(coefs), coefs, color=:black, ls=:dash, xlabel="x", ylabel="Coefs", label="Series")
-Plots.plot!(axes(coefs2), mean_coefs2, color=:red, ls=:dot, label="LL")
+    # Plot the results    
+    O = 11
+    # Estimate the coefficients
+    q_est, coefs = series_estimator_with_coefs(data_trans, weights2, O, p_values)
+    q_est2, coefs2 = local_series(data_trans, weights2, p_values; order=O, bandwidth=0.1)
 
-Plots.savefig("/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/$(String(measure_of_choice))_LLseries_coefs.pdf")
+    # Complete Approximation
+    Plots.plot(fontsize=16, legendfontsize=16, titlefontsize=16, labelsize=16, xlabelfontsize=16, ylabelfontsize=16, xtickfontsize=14, ytickfontsize=14, xformatter=:latex, yformatter=:latex)
+    Plots.plot!(axes(emp_est_trans), emp_est_trans, lw=2, color=:black, ls=:solid, label=L"\textrm{Observed}")
+    Plots.plot!(axes(q_est), q_est, color=:blue, lw=2, ls=:dash, xlabel=L"\textrm{Percentile\,\,Grid}", ylabel=L"\textrm{Percentile\,\, Function}", label=L"\textrm{Global}")
+    Plots.plot!(axes(q_est2), q_est2, color=:red, lw=3, ls=:dot, label=L"\textrm{Local}")
+    Plots.savefig("/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/$(String(measure_of_choice))_approx_all.pdf")
 
-cor(coefs, mean_coefs2)
 
+    # Scale global coefficients
+    coefs = abs.(coefs) ./ sum(abs.(coefs), dims=1)
 
+    # Define regions of interest
+    regions = [1:20, 21:40, 41:60, 61:80, 81:100, 91:100, 95:100, 99:100]
 
+    for (i, region) in enumerate(regions)
+        # Select the region
+        coefs_region = coefs2[:, region] # upper tail 
+
+        # Use coefs_bar to estimate the quantile function
+        coefs_region_bar = mean(coefs_region, dims=2)
+        # q_hat = [sum(coefs_region[j+1, pp] * Q_m(j, p) for j in 0:O) for (pp, p) in enumerate(collect(region ./ 100))]
+        q_hat = [sum(coefs_region_bar[j+1] * Q_m(j, p) for j in 0:O) for (pp, p) in enumerate(collect(region ./ 100))]
+
+        # Scale the region
+        coefs_region = abs.(coefs_region) ./ sum(abs.(coefs_region), dims=1) #TODO: correct sum?
+
+        # Mean of the region
+        mean_coefs_region = mean(coefs_region, dims=2) #, Weights(fill(Δp, size(coefs_region, 1))), dims=2)
+
+        # Difference in approximation
+        Plots.plot(fontsize=16, legendfontsize=16, titlefontsize=16, labelsize=16, xlabelfontsize=16, ylabelfontsize=16, xtickfontsize=14, ytickfontsize=14, xformatter=:latex, yformatter=:latex)
+        Plots.plot!(axes(emp_est_trans), emp_est_trans, lw=2, color=:black, ls=:solid, label=L"\textrm{Observed}")
+        Plots.plot!(axes(q_est), q_est, color=:blue, lw=2, ls=:dash, xlabel=L"\textrm{Percentile\,\,Grid}", ylabel=L"\textrm{Quantile\,\, Function}", label=L"\textrm{Global}")
+        Plots.plot!(region, q_hat, color=:red, lw=3, ls=:dot, label=L"\textrm{Local}")
+        Plots.savefig("/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/$(String(measure_of_choice))_approx$(i).pdf")
+
+        # Difference in coefficients
+        Plots.plot(fontsize=16, legendfontsize=16, titlefontsize=16, labelsize=16, xlabelfontsize=16, ylabelfontsize=16, xtickfontsize=14, ytickfontsize=14, xformatter=:latex, yformatter=:latex)
+        Plots.plot!(1:length(coefs), coefs, color=:blue, lw=2, ls=:solid, xlabel=L"\textrm{Order}", ylabel=L"\textrm{Normalized\,\, Coefficient}", label=L"\textrm{Global}")
+        Plots.plot!(1:length(mean_coefs_region), mean_coefs_region, color=:red, ls=:dot, lw=2, label=L"\textrm{Local}", xticks=0:2:O)
+        Plots.savefig("/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/$(String(measure_of_choice))_coefs$(i).pdf")
+    end
+
+    # Compute similarity across grid points
+    similarity = zeros(length(p_values))
+    coefs2 = abs.(coefs2) ./ sum(abs.(coefs2), dims=1)
+    for i in eachindex(p_values)
+        similarity[i] = dot(coefs, coefs2[:, i]) / (norm(coefs) * norm(coefs2[:, i]))
+    end
+
+    Plots.plot(fontsize=16, legendfontsize=16, titlefontsize=16, labelsize=16, xlabelfontsize=16, ylabelfontsize=16, xtickfontsize=14, ytickfontsize=14, xformatter=:latex, yformatter=:latex)
+    Plots.plot!(axes(similarity), similarity;
+        xlabel=L"\textrm{Percentile\,\, Grid}",
+        ylabel=L"\textrm{Cosine\,\, similarity}",
+        label="",
+        ls=:dash,
+        lc=:blue,
+        lw=2)
+    Plots.savefig("/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/$(String(measure_of_choice))_similarity.pdf")
+end
 
