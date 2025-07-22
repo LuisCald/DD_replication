@@ -420,7 +420,7 @@ function recurse_kalman_filter(A, B, C, D, Ω_f, Ω_y, Σ, G, y, smooth)
     P_F[ixF, ixU] = Pcore[1:r, r+1:end]
     P_F[ixU, ixF] = Pcore[r+1:end, 1:r]
 
-    # P_F[diagind(P_F)[r+1:4r]] .= 0 # value doesnt matter
+    P_F[diagind(P_F)[r+1:4r]] .= 1e6 # value doesnt matter
 
     # Filtered containers  
     x_filtered = zeros(eltype(A), nₛ, T)
@@ -781,15 +781,17 @@ function perform_backward_pass(L, P_F, sigma_updated, x_updated, x_smooth, x_fil
     t of the last measurement, computing the smoothed state estimate 
     from the intermediate results stored on the forward pass.
     """
-
+    # try
     KS = sigma_updated * L' * inv(lu(P_F))  # Kalman smoothing gain 
     x_s = x_updated .+ KS * (x_smooth .- x_filtered)
     sigma_s = sigma_updated + KS * (sigma_smooth - P_F) * KS'
 
     # Cross-covariance (Cov(x_t, x_{t-1} | T))
     sigma_cross = KS * sigma_smooth_prev
-
     return x_s, sigma_s, sigma_cross
+    # catch e
+    #     println(diag(P_F))
+    # end
 end
 
 
@@ -1166,8 +1168,8 @@ function sequential_kalman_update!(x_updated, sigma_updated, Y_u, t, G_u, x̂_F,
             try
                 log_c += (log(2π).+log(p)+(e*e).*inv(p))[1] * -0.5  # white noise case. # this is the likelihood contribution of 1 time period, given factors and θ
             catch ee
-                println("Error in log_c: ", ee)
-                log_c += -1.e12
+                # println("Error in log_c, $i, $t: ", ee)
+                log_c += 0 #-1.e12
             end
         end
         # end

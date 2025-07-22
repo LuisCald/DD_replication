@@ -1,4 +1,4 @@
-function X13_seasonality_adjustment!(df_to_des, periods)
+function X13_seasonality_adjustment!(df_to_des, periods, source)
     # Find rows with at least one observation 
     condition_axes = findall(row -> !all(isnan, row), eachrow(df_to_des))
 
@@ -9,6 +9,10 @@ function X13_seasonality_adjustment!(df_to_des, periods)
 
     yr = minimum(year.(qd_vec))
     qr = periods[yr][1]  # first quarter of the first year
+
+    # R"""
+    # library(x12)                       # x13binary must be installed
+    # """
 
     # Loop over these rows
     for i in condition_axes
@@ -23,43 +27,41 @@ function X13_seasonality_adjustment!(df_to_des, periods)
         df_row = fill_between_mean!(df_row)
 
         # TODO: does not work on my machine due to the R installed on my machine being rosetta based i think
-        R"""
-        library(x12)          # make sure x13binary is installed too
+        # R"""
+        # an.error.occured <- FALSE
+        # tryCatch({
+        #     # 1  Build the ts object (this prints nothing, so no need to silence)
+        #     ts_obj <- ts(
+        #         $(df_row),
+        #         frequency = 4,
+        #         start = c($yr, $qr)
+        #     )
 
-        # 1  Build an R ts object
-        ts_obj <- ts(
-            $(df_row),             # only the non-NaN observations
-            frequency = 4,
-            start = c($(yr), $(qr))
-        )
+        #     # 2  Run X‑13ARIMA/SEATS quietly
+        #     invisible(
+        #     capture.output(
+        #         adjusted <- x12(ts_obj)
+        #     )
+        #     )
 
-        # 2  Run X-13ARIMA/SEATS via x12()
-        #    `x11 = ""` asks for the default X-11 adjustment (same slot names as before)
-        an.error.occured <- FALSE
-        tryCatch({
-            adjusted <- x12(ts_obj)
-            print("success")
-            # 3  Extract the seasonally-adjusted component (d11)
-            d <- adjusted@d11               # x12() returns an x12Output object:contentReference[oaicite:0]{index=0}
-        }, error = function(e) {
-            an.error.occured <<- TRUE
-            print(e$message)
-        })
+        #     # 3  Extract the X‑11 adjusted component
+        #     d <- adjusted@d11
+        #     cat("success row", $i, "\n")
 
-        print(an.error.occured)
-        print($i)
-        """
+        # }, error = function(e) {
+        #     an.error.occured <<- TRUE
+        #     cat("error row", $i) #, ":", e$message, "\n")
+        #     d <- $(df_row)                 # fallback: keep original series
+        # })
 
-        @rget d
-        try
-            Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
-            Plots.plot!(df_row, label="Original series", linestyle=:dash)
-            Plots.savefig("x11_adjusted_series_$i.pdf")
-            df_to_des[i, :] = d
-            df_to_des[i, nan_ids] .= NaN
-        catch ee
-            println(i)
-        end
+        # """
+
+        # @rget d
+        # Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
+        # Plots.plot!(df_row, label="Original series", linestyle=:dash)
+        # Plots.savefig("x11_$(source)_$i.pdf")
+        df_to_des[i, :] = d
+        df_to_des[i, nan_ids] .= NaN
     end
 
     return df_to_des
@@ -143,13 +145,12 @@ end
 
 function remove_seasonality_from_quarterly_data!(dfs, names, time_dict)
     sim_data = filter(x -> occursin("SimData", x), names)
-    datasets_that_need_adjustment = ["SIPP1", "SIPP2", sim_data..., "CEX"]
+    datasets_that_need_adjustment = ["SIPP1", "SIPP2", "SIPP3", sim_data..., "CEX"]
 
-    # if "SIPP1" ∈ names || "SIPP2" ∈ names || ocurrin("SimData", names[1])
     for j in datasets_that_need_adjustment
         try
             df_id = findall(x -> x == j, names)[1]
-            X13_seasonality_adjustment!(dfs[df_id], time_dict[df_id])
+            X13_seasonality_adjustment!(dfs[df_id], time_dict[df_id], j)
         catch ee
             println(ee)
             println("No dataset $j found.")
@@ -486,7 +487,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
 
             if !sigma_exists
                 DCT_boot = jldopen(noise_file_name, "r")["noise"]
-                Σ̂⁻¹²ⱼ[j] = transform_DCT_boot(DCT_boot, time_p, year_vec[j], freq, freq_type[j], time_dict[j], estimator, dimension, measures)
+                Σ̂⁻¹²ⱼ[j] = transform_DCT_boot(DCT_boot, time_p, year_vec[j], freq, freq_type[j], time_dict[j], estimator, dimension, measures, source)
             end
 
         else
@@ -505,7 +506,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
             # only keep the lower and upper bounds
             confidence_intervals[source]["ci_u"], confidence_intervals[source]["ci_l"] = construct_confidence_intervals(sub_boot_dict, 0.025, 0.975, objects, measures, year_vec[j], source, estimator)
 
-            Σ̂⁻¹²ⱼ[j] = transform_DCT_boot(DCT_boot, time_p, year_vec[j], freq, freq_type[j], time_dict[j], estimator, dimension, measures)
+            Σ̂⁻¹²ⱼ[j] = transform_DCT_boot(DCT_boot, time_p, year_vec[j], freq, freq_type[j], time_dict[j], estimator, dimension, measures, source)
         end
     end
 
@@ -539,14 +540,23 @@ function compute_Kullback_Leibler_divergence(P, Q; compare_to_average=false)
 end
 
 
-function transform_DCT_boot(DCT_boot, time_p, year_vec, freq, freq_type, time_dict, estimator, dimension, measures)
+
+function transform_DCT_boot(DCT_boot, time_p, year_vec, freq, freq_type, time_dict, estimator, dimension, measures, source)
     # STEP 1: detrend 
     n_bootstraps = axes(DCT_boot, 3)
 
-    # Threads.@threads for b in n_bootstraps
-    for b in n_bootstraps
-        DCT_boot[:, :, b] = perform_detrending(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
-        DCT_boot[:, :, b] = perform_standardization([DCT_boot[:, :, b]], estimator, dimension, measures)[1]
+    if occursin("CEX", source) || occursin("SIPP", source)
+        # Threads.@threads 
+        for b in n_bootstraps
+            X13_seasonality_adjustment!(DCT_boot[:, :, b], time_dict, source)
+            DCT_boot[:, :, b] = perform_detrending(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
+            DCT_boot[:, :, b] = perform_standardization([DCT_boot[:, :, b]], estimator, dimension, measures)[1]
+        end
+    else
+        Threads.@threads for b in n_bootstraps
+            DCT_boot[:, :, b] = perform_detrending(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
+            DCT_boot[:, :, b] = perform_standardization([DCT_boot[:, :, b]], estimator, dimension, measures)[1]
+        end
     end
 
     # Demean across bootstraps 
@@ -1175,11 +1185,7 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
             for m in measures
                 id_tup = tuple(id_dict[m], :)
                 sub_proj = proj[id_tup...]
-                if m == "consum" || m == "income"
-                    Gⱼ[j][id_dict[m], :] .= hcat(sub_proj, [zeros(size(sub_proj)) for _ in 1:3]...)  # Each row has the projection, zeros for the lags, and zeros for the controls
-                elseif m == "wealth"
-                    Gⱼ[j][id_dict[m], :] .= hcat(sub_proj, [zeros(size(sub_proj)) for _ in 1:3]...)  # Each row has the projection, zeros for the lags, and zeros for the controls
-                end
+                Gⱼ[j][id_dict[m], :] .= hcat(sub_proj, [zeros(size(sub_proj)) for _ in 1:3]...)  # Each row has the projection, zeros for the lags, and zeros for the controls
             end
             Gⱼ[j][1:cop_rows, :] .= hcat(cop_proj, [zeros(size(cop_proj)) for _ in 1:3]...)  # Copula rows are scaled by 1/4
         end

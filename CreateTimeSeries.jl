@@ -533,6 +533,8 @@ function select_color(source; ext=false)
         return a[7]
     elseif source == "SIPP2"
         return a[8]
+    elseif source == "SIPP3"
+        return a[9]
     end
 end
 

@@ -495,12 +495,50 @@ foreach y of local years {
     }
 }
 
+* Break SIPP 1 into two pieces
+import delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP1.csv", clear
+
+* Combine year and quarter into a quarterly date
+generate qdate = yq(year, quarter)
+
+* Tell Stata to display it in yearq format (e.g. 2025q3)
+format qdate %tq
+
+* Drop if qdate > (1996, 1)
+drop if qdate <= yq(1995, 4)
+
+* Drop 2003Q4 (Seam)
+drop if qdate == yq(2003,4)
+drop if qdate == yq(1999, 4)
+
+export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP2.csv", replace
+
+* Again
+import delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP1.csv", clear
+
+* Combine year and quarter into a quarterly date
+generate qdate = yq(year, quarter)
+
+* Tell Stata to display it in yearq format (e.g. 2025q3)
+format qdate %tq
+
+* Drop if qdate > (1996, 1)
+drop if qdate > yq(1995, 4)
+
+* Drop 1988Q1 (Seam)
+drop if qdate == yq(1988,1)
+drop if qdate == yq(1985, 4)
+
+export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP1.csv", replace
+
+
+
 // collapse (sum) weight, by(year quarter )
 // drop if weight == 0 
 // egen tt = group(year quarter)
 // tsset tt
 
-foreach var in wealth {
+foreach var in income {
 	collapse (mean) `var' (p10) `var'10=`var' (p20) `var'20=`var' (p30) `var'30=`var' (p40) `var'40=`var' (p50) `var'50=`var' (p60) `var'60=`var' (p70) `var'70=`var' (p80) `var'80=`var' (p90) `var'90=`var' (p99) `var'99=`var' [pw=weight], by(year quarter)
 	drop if missing(`var')
 	egen tt = group(year quarter)
