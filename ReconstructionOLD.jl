@@ -38,11 +38,11 @@ function reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, mode
 
     for i in axes(x_smoothed, 1)
         Plots.plot!(
-            xaxis,
-            x_smoothed[i, :],
+            xaxis[5:end],
+            x_smoothed[i, 5:end],
             xformatter=:latex,
             yformatter=:latex,
-            xticks=(xaxis[1:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(dts[1:20:end])]),
+            xticks=(xaxis[5:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(dts[5:20:end])]),
             ylabel=L"\textrm{Factor\,\, Value}",
             label=L"\textrm{Factor \,\, %$(i)}",
             legend=:best) #, xticks=(collect(1:20:tot_periods), [L"%$(date)"[1:5] * "\$" for (_,date) in enumerate(gdp_series[1:20:end, :time])]))
@@ -89,8 +89,8 @@ function reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, mode
     end
 
     # Split by object, multiply by stds, reform object 
-    ΓF_σ = add_variance(estimator, ΓF, stds, measures)
-    X = add_mean!(X, ΓF_σ, means, data_names, blind_to) # completely filled matrices
+    add_variance!(estimator, X, stds, measures)
+    add_mean!(X, means, data_names, blind_to) # completely filled matrices
 
     # Generate two X's: one with the trend and one with average trend in
 
@@ -187,36 +187,37 @@ function state_transition(x_t, w_t, u_t, A, B)
 end
 
 
-function add_mean!(X, ΓF_σ, means, data_names, blind_to)  # Add mean by dataset 
+function add_mean!(X, means, data_names, blind_to)  # Add mean by dataset 
     for j in eachindex(X)
-        name = data_names[j]
-        l_X = length(X)
-        if name ∈ keys(blind_to)
-            condition = true
-            i = rand(1:l_X)
-            # Test next dataset to see if it's also blind
-            while condition
-                next_name = data_names[i]
-                if next_name ∈ keys(blind_to)
-                    condition = true
-                    i = rand(1:l_X)
-                else
-                    condition = false
-                    v = copy(means[j])
-                    idx = findall(isnan, v)
-                    v[idx] = means[i][idx]
-                    X[j] = ΓF_σ .+ v
-                end
-            end
-        else
-            X[j] = ΓF_σ .+ means[j]
-        end
+        # name = data_names[j]
+        # l_X = length(X)
+
+        # if name ∈ keys(blind_to)
+        #     condition = true
+        #     i = rand(1:l_X)
+        #     # Test next dataset to see if it's also blind
+        #     while condition
+        #         next_name = data_names[i]
+        #         if next_name ∈ keys(blind_to)
+        #             condition = true
+        #             i = rand(1:l_X)
+        #         else
+        #             condition = false
+        #             v = copy(means[j])
+        #             idx = findall(isnan, v)
+        #             v[idx] = means[i][idx]
+        #             X[j] = ΓF_σ .+ v
+        #         end
+        #     end
+        # else
+        X[j] .+= means[j]
+        # end
     end
 
     return X
 end
 
-function add_variance(estimator, ΓF, stds, measures)
+function add_variance!(estimator, X, stds, measures)
     @unpack grid_cop, grid_pcf = estimator
 
     dimension = length(measures)
@@ -227,25 +228,26 @@ function add_variance(estimator, ΓF, stds, measures)
 
     cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
     cop_rows = cop_part - imm_part
-    copula_data = ΓF[1:cop_rows, :]
 
-    # pcfs stuff 
-    pcfs_data = ΓF[cop_rows+1:end, :]
-    pcf_partition = size(pcfs_data, 1) ÷ dimension
-    pcfs = [pcfs_data[I, :] for I in Iterators.partition(axes(pcfs_data, 1), pcf_partition)]
+    for j in eachindex(X)
+        copula_data = X[j][1:cop_rows, :]
 
-    # standard deviations 
-    copula_data .= copula_data .* stds[1]
+        # pcfs stuff 
+        pcfs_data = X[j][cop_rows+1:end, :]
+        pcf_partition = size(pcfs_data, 1) ÷ dimension
+        pcfs = [pcfs_data[I, :] for I in Iterators.partition(axes(pcfs_data, 1), pcf_partition)]
 
-    start = 2
+        # standard deviations 
+        copula_data .= copula_data .* stds[1]
 
-    for o in start:n_objs
-        pcfs[o-1] .= pcfs[o-1] .* stds[o]
+        start = 2
+
+        for o in start:n_objs
+            pcfs[o-1] .= pcfs[o-1] .* stds[o]
+        end
+
+        X[j] = vcat(copula_data, vcat(pcfs...))
     end
-
-    ΓF_σ = vcat(copula_data, vcat(pcfs...))
-
-    return ΓF_σ
 end
 
 
@@ -2087,4 +2089,44 @@ function gen_proof_of_concept_figure_Γ_comparison(d_data_dict, r_data_dict, mod
     end
 end
 
+
+function irf_wold(L::AbstractMatrix, h::Integer)
+    n = size(L, 1)
+    Ψ = Array{eltype(L)}(undef, n, n, h + 1)
+    Ψ[:, :, 1] .= I(n)              # zeroth-period response
+    Ψ[:, :, 2] .= L                 # 1-step
+    for ℓ = 2:h
+        @views Ψ[:, :, ℓ+1] .= L * Ψ[:, :, ℓ]
+    end
+    return Ψ
+end
+
+function fevd(L, Σv, h; method=:trace)
+    n = size(L, 1)
+    # orthogonalised shocks  (use your favourite identification here)
+    W = cholesky(Σv).L           # Σv = W W'
+    Ψ = irf_wold(L, h)           # Wold IRFs
+
+    # structural IRFs  θ[ℓ] = Ψ[ℓ] * W
+    θ = similar(Ψ)
+    for ℓ = 1:h+1
+        @views θ[:, :, ℓ] .= Ψ[:, :, ℓ] * W
+    end
+
+    # cumulative sum of squared IRFs (IEC notation)
+    # dims = 3 → sum over lags 0…ℓ
+    θ2cum = cumsum(abs2.(θ); dims=3)
+
+    if method == :diag
+        numer = permutedims(diag.(eachslice(θ2cum, dims=2)), (2, 1, 3)) # n×n×h+1
+        denom = sum(numer; dims=2)                                 # n×1×h+1
+        return numer ./ denom
+    elseif method == :trace
+        numer = sum(θ2cum; dims=(1, 2))           # 1×1×h+1  per shock
+        denom = sum(numer; dims=2)               # 1×1×h+1  total
+        return dropdims(numer ./ denom; dims=(1, 2))
+    else
+        throw(ArgumentError("method must be :diag or :trace"))
+    end
+end
 
