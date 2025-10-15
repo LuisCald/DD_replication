@@ -592,8 +592,6 @@ for (i, j) in enumerate(0.0:0.01:0.099)
     to_store[i] = eval_quantile_function(q_weights, 10, j)[1]
 end
 
-mean(to_store)
-integral / 0.1
 
 # Plotting the coefficients 
 
@@ -609,7 +607,7 @@ for (i, m) in enumerate(sort(["income", "consum", "wealth"]))
     data = inverse_hyperbolic_sine(data ./ a[1, m*"_per_hh"])
     w = get_quantile_weights(data, weights, 21)
 
-    Plots.plot(axes(w), w, color=:blue, xformatter=:latex, yformatter=:latex, ls=:dot, label="", xlabel=L"\textrm{Order}", ylabel=L"\textrm{Coefficient}")
-    Plots.scatter!(axes(w), w, color=:blue, xformatter=:latex, yformatter=:latex, ls=:dot, markersize=3, label=i == 1 ? L"\textrm{Legendre \,\, Coefficients}" : "", xlabel=L"\textrm{Order}", ylabel=L"\textrm{Coefficient}")
+    Plots.plot(axes(w), w, color=:blue, xformatter=:latex, yformatter=:latex, fontsize=14, guidefontsize=14, xtickfontsize=14, ytickfontsize=14, legendfontsize=14, ls=:dot, label="", xlabel=L"\textrm{Order}", ylabel="")
+    Plots.scatter!(axes(w), w, color=:blue, xformatter=:latex, yformatter=:latex, ls=:dot, markersize=3, label=i == 1 ? L"\textrm{Legendre \,\, Coefficients}" : "", xlabel=L"\textrm{Order}", ylabel="")
     Plots.savefig("Legendre_coefs_" * "$m" * "_pcfs.pdf")
 end

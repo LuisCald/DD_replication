@@ -516,8 +516,8 @@ function reconstruct_data_short(A_new,B_new,Ω_new,Δ_new,G_new, likeli_vec, Δ_
 
     for (k, v) in X̄̄
         X̄̄_new[k]       = Dict()
-        X̄̄_new[k]["normal"]    = undo_functional_treatment(estimator, v[1], measures, time_params) 
-        X̄̄_new[k]["average"]   = undo_functional_treatment(estimator, v[2], measures, time_params) 
+        X̄̄_new[k]["normal"]  = undo_functional_treatment(estimator, v[1], measures) 
+        X̄̄_new[k]["average"]   = undo_functional_treatment(estimator, v[2], measures) 
     end
     
     # n_out_of_bounds  = data_diagnostics(copulas, measures)

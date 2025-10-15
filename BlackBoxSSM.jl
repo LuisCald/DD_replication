@@ -1,6 +1,6 @@
 function run_black_box_opt(SSM, param_vector, param_sizes, priors, measures)
     step_ranges = define_step_ranges(param_sizes, priors, param_vector)
-    opttime = length(param_vector) * 7
+    opttime = length(param_vector) * 2
     res = bboptimize(SSM, param_vector; SearchRange=step_ranges, Method=:adaptive_de_rand_1_bin_radiuslimited, MaxTime=opttime, TraceMode=:compact, TraceInterval=60)
     return best_candidate(res)
 end
@@ -28,7 +28,8 @@ function define_step_ranges(param_sizes, priors, param_vector)
     l_D = param_sizes[4][1]
     l_Ωf = param_sizes[1][1]
     l_Ωy = param_sizes[2][2]
-    l_Σ = param_sizes[6][1]
+    l_Ω_corr = param_sizes[6][1]
+    l_Σ = param_sizes[7][1]
 
     for i in 1:l_A
         # step_ranges[i] = (-0.99, 0.99) 
@@ -64,9 +65,15 @@ function define_step_ranges(param_sizes, priors, param_vector)
         step_ranges[i] = (-3 * priors[3].σ + priors[3].μ, 3 * priors[3].σ + priors[3].μ)
     end
 
+    # For Ω_corr
+    for (q, i) in enumerate((l_A+l_B+l_C+l_D+l_Ωf+l_Ωy+1):(l_A+l_B+l_C+l_D+l_Ωf+l_Ωy+l_Ω_corr))
+        # it's just the real line
+        step_ranges[i] = (-10, 10)
+    end
+
     # For Σ
-    for (q, i) in enumerate((l_A+l_B+l_C+l_D+l_Ωf+l_Ωy+1):(l_A+l_B+l_C+l_D+l_Ωf+l_Ωy+l_Σ))
-        step_ranges[i] = (-3 * priors[3+q].σ + priors[3+q].μ, 3 * priors[3+q].σ + priors[3+q].μ)
+    for (q, i) in enumerate((l_A+l_B+l_C+l_D+l_Ωf+l_Ωy+l_Ω_corr+1):(l_A+l_B+l_C+l_D+l_Ωf+l_Ωy+l_Ω_corr+l_Σ))
+        step_ranges[i] = (-3 * priors[4+q].σ + priors[4+q].μ, 3 * priors[4+q].σ + priors[4+q].μ)
     end
 
     return step_ranges

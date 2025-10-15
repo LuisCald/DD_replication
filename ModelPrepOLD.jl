@@ -14,55 +14,55 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
     # library(x12)                       # x13binary must be installed
     # """
 
-    # Loop over these rows
-    for i in condition_axes
-        indexing = tuple(i, :)
+    # # Loop over these rows
+    # for i in condition_axes
+    #     indexing = tuple(i, :)
 
-        df_row = df_to_des[indexing...]
+    #     df_row = df_to_des[indexing...]
 
-        # Find indices of NaNs across columns
-        nan_ids = findall(isnan, df_row)
+    #     # Find indices of NaNs across columns
+    #     nan_ids = findall(isnan, df_row)
 
-        # Since x12 cannot handle NaNs, we fill them with linear interpolation. We do not use these values anyway, so, its completely fine.
-        df_row = fill_between_mean!(df_row)
+    #     # Since x12 cannot handle NaNs, we fill them with linear interpolation. We do not use these values anyway, so, its completely fine.
+    #     df_row = fill_between_mean!(df_row)
 
-        # TODO: does not work on my machine due to the R installed on my machine being rosetta based i think
-        # R"""
-        # an.error.occured <- FALSE
-        # tryCatch({
-        #     # 1  Build the ts object (this prints nothing, so no need to silence)
-        #     ts_obj <- ts(
-        #         $(df_row),
-        #         frequency = 4,
-        #         start = c($yr, $qr)
-        #     )
+    #     # TODO: does not work on my machine due to the R installed on my machine being rosetta based i think
+    #     R"""
+    #     an.error.occured <- FALSE
+    #     tryCatch({
+    #         # 1  Build the ts object (this prints nothing, so no need to silence)
+    #         ts_obj <- ts(
+    #             $(df_row),
+    #             frequency = 4,
+    #             start = c($yr, $qr)
+    #         )
 
-        #     # 2  Run X‑13ARIMA/SEATS quietly
-        #     invisible(
-        #     capture.output(
-        #         adjusted <- x12(ts_obj)
-        #     )
-        #     )
+    #         # 2  Run X‑13ARIMA/SEATS quietly
+    #         invisible(
+    #         capture.output(
+    #             adjusted <- x12(ts_obj)
+    #         )
+    #         )
 
-        #     # 3  Extract the X‑11 adjusted component
-        #     d <- adjusted@d11
-        #     cat("success row", $i, "\n")
+    #         # 3  Extract the X‑11 adjusted component
+    #         d <- adjusted@d11
+    #         cat("success row", $i, "\n")
 
-        # }, error = function(e) {
-        #     an.error.occured <<- TRUE
-        #     cat("error row", $i) #, ":", e$message, "\n")
-        #     d <- $(df_row)                 # fallback: keep original series
-        # })
+    #     }, error = function(e) {
+    #         an.error.occured <<- TRUE
+    #         cat("error row", $i, ":", e$message, "\n")
+    #         d <- $(df_row)                 # fallback: keep original series
+    #     })
 
-        # """
+    #     """
 
-        # @rget d
-        # Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
-        # Plots.plot!(df_row, label="Original series", linestyle=:dash)
-        # Plots.savefig("x11_$(source)_$i.pdf")
-        df_to_des[i, :] = d
-        df_to_des[i, nan_ids] .= NaN
-    end
+    #     @rget d
+    #     # Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
+    #     # Plots.plot!(df_row, label="Original series", linestyle=:dash)
+    #     # Plots.savefig("x11_$(source)_$i.pdf")
+    #     df_to_des[i, :] = d
+    #     df_to_des[i, nan_ids] .= NaN
+    # end
 
     return df_to_des
 end
@@ -189,7 +189,7 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
     #TODO: Requires that we know the dates of the intervals of course, which we do 
     #TODO: for functional data ... tricky 
     confidence_intervals, Σ̂⁻¹² = define_data_intervals(df_vec, model_options, init_path, time_p, obs_data)
-
+    println("Intervals defined.")
     # Perform proof of concept reconstruction
     # First, select a df where all measures are observed 
 
@@ -203,7 +203,11 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
 
 
     # Keep functional data for plotting against estimates 
-    func_struct = store_functional_data(files, dfs, confidence_intervals, gdp_series, model_options, time_p, cutoff_bounds)
+    func_dict = store_functional_data(files, dfs, gdp_series, model_options, time_p)
+    confidence_intervals = store_confidence_intervals(files, confidence_intervals, freq, time_p)
+    data_sources = sort(collect(keys(files)))
+
+    func_struct = FunctionalData(func_dict, confidence_intervals, year_vec, data_sources)
 
     @info("Performing data transformations.")
 
@@ -453,7 +457,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
     # Loop over data sources and generate intervals
     confidence_intervals = Dict()
     Σ̂⁻¹²ⱼ = Vector{Matrix{Float64}}(undef, length(sources))
-    max_draws = 999
+    max_draws = 500
 
     # File to save the sigma matrix. Only higher orders require a different computation
     ci_tag = tag == " higher order15" ? tag : ""
@@ -483,7 +487,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
             sub_boot_dict = jldopen(ci_file_name, "r")["ci"]
 
             # only keep the lower and upper bounds
-            confidence_intervals[source]["ci_u"], confidence_intervals[source]["ci_l"] = construct_confidence_intervals(sub_boot_dict, 0.025, 0.975, objects, measures, year_vec[j], source, estimator)
+            confidence_intervals[source]["ci_u"], confidence_intervals[source]["ci_l"] = construct_confidence_intervals(sub_boot_dict, 0.025, 0.975, measures, year_vec[j], estimator)
 
             if !sigma_exists
                 DCT_boot = jldopen(noise_file_name, "r")["noise"]
@@ -504,7 +508,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
             JLD2.save(noise_file_name, "noise", DCT_boot)
 
             # only keep the lower and upper bounds
-            confidence_intervals[source]["ci_u"], confidence_intervals[source]["ci_l"] = construct_confidence_intervals(sub_boot_dict, 0.025, 0.975, objects, measures, year_vec[j], source, estimator)
+            confidence_intervals[source]["ci_u"], confidence_intervals[source]["ci_l"] = construct_confidence_intervals(sub_boot_dict, 0.025, 0.975, measures, year_vec[j], estimator)
 
             Σ̂⁻¹²ⱼ[j] = transform_DCT_boot(DCT_boot, time_p, year_vec[j], freq, freq_type[j], time_dict[j], estimator, dimension, measures, source)
         end
@@ -781,7 +785,11 @@ function define_timeframe(agg_data, year_vec, freq_type, time_dict, data_cutoffs
     years = unique(vcat(year_vec...))
 
     # Add time columns to aggregate data 
-    agg_data[!, "time"] = QuarterlyDate.(agg_data[!, "time"])
+    try
+        agg_data[!, "time"] = QuarterlyDate.(agg_data[!, "time"])
+    catch
+        agg_data[!, "time"] = QuarterlyDate.(agg_data[!, "year"], agg_data[!, "quarter"])
+    end
     agg_data[!, "year"] = Dates.year.(agg_data[!, "time"])
     agg_data[!, "quarter"] = Dates.quarterofyear.(agg_data[!, "time"])
 
@@ -1103,7 +1111,7 @@ end
 function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, time_p, freq_type, time_dict, model_options, n_less_than_one, βs, trend, Σ̂⁻¹², data_to_mute, agg_lags, df_vec, gdp_series)
     @unpack freq, agg_freq, number_of_dfs, lags, case, measures, pre_multiply, pca_perspective, tag, plot_proof, best_aggs, estimator = model_options
     @unpack tot_years, year_vec, tmin, tmax, tot_periods = time_p
-    @unpack integral_pcf_grid, integral_cop_grid = estimator
+    @unpack integral_pcf_grid, integral_cop_grid, grid_pcf, grid_cop = estimator
 
 
     # Order Measures
@@ -1122,16 +1130,76 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
     # mute observations that correspond to 'data_to_mute'
 
     # Find the time index that corresponds to 'data_to_mute'
-    if data_to_mute["begin"] != ""
-        dts = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
-        begin_id = findall(x -> x == data_to_mute["begin"], dts)
-        end_id = findall(x -> x == data_to_mute["end"], dts)
+    dts = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
+    if typeof(data_to_mute) == Dict{String,QuarterlyDate}
+        tag_check = [occursin(m, tag) for m in measures]
+        if sum(tag_check) != 0
+            # Case of removing wealth/income/other observations during the housing cycle
 
-        for j in eachindex(MV)
-            if isempty(end_id)
-                MV[j][:, begin_id[1]:end] .= NaN
-            else
-                MV[j][:, begin_id[1]:end_id[1]] .= NaN
+            # First, find wealth indices
+            meas_to_remove = tag[end-5:end]
+            meas_to_remove_loc = findfirst(x -> x == meas_to_remove, measures)
+            cop_end = grid_cop^length(measures) - (grid_cop + (length(measures) - 1) * (grid_cop - 1))
+            meas_to_remove_ids = (cop_end+grid_pcf*(meas_to_remove_loc-1)+1):(cop_end+grid_pcf*meas_to_remove_loc)
+
+            if data_to_mute["begin"] != ""
+                begin_id = findall(x -> x == data_to_mute["begin"], dts)
+                end_id = findall(x -> x == data_to_mute["end"], dts)
+
+                for j in eachindex(MV)
+                    if isempty(end_id)
+                        MV[j][meas_to_remove_ids, begin_id[1]:end] .= NaN
+                    else
+                        MV[j][meas_to_remove_ids, begin_id[1]:end_id[1]] .= NaN
+                    end
+                end
+            end
+        else
+            # General case
+            if data_to_mute["begin"] != ""
+                begin_id = findall(x -> x == data_to_mute["begin"], dts)
+                end_id = findall(x -> x == data_to_mute["end"], dts)
+
+                for j in eachindex(MV)
+                    if isempty(end_id)
+                        MV[j][:, begin_id[1]:end] .= NaN
+                    else
+                        MV[j][:, begin_id[1]:end_id[1]] .= NaN
+                    end
+                end
+            end
+        end
+    elseif typeof(data_to_mute) == Dict{String,Vector{QuarterlyDate}}
+        # For specific datasets e.g., muting CEX
+        tag_check = [occursin(m, tag) for m in measures]
+        if sum(tag_check) != 0
+            # Case of removing wealth/income/other observations during the housing cycle
+
+            # First, find wealth indices
+            meas_to_remove = tag[end-5:end]
+            meas_to_remove_loc = findfirst(x -> x == meas_to_remove, measures)
+            cop_end = grid_cop^length(measures) - (grid_cop + (length(measures) - 1) * (grid_cop - 1))
+            meas_to_remove_ids = (cop_end+grid_pcf*(meas_to_remove_loc-1)+1):(cop_end+grid_pcf*meas_to_remove_loc)
+
+            if data_to_mute["begin"] != ""
+                begin_id = findall(x -> x == data_to_mute["begin"], dts)
+                end_id = findall(x -> x == data_to_mute["end"], dts)
+
+                for j in eachindex(MV)
+                    if isempty(end_id)
+                        MV[j][meas_to_remove_ids, begin_id[1]:end] .= NaN
+                    else
+                        MV[j][meas_to_remove_ids, begin_id[1]:end_id[1]] .= NaN
+                    end
+                end
+            end
+        else
+            for df_name in collect(keys(data_to_mute))
+                j = findfirst(x -> x == df_name, df_vec.df_names)
+                for dt in data_to_mute[df_name]
+                    date_id = findall(x -> x == dt, dts)[1]
+                    MV[j][:, date_id] .= NaN
+                end
             end
         end
     end
@@ -1161,7 +1229,7 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
     dimension = length(measures)  # number of objects, e.g., 1 for copula, 2 for copula and pcf, etc.
     cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
     cop_rows = cop_part - imm_part
-    id_dict = Dict(measures[i] => (cop_rows+1)+integral_pcf_grid*(i-1):(cop_rows)+i*integral_pcf_grid for i in eachindex(measures))  # mapping measures to their ids
+    id_dict = Dict(measures[i] => (cop_rows+1)+grid_pcf*(i-1):(cop_rows)+i*grid_pcf for i in eachindex(measures))  # mapping measures to their ids
     id_dict["copula"] = 1:cop_rows  # copula rows are always the first rows
     cop_proj = proj[id_dict["copula"], :]
 
@@ -1180,8 +1248,8 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
             # Dealing with copula
             Gⱼ[j][1:cop_rows, :] .= 1 / 4 .* hcat(cop_proj, [cop_proj for _ in 1:3]...)  # Copula rows are scaled by 1/4
 
-        elseif occursin("SIPP", df_name) || occursin("CEX", df_name)
-            # These datasets are quarterly
+        elseif occursin("SIPP", df_name) || occursin("CEX", df_name) || occursin("HANK", df_name)
+            # These datasets are quarterly/high-frequency
             for m in measures
                 id_tup = tuple(id_dict[m], :)
                 sub_proj = proj[id_tup...]
@@ -1258,17 +1326,17 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # Create new data matrix with information on the lags 
         r_max = 30 # just some high number 
         MOdim = n_factors(pool', r_max) # pool' is a T x N matrix
-        println("The maximum number of aggregate factors is $MOdim")
+        println("The maximum number of aggregate factors with other estimator is $MOdim")
         println(tag)
 
         M = MultivariateStats.fit(PCA, pool; pratio=0.95, method=:svd, mean=0)  # TODO: unfix this!
         pcs = MultivariateStats.transform(M, pool)
-        Mdim = tag == " less AF" ? 15 : tag == " more AF" ? 25 : tag == " all AF" ? 30 : tag == " less DF and AF" ? 10 : 25
+        Mdim = tag == " less AF" ? 15 : tag == " more AF" ? 20 : tag == " all AF" ? 30 : tag == " less DF and AF" ? 10 : 25
 
         λ = sqrt.(principalvars(M))
         pcs_s = pcs ./ λ
         proj = projection(M) * diagm(λ)
-        println("The size of the projection matrix is $(size(proj))")
+        println("The size of the projection matrix for the aggs. is $(size(proj))")
 
         # Import jld2
         if best_aggs
@@ -1295,6 +1363,8 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=6, method=:svd) # mean=0
         elseif tag == " 7 factors"
             M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=7, method=:svd) # mean=0
+        elseif tag == " HANK"
+            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=8, method=:svd) # mean=0
         else
             M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
         end
@@ -1424,6 +1494,7 @@ function select_aggregates(aggregates, measures, tot_periods, tmin, tmax, agg_la
     else
         b = filter(row -> row.date <= QuarterlyDate(tmax["year"], tmax["quarter"]), aggregates)
     end
+
     dropped_rows_ub = nrow(aggregates) - nrow(b)
 
     data_only_aggs = select(aggregates, Not(["date", "time", "year", "quarter"]))
@@ -1433,6 +1504,14 @@ function select_aggregates(aggregates, measures, tot_periods, tmin, tmax, agg_la
     # Fill matrix with density, percentile function measurements 
     data_only_aggs = copy(transpose(Matrix{Float64}(data_only_aggs)))  # removes date column, K x T
 
+    # if tag == " HANK"
+    #     agg_pcs = data_only_aggs[:, 1:end-agg_lags-dropped_rows_ub]
+    #     agg_count = size(agg_pcs, 1)
+    #     u_proj = zeros(size(data_only_aggs, 1), size(agg_pcs, 1)) # doesnt matter
+    #     @info "For HANK, we keep $agg_count aggregate series."
+
+    #     return u_proj, agg_pcs, agg_count
+    # else
     super_aggs = data_only_aggs[:, 1:end-agg_lags]
 
     for i in 1:agg_lags
@@ -1445,11 +1524,10 @@ function select_aggregates(aggregates, measures, tot_periods, tmin, tmax, agg_la
 
     # subset agg_pcs 
     agg_pcs = agg_pcs[:, 1:end-dropped_rows_ub]
-
     agg_count = size(agg_pcs, 1)
 
-
     return u_proj, agg_pcs, agg_count
+    # end
 end
 
 # function impose_stationarity(aggregates)
@@ -1619,7 +1697,13 @@ function generate_ecdf(rv, weight=false)
 end
 
 
-function construct_confidence_intervals(sub_boot_dict, lb, ub, objects, measures, years, source, estimator)
+function q_ignore_nan(v, p)
+    w = v[isfinite.(v)]              # keeps finite; drops NaN/Inf
+    return isempty(w) ? NaN : quantile(w, p)
+end
+
+
+function construct_confidence_intervals(sub_boot_dict, lb, ub, measures, years, estimator)
 
     # q_grid, cop_grid = pick_grid_for_confidence_intervals(estimator)
 
@@ -1652,22 +1736,16 @@ function construct_confidence_intervals(sub_boot_dict, lb, ub, objects, measures
             for o in ["quantiles"]
                 U = size(ci_b[meas][o], 1)
                 for i in 1:U
-                    # n_ub = occursin("SCF", source) && years[yr] < 1983 && i == U ? .95 : ub
-                    # n_lb = occursin("SCF", source) && years[yr] < 1983 && i == U ? .05 : lb
+                    vv = sub_boot_dict[meas][o][i, :, yr]
                     try
-                        # println(sub_boot_dict[meas][o][i, :, yr])
-                        ci_b[meas][o][i, yr] = quantile(sub_boot_dict[meas][o][i, :, yr], lb)
-                        ci_u[meas][o][i, yr] = quantile(sub_boot_dict[meas][o][i, :, yr], ub)
+                        ci_b[meas][o][i, yr] = q_ignore_nan(vv, lb)
+                        ci_u[meas][o][i, yr] = q_ignore_nan(vv, ub)
                     catch e
-                        # println(e)
-                        # println(meas)
-                        # println(yr)
                         nothing
                     end
                 end
             end
         end
-
     end
 
     ci_u["copula"] = zeros(grid_choice_cop^dim, l_yrs)
@@ -1678,8 +1756,9 @@ function construct_confidence_intervals(sub_boot_dict, lb, ub, objects, measures
         # Copula stuff
         for i in axes(sub_boot_dict["copula"], 1)
             try
-                ci_b["copula"][i, yr] = quantile(sub_boot_dict["copula"][i, :, yr], lb)
-                ci_u["copula"][i, yr] = quantile(sub_boot_dict["copula"][i, :, yr], ub)
+                vv = sub_boot_dict["copula"][i, :, yr]
+                ci_b["copula"][i, yr] = q_ignore_nan(vv, lb)
+                ci_u["copula"][i, yr] = q_ignore_nan(vv, ub)
             catch e
                 ci_b["copula"][i, yr] = NaN
                 ci_u["copula"][i, yr] = NaN

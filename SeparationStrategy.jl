@@ -16,18 +16,19 @@ function set_shock_priors(priors, factor_count, agg_count, n_param)
     try
         Ωf_mode = repeat([StatsBase.mode(priors[2])], factor_count)
         Ωy_mode = repeat([StatsBase.mode(priors[3])], agg_count)
-        Σ_mode = [StatsBase.mode(priors[3+i]) for i in 1:n_param]
+        Σ_mode = [StatsBase.mode(priors[4+i]) for i in 1:n_param]
     catch e
         Ωf_mode = repeat([StatsBase.mode(priors[2].untruncated)], factor_count)
         Ωy_mode = repeat([StatsBase.mode(priors[3].untruncated)], agg_count)
-        Σ_mode = [StatsBase.mode(priors[2+i].untruncated) for i in 1:n_param] # For the truncated cauchy
+        Σ_mode = [StatsBase.mode(priors[4+i].untruncated) for i in 1:n_param] # For the truncated cauchy
     end
 
     # Replace the last n_aggs entries of Σ_mode to zero
-    Ω_prior = Diagonal(vcat(Ωf_mode, Ωy_mode))
+    Ω_var = vcat(Ωf_mode, Ωy_mode)
+    Ω_corr = lower_offdiag(diagm(ones(length(Ω_var))))
     Σ_prior = Diagonal(Σ_mode)
 
-    return Ω_prior, Σ_prior
+    return Ω_var, Ω_corr, Σ_prior
 end
 
 function correlation_pdf(R, ν)

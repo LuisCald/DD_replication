@@ -1,0 +1,288 @@
+# Robust symmetric "square root" for a (near) PSD matrix
+function sym_sqrt_psd(Σ::AbstractMatrix{<:Real}; tol=1e-12)
+    F = Symmetric(Σ)
+    E = eigen(F)                     # Σ = V*Diagonal(λ)*V'
+    λ = clamp.(E.values, 0.0, Inf)   # guard tiny negatives
+    V = E.vectors
+    return V * Diagonal(sqrt.(λ)) * V'   # principal square root
+end
+
+"""
+    fevd_dist_vs_agg(Φ, Ω; r, q, horizon=20, factor_names=nothing)
+
+Compute FEVD shares (in %) for each of the r "distributional" factors:
+two columns: Distributional vs Aggregates, at horizon `horizon`.
+
+Assumes your companion ordering with 4 lags of factors (size 4r) and q aggregates:
+ε_t has nonzero entries only in rows 1:r (current factors) and 4r+1:4r+q (aggregates).
+
+Inputs
+------
+- Φ :: n×n  (state transition)
+- Ω :: n×n  (innovation covariance)
+- r, q :: Int
+- horizon :: Int = 20
+- factor_names :: Vector{String} (optional, length r)
+
+Returns
+-------
+DataFrame with columns: :Factor, :Distributional, :Aggregates
+"""
+function fevd_dist_vs_agg(model_elements, model_options, obs_data, Φ_sub, Ω; r, q, horizon=20, factor_names=nothing)
+    @unpack measures, case, equivalized, bottom_coded, estimator, tag = model_options
+    @unpack grid_cop, grid_pcf, integral_pcf_grid, integral_cop_grid = estimator
+    @unpack trend, Gⱼ, means, stds = model_elements
+    @unpack df_vec = obs_data
+
+    grid_data_size_pcf = typeof(estimator) <: SeriesEstimator ? integral_pcf_grid : grid_pcf
+    grid_data_size_cop = typeof(estimator) <: SeriesEstimator ? integral_cop_grid : grid_cop
+
+    n = size(Φ_sub, 1)
+    @assert size(Φ_sub, 2) == n && size(Ω, 1) == n && size(Ω, 2) == n
+    # @assert n == 4r + q "Expected state dimension n = 4r + q for the quarterly companion form."
+
+    # Selectors (match your build_selectors)
+    J = zeros(eltype(Φ_sub), r, n) # distributional by all factors
+    J[:, 1:r] .= diagm(ones(eltype(Φ_sub), r))          # pick current f_t from state
+
+    S_f = zeros(eltype(Φ_sub), n, r)
+    S_f[1:r, 1:r] .= diagm(ones(eltype(Φ_sub), r))      # factor shock locations
+
+    S_y = zeros(eltype(Φ_sub), n, q)
+    S_y[r+1:r+q, 1:q] .= diagm(ones(eltype(Φ_sub), q))  # aggregate shock locations
+
+    S = hcat(S_f, S_y)               # n × (r+q) --- in the general case, its basically the identity
+
+    # Structural impact with orthonormal shocks: ε = B u, E[uu']=I
+    # Ω[diagind(Ω)] = log.(exp.(Ω[diagind(Ω)]) .+ 1)
+    Σξ = Symmetric(S' * Ω * S)       # (r+q)×(r+q) reduced-form shock cov
+    C = sym_sqrt_psd(Matrix(Σξ))    # principal sqrt (robust to near-PSD)
+    # C = diagm(sqrt.(Σξ[diagind(Σξ)]))      # diagonal sqrt (assumes orthogonal shocks)
+    # C  = cholesky(Σξ; check=false).L
+    B = S * C                        # n × (r+q)
+
+    # FEVD accumulators
+    num_dist = zeros(Float64, r)
+    num_agg = zeros(Float64, r)
+    denom = zeros(Float64, r)
+
+    # Generate impulse responses and accumulate FEVD parts
+    ψ = zeros(eltype(Φ_sub), r, r + q, horizon)  # n × (r+q)
+    Φs = I(n)        # to store, within iteration, everything
+    for s in 0:(horizon-1)
+        ψ[:, :, s+1] = J * Φs * B                         # r × (r+q)
+        @views begin
+            num_dist .+= sum(abs2, ψ[:, 1:r, s+1]; dims=2)[:]
+            num_agg .+= sum(abs2, ψ[:, r+1:r+q, s+1]; dims=2)[:]
+            denom .+= sum(abs2, ψ[:, :, s+1]; dims=2)[:]
+        end
+        Φs = Φs * Φ_sub
+    end
+
+    share_dist = 100 .* (num_dist ./ denom)
+    share_agg = 100 .* (num_agg ./ denom)
+
+    names = factor_names === nothing ? ["Factor $(i)" for i in 1:r] : factor_names
+    @assert length(names) == r
+
+    tbl = DataFrame(Factor=names, Variation_from_Distributional=share_dist,
+        Variation_from_Aggregates=share_agg)
+
+    #################################################
+    # Map these contributions to the observable space
+    #################################################
+    D = length(measures)
+    psid_id = findfirst(==("PSID"), df_vec.df_names)  # hardcoded for now, but could be an input
+    new_trend = select_trend(trend, "average") # for later 
+
+    Δobs = Vector{Matrix{Float64}}(undef, horizon)
+
+    for h in axes(ψ, 3)
+        Δobs[h] = (Gⱼ[psid_id][:, 1:r] * ψ[:, :, h]) # n_coefs by r+q
+    end
+    # add_variance!(estimator, Δobs, stds, measures)
+    # Δobs = [Δobs[h] .+ means[psid_id] for h in 1:horizon]  # Add means
+
+    # # Add linear-trend back
+    # for h in 1:horizon
+    #     # For copula, weights do not seem to be affected
+    #     Δobs[h] .+= new_trend[psid_id]
+    # end
+
+    # Add the immutable part
+    for h in eachindex(Δobs)
+        Δobs[h] = add_multidimensional_immutable(estimator, Δobs[h], grid_cop, measures)
+    end
+
+    # split into copula and pcfs
+    split_Δobs = Vector(undef, horizon)
+    for h in eachindex(Δobs)
+        split_Δobs[h] = undo_functional_treatment(estimator, Δobs[h], measures)
+    end
+
+    # Generate container to store the data of choice 
+    new_data_pcf = [zeros(integral_pcf_grid, r + q, horizon) for _ in 1:D] # obs x shocks x horizon, for each pcf
+    grid_points_pcf = select_grid_points(grid_data_size_pcf)
+    intervals = vcat([0.0] .+ 1e-6, grid_points_pcf)
+
+    # We need to generate new data_pcf, which are the average quantiles over the intervals (e.g., deciles)
+    for h in 1:horizon
+        for s in 1:r+q
+            # split the pcfs
+            pcf_coefs = split_Δobs[h][2][:, s]  # second element is the pcfs
+            split_pcfs = [pcf_coefs[I] for I in Iterators.partition(axes(pcf_coefs, 1), grid_pcf)]  # split by measure 
+            for m in eachindex(split_pcfs)
+                if all(isnan.(split_pcfs[m]))
+                    new_data_pcf[m][:, s, h] .= NaN
+                else
+                    for i in 1:integral_pcf_grid
+                        # Using coefs, generate pcf function and then integrate pcf function over diff. intervals
+                        # integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, h, s], grid_pcf - 1, u))[1] .* select_series[s, correction_names[m]], intervals[i], intervals[i+1], rtol=1e-8)
+                        integral, _ = quadgk(u -> eval_quantile_function(split_pcfs[m], grid_pcf - 1, u)[1], intervals[i], intervals[i+1], rtol=1e-8)
+
+                        # Undo treatment of data => gives us average quantile within the interval
+                        new_data_pcf[m][i, s, h] = integral / (intervals[i+1] - intervals[i]) #reverse_inverse_hyperbolic_sine(integral)[1] .* select_series[t, correction_names[m]] #./ (intervals[i+1] - intervals[i])
+                    end
+                end
+            end
+        end
+    end
+
+    for m in eachindex(new_data_pcf)
+        for s in 1:(r+q)
+            # @show s, norm(new_data_pcf[m][:, s, :])
+        end
+    end
+
+
+    # To store FEVD
+    stats_dict = Dict()
+
+    # # For the copulas
+    # copulas = [generate_copula_densities(split_Δobs[h], measures, grid_data_size_cop) for h in 1:horizon]
+    # cop_tot = sum(sum(abs2, Mt) for Mt in copulas)
+    # stats_dict["copula_dist"] = sum(sum(abs2, Mt[:, 1:r]) for Mt in copulas) ./ cop_tot
+    # stats_dict["copula_agg"] = sum(sum(abs2, Mt[:, r+1:r+q]) for Mt in copulas) ./ cop_tot
+
+    # For the pcfs, find the contributions by distribution and aggregate (as reference, new_data_pcf[m][i, h, s])
+    for m in eachindex(new_data_pcf)
+        total50 = sum(abs2, new_data_pcf[m][1:5, :, :])
+        total40 = sum(abs2, new_data_pcf[m][6:9, :, :])
+        total10 = sum(abs2, new_data_pcf[m][10, :, :])
+        stats_dict[measures[m]] = Dict()
+        stats_dict[measures[m]]["bottom50"] = [sum(abs2, new_data_pcf[m][1:5, 1:r, :]) / total50, sum(abs2, new_data_pcf[m][1:5, r+1:r+q, :]) / total50] # distributional, aggregate
+        stats_dict[measures[m]]["next40"] = [sum(abs2, new_data_pcf[m][6:9, 1:r, :]) / total40, sum(abs2, new_data_pcf[m][6:9, r+1:r+q, :]) / total40]
+        stats_dict[measures[m]]["top10"] = [sum(abs2, new_data_pcf[m][10, 1:r, :]) / total10, sum(abs2, new_data_pcf[m][10, r+1:r+q, :]) / total10]
+
+        std_across_s = std.(eachrow(reshape(new_data_pcf[m][:, :, :], :, r + q)))
+        # println("Std. across shocks (last measure): $(std_across_s)")
+    end
+
+
+    # Generate Latex Table of 9 rows, 3 columns
+    latex_tbl = make_latex_table_dist_agg(stats_dict, measures; caption="FEVD contributions", label="tab:fevd_contrib")
+    println(latex_tbl)
+
+
+    return tbl
+
+end
+
+using Printf
+
+function make_latex_table_dist_agg(stats_dict, measures; caption="FEVD by group", label="tab:fevd")
+    rows = String[]
+    push!(rows, "\\begin{table}[!htbp]")
+    push!(rows, "\\centering")
+    push!(rows, "\\begin{tabular}{lccc}")
+    push!(rows, "\\hline")
+    push!(rows, "Measure & Group & Distributional (\\%) & Aggregate (\\%) \\\\")
+    push!(rows, "\\hline")
+    for meas in measures
+        for group in ["bottom50", "next40", "top10"]
+            dist, agg = stats_dict[meas][group]
+            denom = dist + agg + eps()       # safe denominator
+            dist_share = 100 * dist / denom
+            agg_share = 100 * agg / denom
+            push!(rows, @sprintf("%s & %s & %.2f & %.2f \\\\",
+                meas, group, dist_share, agg_share))
+        end
+        push!(rows, "\\hline")
+    end
+    push!(rows, "\\end{tabular}")
+    push!(rows, "\\caption{$caption}")
+    push!(rows, "\\label{$label}")
+    push!(rows, "\\end{table}")
+    return join(rows, "\n")
+end
+
+
+# sizes: Φ (n×n), J (r×n), B (n×(r_dist+q_agg))
+r_dist, q_agg = 8, 25  # example
+# Example
+# A, B, C, D, Ω, Σ = matrisize(par_final, param_sizes)
+A, B, C, D, Ω_var, Ω_corr, Σ = matrisize(par_final, param_sizes)
+Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)  # softplus transformation
+mat_Ω_corr = Matrix(Ω_corr)
+Ω = Ω_var * mat_Ω_corr * Ω_var'
+
+r, q = size(B)
+nₛ = 4r + q
+Tval = eltype(A)
+
+# Get controls 
+@unpack u = model_elements
+smoother_res, logV, alarm = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options; smooth=true)
+@unpack x_smoothed, dε_smoothed = smoother_res
+
+# Y = x_smoothed[vcat(collect(1:8), collect(33:57)), :]; #
+Y = vcat(x_smoothed[collect(1:8), :], u);
+p = 1;
+y = Y';
+(T, K) = size(y);
+X = y;
+y = transpose(y);
+Y = y[:, p+1:T];
+X = lagmatrix(X, p)';
+β = (Y * X') / (X * X');
+ϵ = Y - β * X;
+Σ_var = ϵ * ϵ' / (T - p * K - 1);
+
+# --------- constant matrices ------------------------------------
+AI = Matrix{Tval}(I, r, r);
+
+Φ = zeros(Tval, nₛ, nₛ);
+@views begin
+    Φ[1:r, 1:r] .= A
+    Φ[1:r, 4r+1:4r+q] .= B
+    Φ[r+1:2r, 1:r] .= AI
+    Φ[2r+1:3r, r+1:2r] .= AI
+    Φ[3r+1:4r, 2r+1:3r] .= AI
+    Φ[4r+1:end, 1:r] .= C
+    Φ[4r+1:end, 4r+1:end] .= D
+end
+
+ids_sub = vcat(1:r, 4r+1:4r+q);  # indices of nonzero shock rows
+Φ_sub = Φ[ids_sub, ids_sub];  # truncate zero rows/cols if q < full q
+
+tbl = fevd_dist_vs_agg(model_elements, model_options, obs_data, Φ_sub, Ω; r, q, horizon=20, factor_names=nothing)
+
+# LaTeX export
+latex_str = pretty_table(tbl, backend=Val(:latex), tf=tf_latex_default)
+
+# Write to a .tex file
+open("fevd_table.tex", "w") do io
+    write(io, latex_str)
+end
+
+function VAR_fit(y::AbstractArray, p::Int64)
+    (T, K) = size(y)
+    X = y
+    y = transpose(y)
+    Y = y[:, p+1:T]
+    X = lagmatrix(X, p)'
+    β = (Y * X') / (X * X')
+    ϵ = Y - β * X
+    Σ = ϵ * ϵ' / (T - p * K - 1)
+    return diag(Σ)
+end

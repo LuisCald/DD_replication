@@ -17,8 +17,8 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
 
     # First run tenative optimization
     BBO(par) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
-    # par_final = run_black_box_opt(BBO, param_vector, param_sizes, priors, measures)
-    par_final = param_vector
+    par_final = run_black_box_opt(BBO, param_vector, param_sizes, priors, measures)
+
     # A_new,B_new,Ω_new,Δ_new,G_new, likeli_vec, Δ_log = run_EM_algorithm(param_vector, param_sizes, meas_ind, Σ_ids, model_elements, model_options)
     # @unpack G = model_elements
     # old_G = deepcopy(G)
@@ -63,14 +63,15 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     to_keep = minimum([500, last_25p])
     DIME_chains = DIME_chains[end-to_keep+1:end, :, :] #     chains = Array{Float64,3}(undef, niter, nchain, ndim)
 
-    # Store paramter vector
-    par_final = find_mode(DIME_chains, lprobs)
-    # par_final = mean(DIME_chains[end, :, :][:, :], dims=1) # for 'additional factors', its not 3 dimensions ... only kept last iteration  which is fine
-    store_optim_estimate(par_final, label, m_label, data_cutoffs, tag)
-
     # Save the chains, the log probabilities, and the proposal distribution
     init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
     jldsave(init_path * "/posterior_draws" * "/" * m_label * "_$tag.jld2"; d_chains=DIME_chains, lprobs=lprobs, propdist=propdist)
+
+    # Store paramter vector
+    par_final = find_mode(DIME_chains, lprobs)
+    store_optim_estimate(par_final, label, m_label, data_cutoffs, tag)
+
+    # par_final = mean(DIME_chains[end, :, :][:, :], dims=1) # for 'additional factors', its not 3 dimensions ... only kept last iteration  which is fine
 
     # Generate plot of chains 
     log_LProbs = -1 .* log.(-1 .* lprobs)
@@ -79,9 +80,8 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     Plots.plot!(maximum(log_LProbs) * ones(size(log_LProbs, 1)), color="blue3", lw=1)
     Plots.savefig(init_path * "/7_Results/" * m_label * "$tag" * "/from_mcmc/bayesian_convergence/log_probs.pdf")
 
-
     # MDD 
-    # laplace_approximation(tag, model_elements, m_label, param_sizes, priors, meas_ind, Σ_ids, model_options)
+    run_mdd(tag, model_elements, m_label, param_sizes, priors, meas_ind, Σ_ids, model_options)
 
     return par_final
 end

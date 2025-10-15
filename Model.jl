@@ -161,6 +161,26 @@ function find_observed_objects!(estimator::KernelEstimator, Σ_ids, MV, cop_id, 
     end
 end
 
+function u_to_Lcorr(u::AbstractVector, n::Int)
+    expected = n * (n - 1) ÷ 2
+    @assert length(u) == expected "length(u) must be n*(n-1)/2 = $expected"
+
+    ζ = tanh.(u)  # map to (-1,1)
+    L = Matrix{Float64}(I, n, n)
+    k = 1
+    for i in 2:n
+        c = 1.0
+        for j in 1:(i-1)
+            z = ζ[k]
+            @inbounds L[i, j] = z * c
+            c *= sqrt(1 - z * z)
+            k += 1
+        end
+        @inbounds L[i, i] = c                # positive diag; ensures diag(R)=1
+    end
+    return Cholesky(L, 'L', 0)               # R = Matrix(F) gives the correlation matrix
+end
+
 
 function define_parameter_space(model_elements, model_options, prior_objects)
     """Reshapes the parameter vector into 3 matrices and generates the prior, P. Then retains parameters we wish to estimate."""
@@ -174,8 +194,10 @@ function define_parameter_space(model_elements, model_options, prior_objects)
     B = param_vector[2]
     C = param_vector[3]
     D = param_vector[4] # already a vector
-    Ω = diag(param_vector[5])
-    Σ = diag(param_vector[6])
+    #Ω = diag(param_vector[5])
+    Ω_var = param_vector[5] # a vector
+    Ω_corr_vec = param_vector[6] # vector of non-diagonal elements of actual Ω_corr
+    Σ = diag(param_vector[7])
 
     # Set elements in Σ to NaN if the measure is never observed 
     Σ_ids = Float64.(collect(1:length(Σ)))
@@ -192,14 +214,16 @@ function define_parameter_space(model_elements, model_options, prior_objects)
     short_Σ = Σ[cond]
 
     new_param_sizes = Vector(undef, length(param_vector))
-    for (m, mat) in enumerate([A, B, C, D, Ω, short_Σ])
+    for (m, mat) in enumerate([A, B, C, D, Ω_var, Ω_corr_vec, short_Σ])
         new_param_sizes[m] = size(mat)
     end
 
     # Remove elements from the vector of priors that we don't want to estimate
-    priors = [priors[1], priors[2], priors[3], priors[3 .+ cond]...]
+    # priors = [priors[1], priors[2], priors[3], priors[3 .+ cond]...]
+    priors = [priors[1], priors[2], priors[3], priors[4], priors[4 .+ cond]...]
 
-    return [A[:]; B[:]; C[:]; D[:]; Ω[:]; short_Σ[:]], new_param_sizes, Σ_ids, priors # [lb, ub]
+    # return [A[:]; B[:]; C[:]; D[:]; Ω[:]; short_Σ[:]], new_param_sizes, Σ_ids, priors # [lb, ub]
+    return [A[:]; B[:]; C[:]; D[:]; Ω_var; Ω_corr_vec; short_Σ[:]], new_param_sizes, Σ_ids, priors # [lb, ub]
 end
 
 
@@ -260,35 +284,107 @@ end
 #     return A, B, Hermitian(Ω), Hermitian(Σ)  # they need to be positive semi-def. 
 # end
 
+function vec_to_lower(v::AbstractVector, n::Int)
+    L = zeros(n, n)
+    k = 1
+    for j in 1:n
+        for i in (j+1):n   # rows below the diagonal
+            L[i, j] = v[k]
+            k += 1
+        end
+    end
+    for i in 1:n
+        L[i, i] = 1.0
+    end
+    return L
+end
+
+# function lower_offdiag(L::AbstractMatrix)
+#     n = size(L, 1)
+#     L_vec = zeros(n * (n - 1) ÷ 2)
+
+#     k = 1
+#     for j in 1:n
+#         for i in (j+1):n   # rows below the diagonal
+#             L_vec[k] = L[i, j]
+#             k += 1
+#         end
+#     end
+#     return L_vec
+# end
+
+function lower_offdiag(L::AbstractMatrix)
+    n = size(L, 1)
+    v = Vector{eltype(L)}(undef, n * (n - 1) ÷ 2)
+    k = 1
+    for j in 1:n-1, i in (j+1):n
+        @inbounds v[k] = L[i, j]
+        k += 1
+    end
+    return v
+end
+
+function lower_to_vec(L::AbstractMatrix)
+    n = size(L, 1)
+    L_vec = zeros(n * (n + 1) ÷ 2)
+
+    k = 1
+    for j in 1:n
+        for i in j:n   # rows below the diagonal
+            L_vec[k] = L[i, j]
+            k += 1
+        end
+    end
+    return L_vec
+end
+
+
+
 function matrisize(param_vector, param_sizes)
     # For gregors implementation, it requires an nx1 matrix vs. a vec
     param_vector = reshape(param_vector, length(param_vector))
     # n_aggs = length(param_sizes[3])  # number of aggregates
 
-    A = zeros(eltype(param_vector), param_sizes[1][1], param_sizes[1][1])
-    B = zeros(eltype(param_vector), param_sizes[2][1], param_sizes[2][2])
-    C = zeros(eltype(param_vector), param_sizes[3][1], param_sizes[3][2])
-    D = zeros(eltype(param_vector), param_sizes[4][1], param_sizes[4][1])
-    Ω = zeros(eltype(param_vector), param_sizes[5][1], param_sizes[5][1])
-    Σ = zeros(eltype(param_vector), param_sizes[6][1], param_sizes[6][1])
+    A = zeros(param_sizes[1][1], param_sizes[1][1])
+    B = zeros(param_sizes[2][1], param_sizes[2][2])
+    C = zeros(param_sizes[3][1], param_sizes[3][2])
+    D = zeros(param_sizes[4][1], param_sizes[4][1])
+    # Ω = zeros(eltype(param_vector), param_sizes[5][1], param_sizes[5][1])
+    Ω_var = zeros(param_sizes[5][1], param_sizes[5][1])
+    # Ω_corr = zeros(param_sizes[5][1], param_sizes[5][1])
+    Σ = zeros(param_sizes[7][1], param_sizes[7][1])
 
     l_A = length(A)
     l_B = length(B)
+    l_AB = l_A + l_B
     l_C = length(C)
+    l_D = param_sizes[4][1]
+    l_ABC = l_AB + l_C
+    l_ABCD = l_ABC + l_D
+    l_Ω_var = param_sizes[5][1]
+    l_Ω_corr = param_sizes[6][1]  # number of free elements in lower triangular matrix
+    l_Ω = l_Ω_var + l_Ω_corr
 
     # Change parameter space based on :case
     A .= reshape(view(param_vector, 1:l_A), param_sizes[1])
-    B .= reshape(view(param_vector, 1+l_A:l_A+l_B), param_sizes[2])
-    C .= reshape(view(param_vector, 1+l_A+l_B:l_A+l_B+l_C), param_sizes[3])
-    D .= diagm(view(param_vector, 1+l_A+l_B+l_C:l_A+l_B+l_C+param_sizes[4][1]))
-    Ω .= diagm(view(param_vector, 1+l_A+l_B+l_C+param_sizes[4][1]+1:1+l_A+l_B+l_C+param_sizes[4][1]+param_sizes[5][1]))
+    B .= reshape(view(param_vector, 1+l_A:l_AB), param_sizes[2])
+    C .= reshape(view(param_vector, 1+l_AB:l_ABC), param_sizes[3])
+    D .= diagm(view(param_vector, 1+l_ABC:l_ABCD))
+    # Ω .= diagm(view(param_vector, 1+l_ABC+param_sizes[4][1]+1:1+l_ABC+param_sizes[4][1]+param_sizes[5][1]))
+    Ω_var .= diagm(reshape(view(param_vector, 1+l_ABCD:l_ABCD+l_Ω_var), l_Ω_var))
+    Ω_corr = u_to_Lcorr(view(param_vector, 1+l_ABCD+l_Ω_var:l_ABCD+l_Ω_var+l_Ω_corr), param_sizes[5][1]) # maps also "u" to (-1,1)
+
+    # Ω .= Ω_var * Ω_corr * Ω_var
 
     # Creating Σ, adding zeros for aggregates (perfectly measured)
     # Σ_vec = vcat(view(param_vector, length(A)+length(B)+param_sizes[3][1]+param_sizes[4][1]+1:length(param_vector)), zeros(n_aggs))
-    Σ .= diagm(view(param_vector, l_A+l_B+l_C+param_sizes[4][1]+param_sizes[5][1]+1:length(param_vector)))
+    Σ .= diagm(view(param_vector, l_ABCD+l_Ω+1:length(param_vector)))
 
-    return A, B, C, D, Hermitian(Ω), Hermitian(Σ)  # they need to be positive semi-def. 
+    # return A, B, C, D, Hermitian(Ω), Hermitian(Σ)  # they need to be positive semi-def. 
+    return A, B, C, D, Ω_var, Ω_corr, Hermitian(Σ)  # they need to be positive semi-def. 
 end
+
+
 
 function variance_check!(Ω, Σ)
     """For now, this works in the diagonal case. Essentially checking that the params are indeed positive."""
@@ -316,10 +412,18 @@ function likeli(model_elements, param_vector, param_sizes, priors, meas_ind, Σ_
     @unpack number_of_dfs = model_options
     @unpack y, G, u, agg_count = model_elements
 
-    A, B, C, D, Ω, Σ = matrisize(param_vector, param_sizes)
+    # A, B, C, D, Ω, Σ = matrisize(param_vector, param_sizes)
+    A, B, C, D, Ω_var, Ω_corr, Σ = matrisize(param_vector, param_sizes)
+
 
     # Reparametization
-    log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Matrix(Ω), Matrix(Σ)], priors, param_sizes)
+    # log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Matrix(Ω), Matrix(Σ)], priors, param_sizes)
+    log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Ω_var, Ω_corr, Matrix(Σ)], priors, param_sizes)
+    Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)  # softplus transformation
+    mat_Ω_corr = Matrix(Ω_corr)
+
+    @assert all(isapprox(diag(mat_Ω_corr), ones(size(mat_Ω_corr, 1)))) "Diagonal of Ω_corr must be 1"
+    Ω = Ω_var * mat_Ω_corr * Ω_var'  # reconstructing Ω
 
     if alarm
         # println("not in support")
@@ -336,7 +440,6 @@ function likeli(model_elements, param_vector, param_sizes, priors, meas_ind, Σ_
     # Transform parameters related to Σ
     cond = Σ .> 10
     Σ[.!cond] .= log.(exp.(Σ[.!cond]) .+ 1) # Basically, for large numbers, it does not matter if we use log(exp(x) + 1) or log(x + 1)
-    Ω[diagind(Ω)] = log.(exp.(Ω[diagind(Ω)]) .+ 1)  # softplus transformation
 
     # Create the separate Ω_f, Ω_y
     Ω_f = Ω[1:size(A, 1), 1:size(A, 1)]
@@ -345,98 +448,90 @@ function likeli(model_elements, param_vector, param_sizes, priors, meas_ind, Σ_
     # Filter-smoother estimates
     if smooth
         # Generate likelihood of data and smoother output 
-        smoother_output, log_D, alarm = recurse_kalman_filter(A, B, C, D, Ω_f, Ω_y, Σ, G, y, smooth)
+        smoother_output, log_D, alarm = recurse_kalman_filter_smoother(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
         tot_log_like = log_P + log_D         # Total likelihood 
         return smoother_output, tot_log_like, alarm
 
     else
-        log_D, alarm = recurse_kalman_filter(A, B, C, D, Ω_f, Ω_y, Σ, G, y, smooth)
-        # log_D, alarm         = recurse_kalman_filter(A,B,Ω,VΣ̂V,Ĝ,ŷ,u,smooth)
+        local log_D, alarm
+        try
+            log_D, alarm = recurse_kalman_filter_forward(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
+        catch e
+            log_D = -1.e12
+            alarm = true
+            # log_D, alarm         = recurse_kalman_filter(A,B,Ω,VΣ̂V,Ĝ,ŷ,u,smooth)
+        end
 
         tot_log_like = log_P + log_D         # Total likelihood 
-
         return tot_log_like, alarm
     end
 end
 
 
-function recurse_kalman_filter(A, B, C, D, Ω_f, Ω_y, Σ, G, y, smooth)
+function recurse_kalman_filter_smoother(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
     """Performs kalman filter recursively, performing a filtering step and updating step thereafter.
     Assumption is: measurements are uncorrelated.
 
     In terms of timing, everything has been checked so that measurements and aggregates 
     are aligned and that the first estimate is tmin[]
     """
-    # Types for auto-differentiation
-    r, q = size(B) # number of factors and controls
-    big_zero = zeros(eltype(A), size(A))
-    big_zero_b = zeros(eltype(B), size(B))
-    AI = Matrix{eltype(A)}(I, size(A, 1), size(A, 1))  # Identity matrix of the same type as A
-
-
-    L = [A big_zero big_zero big_zero B;
-        AI big_zero big_zero big_zero big_zero_b;
-        big_zero AI big_zero big_zero big_zero_b;
-        big_zero big_zero AI big_zero big_zero_b;
-        C big_zero_b' big_zero_b' big_zero_b' D]               # (4r+q) × (4r+q)
-
-    big_Ω = cat([Ω_f, big_zero, big_zero, big_zero, Ω_y]..., dims=(1, 2))
-
-    nₛ = size(big_Ω, 1)  # number of states
-
-    # Data + Parameters 
     T = size(y, 2)
-    q = size(D, 1)  # number of controls
-    x̂ = zeros(eltype(A), nₛ)
+    r, q = size(B)
+    nₛ = 4r + q
+    Tval = eltype(A)
 
-    # P_F  = gen_spd_in_lyapd(A, Ω) 
-    # P_F  = psd_lyapd(A, Ω)
-    # a    = zeros(eltype(A), n) 
-    # P_F  = diagm(a)  #
-    # P_F = lyapd(A, Ω)
-    # P_F = lyapd(A, B * B' + Ω) # Assumes covariances are zero or small, cov(u; dims=2) = 1
-    # P_F = lyapd(A, B * B' + A * C_FY * B' + B * C_FY' * A' + Ω)
-    # P_F = lyapd(L, big_Ω)                    # solves  P = L P L' + Q
+    # --------- constant matrices ------------------------------------
+    AI = Matrix{Tval}(I, r, r)
 
-    ixF = 1:r
-    # ixF1 = r+1:2r
-    # ixF2 = 2r+1:3r
-    # ixF3 = 3r+1:4r
-    ixU = 4r+1:4r+q
+    L = zeros(Tval, nₛ, nₛ)
+    @views begin
+        L[1:r, 1:r] .= A
+        L[1:r, 4r+1:4r+q] .= B
+        L[r+1:2r, 1:r] .= AI
+        L[2r+1:3r, r+1:2r] .= AI
+        L[3r+1:4r, 2r+1:3r] .= AI
+        L[4r+1:end, 1:r] .= C
+        L[4r+1:end, 4r+1:end] .= D
+    end
+    Lᵀ = transpose(L)                       # (B)
 
-    # Solve for core
+    bigΩ = zeros(Tval, nₛ, nₛ)
+    @views begin
+        bigΩ[1:r, 1:r] .= Ω_f
+        bigΩ[4r+1:end, 4r+1:end] .= Ω_y
+    end
+
+    # --------- initial prior ----------------------------------------
+    ixF, ixU = 1:r, 4r+1:4r+q
     Lcore = [A B; C D]
-    Qcore = zeros(eltype(A), r + q, r + q)
-    Qcore[1:r, 1:r] = Ω_f
-    Qcore[r+1:end, r+1:end] = Ω_y
+    Qcore = zeros(Tval, r + q, r + q)
+    Qcore[1:r, 1:r] .= Ω_f
+    Qcore[r+1:end, r+1:end] .= Ω_y
     Pcore = lyapd(Lcore, Qcore)
 
-    # Build big P0
-    P_F = zeros(eltype(A), 4r + q, 4r + q)
-
-    # current F_t and u_t blocks
-    P_F[ixF, ixF] = Pcore[1:r, 1:r]
-    P_F[ixU, ixU] = Pcore[r+1:end, r+1:end]
-    P_F[ixF, ixU] = Pcore[1:r, r+1:end]
-    P_F[ixU, ixF] = Pcore[r+1:end, 1:r]
-
-    P_F[diagind(P_F)[r+1:4r]] .= 1e6 # value doesnt matter
+    P_F = zeros(Tval, nₛ, nₛ)
+    P_F[ixF, ixF] .= Pcore[1:r, 1:r]
+    P_F[ixU, ixU] .= Pcore[r+1:end, r+1:end]
+    P_F[ixF, ixU] .= Pcore[1:r, r+1:end]
+    P_F[ixU, ixF] .= Pcore[r+1:end, 1:r]
+    P_F[diagind(P_F)[r+1:4r]] .= 1e6
 
     # Filtered containers  
-    x_filtered = zeros(eltype(A), nₛ, T)
-    sigma_filtered = [zeros(eltype(A), nₛ, nₛ) for _ in 1:T]
+    x_filtered = zeros(Tval, nₛ, T)
+    sigma_filtered = [zeros(Tval, nₛ, nₛ) for _ in 1:T]
 
     # Updated containers 
-    x_updated = zeros(eltype(A), nₛ, T)
-    sigma_updated = [zeros(eltype(A), nₛ, nₛ) for _ in 1:T]
+    x_updated = zeros(Tval, nₛ, T)
+    sigma_updated = [zeros(Tval, nₛ, nₛ) for _ in 1:T]
 
     # Containers for factors and controls
-    x_filtered_factors = zeros(eltype(A), nₛ)
+    x̂ = zeros(Tval, nₛ)
+    x_filtered_factors = zeros(Tval, nₛ)
     # x_filtered_controls = zeros(eltype(A), v)
 
     # Containers for sigma
-    sigma_filtered_r = Matrix{eltype(A)}(undef, nₛ, nₛ)
-    sigma_filtered_l = Matrix{eltype(A)}(undef, nₛ, nₛ)
+    sigma_filtered_r = Matrix{Tval}(undef, nₛ, nₛ)
+    sigma_filtered_l = Matrix{Tval}(undef, nₛ, nₛ)
 
     # Model Likelihood 
     logL = 0.0
@@ -444,18 +539,15 @@ function recurse_kalman_filter(A, B, C, D, Ω_f, Ω_y, Σ, G, y, smooth)
     # quarterly at the moment 
     for t = 1:T
         # Filtering equations (but better said: prediction equations): uses prior only and C = controls, if any 
-        # x_f        = A * x̂ + B * u[:, t]  
         mul!(x_filtered_factors, L, x̂)
-        # mul!(x_filtered_controls, B, u[:, t])
         x_filtered[:, t] .= x_filtered_factors # .+ x_filtered_controls
 
 
-        mul!(sigma_filtered_r, P_F, L')
+        mul!(sigma_filtered_r, P_F, Lᵀ)
         mul!(sigma_filtered_l, L, sigma_filtered_r)
-        sigma_filtered[t] .= sigma_filtered_l .+ big_Ω
+        sigma_filtered[t] .= sigma_filtered_l .+ bigΩ
 
         # Update step (also called the forward pass)   
-        # logL += @views kalman_update!(x_updated, sigma_updated, y[:, t], t, G[t], x_filtered[:, t], sigma_filtered[t], Σ)
         logL += @views kalman_update!(x_updated, sigma_updated, y[:, t], t, G[t], x_filtered[:, t], sigma_filtered[t], Σ)
 
         # Update priors 
@@ -470,15 +562,195 @@ function recurse_kalman_filter(A, B, C, D, Ω_f, Ω_y, Σ, G, y, smooth)
     end
 
     # Gibbs requires a likelihood over a multivariate dist.
-    local smoother_results
-    if smooth
-        smoother_results = run_smoother(L, x_filtered, sigma_filtered, x_updated, sigma_updated, T)
-        # smoother_results = perform_backward_pass_DK(A, B, D, Ω, Σ, G, y, u, x_filtered, sigma_filtered, x_updated, sigma_updated, T)
-        return smoother_results, logL, alarm
-    else
-        return logL, alarm
-    end
+    smoother_results = run_smoother(L, x_filtered, sigma_filtered, x_updated, sigma_updated, T)
+    return smoother_results, logL, alarm
 end
+
+
+struct KalmanWorkspace{T}
+    g::Vector{T}        # measurement row (n)
+    sig_r::Vector{T}        # P_F * g          (n)
+    # sig_l::Vector{T}        # g' * P_F        (n)
+    K::Vector{T}        # Kalman gain      (n)
+    # Kg::Matrix{T}        # K * g'           (n×n)
+    # id::Diagonal{T,Vector{T}}               # Identity (n×n)
+    # id_Kg::Matrix{T}        # I − K g'         (n×n)
+    # id_sig::Matrix{T}        # (I−Kg)P_F        (n×n)
+    # eta_buf::Vector{T}        # 1‑element buffer
+    # K_eta::Vector{T}        # K * eta         (n)
+end
+
+function KalmanWorkspace(n::Int, ::Type{T}=Float64) where {T}
+    KalmanWorkspace{T}(
+        zeros(T, n),
+        zeros(T, n),
+        # zeros(T, 1),
+        zeros(T, n),
+        # zeros(T, n, n),
+        # Diagonal{T}(ones(T, n)),
+        # zeros(T, n, n),
+        # zeros(T, n, n),
+        # zeros(T, 1),
+        # zeros(T, n)
+    )
+end
+
+# function recurse_kalman_filter_forward(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
+#     # Dimensions
+#     r, q = size(B)  # number of factors and controls
+#     AI = Matrix{eltype(A)}(I, size(A, 1), size(A, 1))  # Identity matrix
+
+#     # Build transition matrix L
+#     L = zeros(eltype(A), 4r + q, 4r + q)
+#     @views begin
+#         L[1:r, 1:r] .= A
+#         L[1:r, 4r+1:4r+q] .= B
+#         L[r+1:2r, 1:r] .= AI
+#         L[2r+1:3r, r+1:2r] .= AI
+#         L[3r+1:4r, 2r+1:3r] .= AI
+#         L[4r+1:end, 1:r] .= C
+#         L[4r+1:end, 4r+1:end] .= D
+#     end
+
+#     # Build covariance matrix big_Ω
+#     big_Ω = zeros(eltype(A), 4r + q, 4r + q)
+#     @views begin
+#         big_Ω[1:r, 1:r] .= Ω_f
+#         big_Ω[4r+1:end, 4r+1:end] .= Ω_y
+#     end
+
+#     nₛ = size(big_Ω, 1)  # full state size
+#     T = size(y, 2)       # number of time steps
+#     x̂ = zeros(eltype(A), nₛ)
+
+#     # Initial covariance P_F from Lyapunov solution
+#     ixF = 1:r
+#     ixU = 4r+1:4r+q
+
+#     Lcore = [A B; C D]
+#     Qcore = zeros(eltype(A), r + q, r + q)
+#     Qcore[1:r, 1:r] .= Ω_f
+#     Qcore[r+1:end, r+1:end] .= Ω_y
+#     Pcore = lyapd(Lcore, Qcore)
+
+#     P_F = zeros(eltype(A), 4r + q, 4r + q)
+#     P_F[ixF, ixF] .= Pcore[1:r, 1:r]
+#     P_F[ixU, ixU] .= Pcore[r+1:end, r+1:end]
+#     P_F[ixF, ixU] .= Pcore[1:r, r+1:end]
+#     P_F[ixU, ixF] .= Pcore[r+1:end, 1:r]
+#     P_F[diagind(P_F)[r+1:4r]] .= 1e6  # placeholder variance
+
+#     # Preallocate
+#     x_filtered_factors = zeros(eltype(A), nₛ)
+#     sigma_filtered_r = Matrix{eltype(A)}(undef, nₛ, nₛ)
+#     sigma_filtered_l = Matrix{eltype(A)}(undef, nₛ, nₛ)
+#     sigma_pred = zeros(eltype(A), nₛ, nₛ)
+#     # x_updated = zeros(eltype(A), nₛ, T)
+#     # sigma_updated = [zeros(eltype(A), nₛ, nₛ) for _ in 1:T]
+#     x_updated = zeros(eltype(A), nₛ)
+#     sigma_updated = zeros(eltype(A), nₛ, nₛ)
+#     logL = 0.0
+#     ws = KalmanWorkspace(nₛ, eltype(A))
+
+
+#     for t = 1:T
+#         mul!(x_filtered_factors, L, x̂)
+#         mul!(sigma_filtered_r, P_F, L')
+#         mul!(sigma_filtered_l, L, sigma_filtered_r)
+#         sigma_pred .= sigma_filtered_l .+ big_Ω
+
+#         logL += @views kalman_update_fast!(x_updated, sigma_updated, @views(y[:, t]), t, G[t], x_filtered_factors, sigma_pred, Σ, ws)
+
+#         # copyto!(P_F, sigma_updated[t])
+#         # copy!(x̂, x_updated[:, t])
+#         copy!(P_F, sigma_updated)
+#         copy!(x̂, x_updated)
+#     end
+
+#     alarm = logL <= -1e12
+#     return logL, alarm
+# end
+
+function recurse_kalman_filter_forward(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
+    T = size(y, 2)
+    r, q = size(B)
+    nₛ = 4r + q
+    Tval = eltype(A)
+
+    # --------- constant matrices ------------------------------------
+    AI = Matrix{Tval}(I, r, r)
+
+    L = zeros(Tval, nₛ, nₛ)
+    @views begin
+        L[1:r, 1:r] .= A
+        L[1:r, 4r+1:4r+q] .= B
+        L[r+1:2r, 1:r] .= AI
+        L[2r+1:3r, r+1:2r] .= AI
+        L[3r+1:4r, 2r+1:3r] .= AI
+        L[4r+1:end, 1:r] .= C
+        L[4r+1:end, 4r+1:end] .= D
+    end
+    Lᵀ = transpose(L)                       # (B)
+
+    bigΩ = zeros(Tval, nₛ, nₛ)
+    @views begin
+        bigΩ[1:r, 1:r] .= Ω_f
+        bigΩ[4r+1:end, 4r+1:end] .= Ω_y
+    end
+
+    # --------- initial prior ----------------------------------------
+    ixF, ixU = 1:r, 4r+1:4r+q
+    Lcore = [A B; C D]
+    Qcore = zeros(Tval, r + q, r + q)
+    Qcore[1:r, 1:r] .= Ω_f
+    Qcore[r+1:end, r+1:end] .= Ω_y
+    Pcore = lyapd(Lcore, Qcore)
+
+    P_F = zeros(Tval, nₛ, nₛ)
+    P_F[ixF, ixF] .= Pcore[1:r, 1:r]
+    P_F[ixU, ixU] .= Pcore[r+1:end, r+1:end]
+    P_F[ixF, ixU] .= Pcore[1:r, r+1:end]
+    P_F[ixU, ixF] .= Pcore[r+1:end, 1:r]
+    P_F[diagind(P_F)[r+1:4r]] .= 1e6
+
+    # --------- work buffers -----------------------------------------
+    x̂ = zeros(Tval, nₛ)
+    x_pred = similar(x̂)
+    σ_r = similar(P_F)
+    σ_pred = similar(P_F)           # will hold P_{t|t-1} in-place
+    x_tmp = similar(x̂)
+    σ_tmp = similar(P_F)
+    ws = KalmanWorkspace(nₛ, Tval)
+
+    # --------- main loop --------------------------------------------
+    logL = zero(Tval)
+
+    @inbounds for t = 1:T
+        mul!(x_pred, L, x̂)
+        mul!(σ_r, P_F, Lᵀ)
+        mul!(σ_pred, L, σ_r)           # σ_pred is P_{t|t-1}
+
+        BLAS.axpy!(1.0, bigΩ, σ_pred)    # σ_pred += bigΩ ; (E)
+
+        # ---- update (C): pass raw pointer to column t without view alloc
+        y_col = @view y[:, t]            # a single SubArray per step is OK
+        G_t = G[t]                     # assuming G is a Vector{Matrix}
+
+
+        logL += kalman_update_fast!(
+            x_tmp, σ_tmp, y_col, G_t,
+            x_pred, σ_pred, Σ, ws)
+
+        # ---- posterior becomes prior (D)
+        copy!(x̂, x_tmp)
+        copy!(P_F, σ_tmp)
+    end
+
+    alarm = logL <= -1e12
+    return logL, alarm
+end
+
+
 
 function save_estimates!(P_F, x̂, sigma_updated, x_updated)
     P_F .= sigma_updated[:, :, t]
@@ -511,52 +783,107 @@ end
 
 
 
-function apply_measurement_criteria(Σ, Σ_ids, model_options, agg_count)
-    """Takes the (grid * number_of_dfs) parameters and extends to fit the actual Σ, accounting for the immutable portions."""
+# function apply_measurement_criteria(Σ, Σ_ids, model_options, agg_count)
+#     """Takes the (grid * number_of_dfs) parameters and extends to fit the actual Σ, accounting for the immutable portions."""
 
-    @unpack pre_multiply, measurement_error, estimation_object, number_of_dfs, measures, estimator = model_options
+#     @unpack pre_multiply, measurement_error, estimation_object, number_of_dfs, measures, estimator = model_options
+#     @unpack grid_pcf, grid_cop = estimator
+
+#     dimension = length(measures)
+
+#     cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
+#     variances = []
+
+#     cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
+#     gp_cop = cop_part - imm_part
+
+#     x = 1 # Σ_ids are of length n_objs * number_of_dfs
+#     ii = 1 # diag(Σ) is of length number of objects observed across all dfs
+
+#     for _ in 1:number_of_dfs
+#         if isnan(Σ_ids[x])
+#             # Append NaNs to the variances, as many NaNs as there are coefficients for this respective copula
+#             variances = vcat(variances, repeat([NaN], gp_cop))
+#         else
+#             # Append the variance parameter assigned to this observed object 
+#             variances = vcat(variances, repeat([Σ[ii, ii]], gp_cop))
+#             ii += 1
+#         end
+#         x += 1
+
+#         # for each pcf ....
+#         for _ in 1:dimension
+#             if isnan(Σ_ids[x])
+#                 variances = vcat(variances, repeat([NaN], grid_pcf))
+#             else
+#                 variances = vcat(variances, repeat([Σ[ii, ii]], grid_pcf))
+#                 ii += 1
+#             end
+#             x += 1
+#         end
+#     end
+
+#     # Add variances for the aggregates
+#     agg_error = [Σ[j, j] for j in (ii):(ii+agg_count-1)]
+#     variances = vcat(variances, agg_error)
+
+#     return variances
+# end
+
+function apply_measurement_criteria(
+    Σ::AbstractMatrix, Σ_ids,
+    model_options, agg_count
+)
+    @unpack number_of_dfs, measures,
+    estimator = model_options
     @unpack grid_pcf, grid_cop = estimator
 
-    dimension = length(measures)
+    dim = length(measures)
+    cop_part, imm = retrieve_cop_and_imm_part(estimator, dim)
+    gp_cop = cop_part - imm           # free copula coeffs / obj
+    block_len = gp_cop + dim * grid_pcf  # coeffs per data frame
 
-    cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
-    variances = []
+    total_len = number_of_dfs * block_len + agg_count
+    v = Vector{eltype(Σ)}(undef, total_len)
 
-    cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
-    gp_cop = cop_part - imm_part
+    pos = 1               # write pointer in v
+    id_ptr = 1               # pointer in Σ_ids
+    Σptr = 1               # pointer on Σ diagonal
 
-    x = 1 # Σ_ids are of length n_objs * number_of_dfs
-    ii = 1 # diag(Σ) is of length number of objects observed across all dfs
+    diagΣ = diag(Σ)            # view of diagonal (no alloc)
 
-    for _ in 1:number_of_dfs
-        if isnan(Σ_ids[x])
-            # Append NaNs to the variances, as many NaNs as there are coefficients for this respective copula
-            variances = vcat(variances, repeat([NaN], gp_cop))
+    @inbounds for _df in 1:number_of_dfs
+        # ----- copula part -------------------------------------------
+        if isnan(Σ_ids[id_ptr])
+            v[pos:pos+gp_cop-1] .= NaN
         else
-            # Append the variance parameter assigned to this observed object 
-            variances = vcat(variances, repeat([Σ[ii, ii]], gp_cop))
-            ii += 1
+            val = diagΣ[Σptr]
+            v[pos:pos+gp_cop-1] .= val
+            Σptr += 1
         end
-        x += 1
+        pos += gp_cop
+        id_ptr += 1
 
-        # for each pcf ....
-        for _ in 1:dimension
-            if isnan(Σ_ids[x])
-                variances = vcat(variances, repeat([NaN], grid_pcf))
+        # ----- pcf part ----------------------------------------------
+        for _m in 1:dim
+            if isnan(Σ_ids[id_ptr])
+                v[pos:pos+grid_pcf-1] .= NaN
             else
-                variances = vcat(variances, repeat([Σ[ii, ii]], grid_pcf))
-                ii += 1
+                val = diagΣ[Σptr]
+                v[pos:pos+grid_pcf-1] .= val
+                Σptr += 1
             end
-            x += 1
+            pos += grid_pcf
+            id_ptr += 1
         end
     end
 
-    # Add variances for the aggregates
-    agg_error = [Σ[j, j] for j in (ii):(ii+agg_count-1)]
-    variances = vcat(variances, agg_error)
+    # ----- aggregates -------------------------------------------------
+    @views v[pos:end] .= diagΣ[Σptr:Σptr+agg_count-1]
 
-    return variances
+    return v
 end
+
 
 
 function run_smoother(L, x_filtered, sigma_filtered, x_updated, sigma_updated, T)
@@ -679,6 +1006,27 @@ function kalman_update_zeros!(x_updated, sigma_updated, measures, t, G, x̂_F, P
     return logC
 end
 
+
+function kalman_update_fast!(x_updated, sigma_updated, measures, G, x̂_F, P_F, diag_Σ, ws)
+    """Used when data is not transformed ie no G."""
+
+    measures_valid = (!isnan).(measures)
+
+    if !any(measures_valid)
+        logC = 0.0
+        x_updated .= x̂_F
+        sigma_updated .= P_F
+    end
+
+    G_u = view(G, measures_valid, :)
+    Σ_u = diag_Σ[measures_valid]
+    Y_u = measures[measures_valid]
+
+    logC = sequential_kalman_update_fast!(x_updated, sigma_updated, Y_u, G_u, x̂_F, P_F, Σ_u, ws)
+
+
+    return logC
+end
 
 function kalman_update!(x_updated, sigma_updated, measures, t, G, x̂_F, P_F, diag_Σ)
     """Used when data is not transformed ie no G."""
@@ -1193,7 +1541,99 @@ function sequential_kalman_update!(x_updated, sigma_updated, Y_u, t, G_u, x̂_F,
     x_updated[:, t] .= x
     sigma_updated[t] .= @. 0.5 * (sig + sig')
 
-    cholesky!(sigma_updated[t], NoPivot(); check=false)
+    # cholesky!(sigma_updated[t], NoPivot(); check=false)
+
+    return log_c
+end
+
+function sequential_kalman_update_fast!(x_updated, sigma_updated, Y_u, G_u, x̂_F, P_F, diag_Σ, ws)
+    """Updating the kalman filter one measurement at a time. Only possible when the measurement covariance matrix is diagonal."""
+    # Get each object
+    # diag_Σ = Σ[diagind(Σ)]  
+    # x = copy(x̂_F)
+    # sig = copy(P_F)
+    # valid_measures = size(G_u, 1)
+
+    log_c = 0.0
+    # n = length(x̂_F)
+    # P = eltype(x̂_F)[0.0]
+    # η = eltype(x̂_F)[0.0]
+
+    @inbounds for m in eachindex(Y_u)
+        # g ← m-th measurement row (viewed, not copied)
+        @views ws.g .= G_u[m, :]
+
+        # innovation covariance vector and scalar variance
+        mul!(ws.sig_r, P_F, ws.g)            # sig_r = P_F * g      (n×1)
+        σ_g = dot(ws.g, ws.sig_r)            # scalar g' P_F g
+        P = σ_g + diag_Σ[m]                # scalar variance
+        η = Y_u[m] - dot(ws.g, x̂_F)       # scalar innovation
+
+        try
+            log_c += -0.5 * (log(2π) + log(P) + (η * η) / P)
+        catch ee
+            # println("Error in log_c, $m, $t: ", ee)
+            log_c += 0
+        end
+
+        invP = 1 / P
+        @. ws.K = ws.sig_r * invP            # K = sig_r / P
+
+        # P_F ← P_F − K * sig_r'
+        BLAS.ger!(-1.0, ws.K, ws.sig_r, P_F)
+
+        # x̂_F ← x̂_F + K * η   (axpy!: x̂_F += η*K)
+        BLAS.axpy!(η, ws.K, x̂_F)
+    end
+
+    # # Pre-allocate 
+    # log_c = 0.0
+    # P = eltype(x̂_F)[0.0]
+    # eta = eltype(x̂_F)[0.0]
+
+    # # For each measurement ... 
+    # for i in 1:valid_measures
+    #     # Get the first row 
+    #     @views ws.g .= G_u[i, :]
+
+    #     mul!(ws.sig_r, P_F, ws.g)
+    #     mul!(ws.sig_l, ws.g', ws.sig_r)
+
+    #     P .= ws.sig_l .+ diag_Σ[i]
+    #     eta .= Y_u[i] .- ws.g' * x̂_F # forecast error
+
+    #     for (e, p) in zip(eta, P)
+    #         try
+    #             log_c += (log(2π).+log(p)+(e*e).*inv(p))[1] * -0.5  # white noise case. # this is the likelihood contribution of 1 time period, given factors and θ
+    #         catch ee
+    #             # println("Error in log_c, $i, $t: ", ee)
+    #             log_c += 0 #-1.e12
+    #         end
+    #     end
+    #     # end
+
+    #     if isnan(log_c)
+    #         log_c += -1.e12
+    #     end
+    #     mul!(ws.K, ws.sig_r, inv.(P))
+
+    #     # Store updates and continue 
+    #     # mul!(ws.Kg, ws.K, ws.g')
+    #     # ws.id_Kg .= (ws.id .- ws.Kg)
+    #     # mul!(ws.id_sig, ws.id_Kg, P_F)
+    #     # copy!(P_F, ws.id_sig)
+    #     BLAS.ger!(-1.0, ws.K, ws.sig_r, P_F)            # -1 * K * sig_r' + P_F
+
+    # mul!(ws.K_eta, ws.K, eta)
+    # x̂_F .+= ws.K_eta
+    # end
+
+    # Store last update 
+    x_updated .= x̂_F
+    # sigma_updated .= @. 0.5 * (P_F + P_F')
+    sigma_updated .= Symmetric(P_F)
+
+    # cholesky!(sigma_updated, NoPivot(); check=false)
 
     return log_c
 end

@@ -211,7 +211,6 @@ function n_factors(X, r_max; τ::Float64=0.5)
     return FR
 end
 
-using LinearAlgebra, Statistics
 
 function log_ml_glp(Y, X, ν0, Ψ0, νT, ΨT, ΩT, p)
     T, n = size(Y)

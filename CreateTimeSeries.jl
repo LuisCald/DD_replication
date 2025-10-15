@@ -125,7 +125,7 @@ end
 
 
 function generate_specific_plots(data_dict, ty, func_data, data_name, time_params, timeframe, model_options, type, select_series, gdp_series, posterior_bounds=false)
-    @unpack measures, case, number_of_dfs, estimator, equivalized, bottom_coded, compare_to_other_est, tag = model_options
+    @unpack measures, case, number_of_dfs, estimator, equivalized, bottom_coded, compare_to_other_est, tag, freq = model_options
     if typeof(estimator) <: SeriesEstimator
         @unpack integral_pcf_grid, integral_cop_grid = estimator
     else
@@ -156,7 +156,11 @@ function generate_specific_plots(data_dict, ty, func_data, data_name, time_param
     #     generate_copula_plots(d1, func_data, data_name, tmin, tmax, grid_choice_cop, type, measures, label, posterior_bounds)
     # end
 
-    within_stat_dict = generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_name, smin, smax, tmin, tmax, estimator, label, type, measures, time_params, select_series, gdp_series, posterior_bounds, compare_to_other_est, tag)
+    if data_name == "HANK"
+        within_stat_dict = generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_name, smin, smax, tmin, tmax, estimator, label, type, measures, time_params, select_series, gdp_series, posterior_bounds, compare_to_other_est, tag, freq)
+    else
+        within_stat_dict = generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_name, smin, smax, tmin, tmax, estimator, label, type, measures, time_params, select_series, gdp_series, posterior_bounds, compare_to_other_est, tag)
+    end
 
     return within_stat_dict
 end
@@ -248,13 +252,13 @@ function find_subset_frame(smin, smax, tmin, tmax)
     return base_jump.value, end_jump.value
 end
 
-function get_obs_meas(func_dict, data_name, measures)
+function get_obs_meas(func_dict, data_name, measures; top="top10")
     """ With slight abuse """
 
     # Find some random series and check if there are only NaNs
     obs_meas = []
     for m in measures
-        if all(isnan.(func_dict[data_name][m]["levels"]["common series"]["top10"])) == false
+        if all(isnan.(func_dict[data_name][m]["quantiles"]["common series"][top])) == false
             push!(obs_meas, m)
         end
     end
@@ -417,38 +421,45 @@ function get_estimates_for_comparison(data_name, ty, time_p, measures, estimator
         # Download cex_all estimates 
         local est_tags
         if plot_name == "CEX"
-            est_tags = ["every 4 years", "PP CEX every 4 years"] # CEX for 'every 4 years', CEX_all for 'additional factors'
+            est_tags = ["every 4 years"] # CEX for 'every 4 years', CEX_all for 'additional factors', "PP CEX every 4 years"
         elseif plot_name == "SCF"
             # #TODO: for some reason, each vector of tags cannot overlap ... so e.g., "additional factors", "less factors" cannot be used for "SCF" and "CEX" at the same time
             est_tags = [
                 "excluding recent 20 quarters",
                 "excluding housing cycle",
+                "excluding housing cycle wealth",
                 "excluding housing cycle short",
-                "PP CEX excluding housing cycle",
-                "PP CEX excluding housing cycle short",
-                "PP CEX excluding recent 20 quarters",
+                # "PP CEX excluding housing cycle",
+                # "PP CEX excluding housing cycle short",
+                # "PP CEX excluding recent 20 quarters",
                 "6 factors",
                 "7 factors",
                 "less DF and AF",
                 "less AF",
                 "more AF",
-                "Γ estimated",
-                "Γ all",
-                "Γ all 85",
-                "PP CEX",
-                "PP SCF",
-                "PP CEX SCF"
+                # "Γ estimated",
+                # "Γ all",
+                # "Γ all 85",
+                # "PP CEX",
+                # "PP SCF",
+                # "PP CEX SCF"
             ]
+        elseif plot_name == "HANK"
+            est_tags = ["HANK full"]
+        else
+            est_tags = [""]
         end
 
         data_tag = ty == "normal" ? "" : "_detrended"
 
         for tag in est_tags
             local estimates
-            if occursin("every 4 years", tag) && plot_name == "CEX"
+            # if occursin("every 4 years", tag) && plot_name == "CEX"
+            #     estimates = CSV.read(init_path * "/7_Results/$meas_folder " * tag * "/from_mcmc/data/CEX_functional_data" * data_tag * "_A non-diag_.csv", DataFrame)
+            # elseif !occursin("every 4 years", tag) && plot_name == "CEX"
+            #     estimates = CSV.read(init_path * "/7_Results/$meas_folder " * tag * "/from_mcmc/data/CEX_all_functional_data" * data_tag * "_A non-diag_.csv", DataFrame)
+            if plot_name == "CEX"
                 estimates = CSV.read(init_path * "/7_Results/$meas_folder " * tag * "/from_mcmc/data/CEX_functional_data" * data_tag * "_A non-diag_.csv", DataFrame)
-            elseif !occursin("every 4 years", tag) && plot_name == "CEX"
-                estimates = CSV.read(init_path * "/7_Results/$meas_folder " * tag * "/from_mcmc/data/CEX_all_functional_data" * data_tag * "_A non-diag_.csv", DataFrame)
             elseif tag == "" && plot_name == "SCF"
                 estimates = CSV.read(init_path * "/7_Results/$meas_folder" * tag * "/from_mcmc/data/$(plot_name)_functional_data" * data_tag * "_A non-diag_.csv", DataFrame)
             else
@@ -535,6 +546,8 @@ function select_color(source; ext=false)
         return a[8]
     elseif source == "SIPP3"
         return a[9]
+    elseif source == "HANK"
+        return a[10]
     end
 end
 
@@ -579,7 +592,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
     if data_name == "consensus"
         obs_meas = measures
     else
-        obs_meas = get_obs_meas(func_dict, data_name, measures)
+        obs_meas = get_obs_meas(func_dict, data_name, measures, top=top)
     end
 
     within_stat_dict = Dict()
@@ -689,11 +702,11 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                     lc=obj != "top" ? palette(:glasbey_bw_n256)[j] : :red,
                     xformatter=:latex,
                     yformatter=:latex,
-                    xtickfontsize=10,
-                    ytickfontsize=10,
+                    xtickfontsize=14,
+                    ytickfontsize=14,
                     legendfontsize=10,
                     guidefontsize=14,
-                    xticks=(s_axis[1:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:20:end])]),
+                    xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
                     legend=:best,
                     label=obj != "top" ? label_quantiles[:, j][1] : L"\textrm{Model}",
                     lw=obj == "top" ? 4 : 2, dpi=500, ls=obj == "top" ? :solid : line_styles[:, lsⱼ][1],
@@ -743,20 +756,22 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
             s_dts = dts[cond[1]:cond[end]]
 
             # Ordinary plots
+            intd = plot_name == "CEX" || occursin("SIPP", plot_name) ? 20 : 40
             Plots.plot(s_axis,
                 s_data,
                 ylabel=M == "Consum" ? L"\textrm{Consumption\, \, rel.\,  to\,\, average}" : L"\textrm{%$(M)\, \, rel.\,  to\,\, average}",
                 lc=:red, #select_color(plot_name),
                 xformatter=:latex,
                 yformatter=:latex,
-                xticks=(s_axis[1:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:20:end])]),
+                xticks=(s_axis[1:intd:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:intd:end])]),
                 legend=:best,
                 linewidth=4,
-                xtickfontsize=10,
-                ytickfontsize=10,
+                xtickfontsize=14,
+                ytickfontsize=14,
                 legendfontsize=10,
                 guidefontsize=14,
-                label=L"\textrm{Model}",
+                # label=L"\textrm{Model}",
+                label="",
                 dpi=500, ls=:solid,
             )
 
@@ -771,17 +786,39 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                 r_data = vec(sum(qu[dist[1], cond], dims=1)' ./ length(dist[1])) # estimates that correspond to these data points 
                 within_stat = floor(Int, (count(c_data[2] .<= r_data .<= c_data[3]) ./ length(r_data)) * 100)
 
-
-                Plots.scatter!(xaxis[cond],
-                    c_data[1],
-                    marker=markers[2],
-                    ms=5,
-                    markercolor=:black,
-                    la=0.5,
-                    lw=2, dpi=500,
-                    label=L"\textrm{Data}",
-                    yerror=(c_data[1] - c_data[2], c_data[3] - c_data[1]),
-                )
+                if plot_name == "CEX"
+                    Plots.plot!(xaxis[cond],
+                        c_data[2],
+                        fillrange=c_data[3],
+                        fillalpha=0.1,
+                        fillcolor=:red,
+                        la=0.0,
+                        lc=:white,
+                        lw=4, dpi=500,
+                        label="",
+                    )
+                    Plots.scatter!(xaxis[cond],
+                        c_data[1],
+                        marker=markers[2],
+                        ms=5,
+                        markercolor=:black,
+                        la=0.5,
+                        lw=2, dpi=500,
+                        label="",
+                    )
+                else
+                    Plots.scatter!(xaxis[cond],
+                        c_data[1],
+                        marker=markers[2],
+                        ms=5,
+                        markercolor=:black,
+                        la=0.5,
+                        lw=2, dpi=500,
+                        # label=L"\textrm{Data}",
+                        label="",
+                        yerror=(c_data[1] - c_data[2], c_data[3] - c_data[1]),
+                    )
+                end
 
                 Plots.plot!([], [], ls=:dash, lc=:black, la=0.0, label=L"\textrm{Within\, \,  bounds: %$(within_stat)\%}",)
             end
@@ -809,11 +846,11 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                 lc=:red, #select_color(plot_name),
                 xformatter=:latex,
                 yformatter=:latex,
-                xticks=(s_axis[1:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:20:end])]),
+                xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
                 legend=:best,
                 linewidth=4,
-                xtickfontsize=10,
-                ytickfontsize=10,
+                xtickfontsize=14,
+                ytickfontsize=14,
                 legendfontsize=10,
                 guidefontsize=14,
                 label=L"\textrm{Model}",
@@ -836,6 +873,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
 
                         # First, plot OUTSIDE estimates
                         Plots.plot()
+                        intd = plot_name == "CEX" || occursin("SIPP", plot_name) ? 20 : 40
                         for (lsⱼ, j) in enumerate(dist[1])
                             Plots.plot!(s_axis,
                                 s_data[j, :],
@@ -843,8 +881,12 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                 lc=obj != "top" ? palette(:glasbey_bw_n256)[j] : select_color(plot_name),
                                 xformatter=:latex,
                                 yformatter=:latex,
-                                xticks=(s_axis[1:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:20:end])]),
+                                xticks=(s_axis[1:intd:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:intd:end])]),
                                 legend=:best,
+                                xtickfontsize=14,
+                                ytickfontsize=14,
+                                legendfontsize=10,
+                                guidefontsize=14,
                                 label=label_quantiles[:, j][1],
                                 lw=4, dpi=500, ls=line_styles[:, lsⱼ][1],
                             )
@@ -882,12 +924,15 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                 local ρ, housing_ids, last20_ids
                                 if occursin("every 4 years", esttag)
                                     # Idea here is we want to get the last observation the same across both estimations -> move data point in starved model to the right 1
-                                    non_overlap_ids = [j for (i, j) in enumerate(cond_cex) if i % 4 != 2]
-                                    overlap_ids = [j for (i, j) in enumerate(cond_cex) if i % 4 == 2]
+                                    # non_overlap_ids = [j for (i, j) in enumerate(cond_cex) if i % 4 != 2]
+                                    # overlap_ids = [j for (i, j) in enumerate(cond_cex) if i % 4 == 2]
+                                    non_overlap_ids = [j for (i, j) in enumerate(cond_cex) if (i - 1) % 16 ≥ 4]
+                                    overlap_ids = [j for (i, j) in enumerate(cond_cex) if (i - 1) % 16 < 4]
+
                                     ρ = round(cor(qu_o[1][j, non_overlap_ids], qu_outside_est[esttag][j, non_overlap_ids]), digits=2) # correlate data with estimates 
                                 elseif occursin("excluding housing cycle", esttag)
                                     # s_dts           = dts[cond[1]:cond[end]]
-                                    housing_ids = findall(x -> x >= QuarterlyDate(2004, 4) && x <= QuarterlyDate(2009, 4), dts)
+                                    housing_ids = findall(x -> x >= QuarterlyDate(2004, 1) && x <= QuarterlyDate(2009, 4), dts)
                                     non_overlap_ids = [i for i in cond_cex if i ∈ housing_ids]
                                     overlap_ids = [i for i in cond_cex if i ∉ housing_ids]
                                     ρ = round(cor(qu_o[1][j, non_overlap_ids], qu_outside_est[esttag][j, non_overlap_ids]), digits=2) # correlate data with estimates 
@@ -968,8 +1013,10 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                 Plots.plot!(s_axis,
                                     cex_all_est,
                                     lc=:red,
-                                    label=L"\textrm{Baseline}",
+                                    # label=L"\textrm{Baseline}",
+                                    label="",
                                     lw=4, dpi=500, ls=:solid,
+                                    legend=false
                                 )
 
                                 Plots.plot!(s_axis,
@@ -980,13 +1027,14 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                     yformatter=:latex,
                                     lw=4,
                                     la=0.5,
-                                    xtickfontsize=10,
-                                    ytickfontsize=10,
+                                    xtickfontsize=14,
+                                    ytickfontsize=14,
                                     legendfontsize=10,
                                     guidefontsize=14,
-                                    xticks=(s_axis[1:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:20:end])]),
+                                    xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
                                     legend=:best, # BUG: with twinx(), legend=:outertopright widens the plot in a weird way
-                                    label=esttag == "7 factors" ? L"\textrm{7 \,\, Factors}" : esttag == "6 factors" ? L"\textrm{6 \,\, Factors}" : esttag == "less factors" ? L"\textrm{Less \,\, Factors}" : esttag == "higher order15" ? L"\textrm{Higher \,\, Order}" : esttag == "less AF" ? L"\textrm{Less \,\,Agg.\,\, Factors}" : esttag == "less DF and AF" ? L"\textrm{Compact\,\, Model}" : esttag == "Γ estimated" ? L"\textrm{Γ\,\, estimated}" : esttag == "Γ all" ? L"\textrm{Γ-10}" : esttag == "more AF" ? L"\textrm{More\,\,Agg.\,\,Factors}" : esttag == "Γ all 85" ? L"\textrm{Γ-12}" : esttag == "PP CEX" ? L"\textrm{\Gamma_{aug}\,\, CEX}" : esttag == "PP SCF" ? L"\textrm{\Gamma_{aug}\,\, SCF}" : esttag == "PP CEX SCF" ? L"\textrm{\Gamma_{aug}\,\, CEX-SCF}" : L"\textrm{Less \,\, Data}",
+                                    # label=esttag == "7 factors" ? L"\textrm{7 \,\, Factors}" : esttag == "6 factors" ? L"\textrm{6 \,\, Factors}" : esttag == "less factors" ? L"\textrm{Less \,\, Factors}" : esttag == "higher order15" ? L"\textrm{Higher \,\, Order}" : esttag == "less AF" ? L"\textrm{Less \,\,Agg.\,\, Factors}" : esttag == "less DF and AF" ? L"\textrm{Compact\,\, Model}" : esttag == "Γ estimated" ? L"\textrm{Γ\,\, estimated}" : esttag == "Γ all" ? L"\textrm{Γ-10}" : esttag == "more AF" ? L"\textrm{More\,\,Agg.\,\,Factors}" : esttag == "Γ all 85" ? L"\textrm{Γ-12}" : esttag == "PP CEX" ? L"\textrm{\Gamma_{aug}\,\, CEX}" : esttag == "PP SCF" ? L"\textrm{\Gamma_{aug}\,\, SCF}" : esttag == "PP CEX SCF" ? L"\textrm{\Gamma_{aug}\,\, CEX-SCF}" : L"\textrm{Less \,\, Data}",
+                                    label="",
                                     dpi=500, ls=:dot,
                                 )
 
@@ -1022,7 +1070,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                             ids_to_use = (ids_to_use .- cond[1]) .+ 1
                                             # ids_to_use = collect(ids_to_use[1]:ids_to_use[end]) # Since the other esttags are in a single interval. every 4 years is multiple intervals.
                                         elseif occursin("excluding housing cycle", esttag)  # this one I need to just stop at the end of the housing cycle
-                                            ids_to_use = findall(x -> x >= QuarterlyDate(2004, 4) && x <= QuarterlyDate(2009, 4), dts)
+                                            ids_to_use = findall(x -> x >= QuarterlyDate(2004, 1) && x <= QuarterlyDate(2009, 4), dts)
                                             ids_to_use = (ids_to_use .- cond[1]) .+ 1
                                         elseif occursin("excluding housing cycle short", esttag) # this one I need to just stop at the end of the housing cycle
                                             ids_to_use = findall(x -> x >= QuarterlyDate(2007, 4) && x <= QuarterlyDate(2011, 4), dts)
@@ -1063,25 +1111,60 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                     # )
 
                                     # First plot everything as is 
-                                    Plots.scatter!(xaxis[cond_cex],
-                                        c_data(cond_cex),
-                                        marker=:dot,
-                                        markercolor=:black,
-                                        markersize=5,
-                                        la=0.5,
-                                        lw=4, dpi=500,
-                                        label=g == 1 ? L"\textrm{Data}" : "",
-                                        yerror=(c_int_ub(cond_cex) - c_data(cond_cex), c_data(cond_cex) - c_int_lb(cond_cex)),
-                                    )
+                                    if plot_name == "CEX"
+                                        Plots.plot!(xaxis[cond_cex],
+                                            c_int_lb(cond_cex),
+                                            fillrange=c_int_ub(cond_cex),
+                                            la=0.0,
+                                            fillalpha=0.1,
+                                            fillcolor=:red,
+                                            dpi=500,
+                                            label=""
+                                        )
 
-                                    if non_overlap_ids != []
-                                        Plots.scatter!(xaxis[non_overlap_ids],
-                                            c_data(non_overlap_ids),
-                                            mc=:white, msc=:black, msw=3, #(5, :white, stroke(1, :black)),
+                                        Plots.scatter!(xaxis[cond_cex],
+                                            c_data(cond_cex),
+                                            marker=:dot,
+                                            markercolor=:black,
+                                            markersize=5,
+                                            dpi=500,
+                                            label=""
+                                            # label=g == 1 ? L"\textrm{Data}" : "",
+                                            # yerror=(c_int_ub(cond_cex) - c_data(cond_cex), c_data(cond_cex) - c_int_lb(cond_cex)),
+                                        )
+
+                                        if non_overlap_ids != []
+                                            Plots.scatter!(xaxis[non_overlap_ids],
+                                                c_data(non_overlap_ids),
+                                                mc=:white, msc=:black, msw=3, #(5, :white, stroke(1, :black)),
+                                                dpi=500,
+                                                label="",
+                                                # label=g == 1 ? L"\textrm{Missing\,\, data}" : "",
+                                            )
+                                        end
+                                    else
+                                        Plots.scatter!(xaxis[cond_cex],
+                                            c_data(cond_cex),
+                                            marker=:dot,
+                                            markercolor=:black,
+                                            markersize=5,
                                             la=0.5,
                                             lw=4, dpi=500,
-                                            label=g == 1 ? L"\textrm{Missing\,\, data}" : "",
+                                            label="",
+                                            # label=g == 1 ? L"\textrm{Data}" : "",
+                                            yerror=(c_int_ub(cond_cex) - c_data(cond_cex), c_data(cond_cex) - c_int_lb(cond_cex)),
                                         )
+
+                                        if non_overlap_ids != []
+                                            Plots.scatter!(xaxis[non_overlap_ids],
+                                                c_data(non_overlap_ids),
+                                                mc=:white, msc=:black, msw=3, #(5, :white, stroke(1, :black)),
+                                                la=0.5,
+                                                lw=4, dpi=500,
+                                                label="",
+                                                # label=g == 1 ? L"\textrm{Missing\,\, data}" : "",
+                                            )
+                                        end
                                     end
                                 end
 
@@ -1135,7 +1218,11 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                 lc=obj != "top" ? palette(:glasbey_bw_n256)[j] : select_color(plot_name),
                                 xformatter=:latex,
                                 yformatter=:latex,
-                                xticks=(s_axis[1:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:20:end])]),
+                                xtickfontsize=14,
+                                ytickfontsize=14,
+                                legendfontsize=10,
+                                guidefontsize=14,
+                                xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
                                 legend=:best,
                                 label=label_quantiles[:, j][1],
                                 lw=4, dpi=500, ls=line_styles[:, lsⱼ][1],
@@ -1251,11 +1338,11 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                     yformatter=:latex,
                                     lw=4,
                                     la=0.5,
-                                    xtickfontsize=10,
-                                    ytickfontsize=10,
+                                    xtickfontsize=14,
+                                    ytickfontsize=14,
                                     legendfontsize=10,
                                     guidefontsize=14,
-                                    xticks=(s_axis[1:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:20:end])]),
+                                    xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
                                     legend=:best,
                                     label=esttag == "7 factors" ? L"\textrm{7 \,\, Factors}" : esttag == "6 factors" ? L"\textrm{6 \,\, Factors}" : esttag == "less factors" ? L"\textrm{Less \,\, Factors}" : esttag == "higher order15" ? L"\textrm{Higher \,\, Order}" : esttag == "less AF" ? L"\textrm{Less \,\,Agg.\,\, Factors}" : esttag == "less DF and AF" ? L"\textrm{Compact\,\, Model}" : esttag == "Γ estimated" ? L"\textrm{Γ\,\, estimated}" : esttag == "Γ all" ? L"\textrm{Γ-10}" : esttag == "more AF" ? L"\textrm{More\,\,Agg.\,\,Factors}" : esttag == "Γ all 85" ? L"\textrm{Γ-12}" : esttag == "PP CEX" ? L"\textrm{\Gamma_{aug}\,\, CEX}" : esttag == "PP SCF" ? L"\textrm{\Gamma_{aug}\,\, SCF}" : esttag == "PP CEX SCF" ? L"\textrm{\Gamma_{aug}\,\, CEX-SCF}" : L"\textrm{Less \,\, Data}",
                                     dpi=500, ls=:dot,
@@ -1281,8 +1368,10 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                 local non_overlap_ids, overlap_ids
                                 if occursin("every 4 years", esttag)
                                     # Idea here is we want to get the last observation the same across both estimations -> move data point in starved model to the right 1
-                                    non_overlap_ids = [j for (i, j) in enumerate(cond_cex) if i % 4 != 2]
-                                    overlap_ids = [j for (i, j) in enumerate(cond_cex) if i % 4 == 2]
+                                    # non_overlap_ids = [j for (i, j) in enumerate(cond_cex) if i % 4 != 2]
+                                    # overlap_ids = [j for (i, j) in enumerate(cond_cex) if i % 4 == 2]
+                                    non_overlap_ids = [j for (i, j) in enumerate(cond_cex) if (i - 1) % 16 < 4]
+                                    overlap_ids = [j for (i, j) in enumerate(cond_cex) if (i - 1) % 16 ≥ 4]
                                 elseif occursin("excluding housing cycle", esttag)
                                     ids_in_question = findall(x -> x >= QuarterlyDate(2004, 1) && x <= QuarterlyDate(2009, 4), dts)
                                     non_overlap_ids = [i for i in cond_cex if i ∈ ids_in_question]
@@ -1324,7 +1413,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                         ids_to_use = (ids_to_use .- cond[1]) .+ 1
                                         # ids_to_use = collect(ids_to_use[1]:ids_to_use[end]) # Since the other esttags are in a single interval. every 4 years is multiple intervals.
                                     elseif occursin("excluding housing cycle", esttag) # this one I need to just stop at the end of the housing cycle
-                                        ids_to_use = findall(x -> x >= QuarterlyDate(2004, 4) && x <= QuarterlyDate(2009, 4), dts)
+                                        ids_to_use = findall(x -> x >= QuarterlyDate(2004, 1) && x <= QuarterlyDate(2009, 4), dts)
                                         ids_to_use = (ids_to_use .- cond[1]) .+ 1
                                     elseif occursin("excluding housing cycle short", esttag) # this one I need to just stop at the end of the housing cycle
                                         ids_to_use = findall(x -> x >= QuarterlyDate(2007, 4) && x <= QuarterlyDate(2011, 4), dts)
@@ -1526,14 +1615,21 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
     """
 
     @unpack measures, case, equivalized, bottom_coded, estimator, tag = model_options
-    @unpack grid_cop, grid_pcf = estimator
+    @unpack grid_cop, grid_pcf, integral_pcf_grid = estimator
     sort!(measures) # just in case 
 
     @unpack tmin, tmax = time_params  # m = model
     @unpack gdp_series = obs_data
     @unpack confidence_intervals, func_dict = func_data
 
-    obs_meas = data_name == "consensus" ? measures : get_obs_meas(func_dict, data_name, measures)
+    local bot, mid, top
+    if integral_pcf_grid == 10 || integral_pcf_grid == 100 || integral_pcf_grid == 20
+        bot, mid, top = "bottom50", "next40", "top10"
+    elseif integral_pcf_grid == 5
+        bot, mid, top = "bottom40", "next40", "top20"
+    end
+
+    obs_meas = data_name == "consensus" ? measures : get_obs_meas(func_dict, data_name, measures, top=top)
 
     if typeof(estimator) <: SeriesEstimator
         @unpack integral_pcf_grid, integral_cop_grid = estimator
@@ -1597,7 +1693,7 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
     elseif typeof(estimator) <: SeriesEstimator
         # Generate container to store the data of choice 
         new_data_pcf = [zeros(integral_pcf_grid, T) for _ in 1:D]
-        intervals = vcat([0.0], grid_points_pcf)
+        intervals = vcat([0.0] .+ 1e-6, grid_points_pcf)
 
         # We need to generate new data_pcf, which are the average quantiles over the intervals (e.g., deciles)
         for m in eachindex(new_data_pcf)
@@ -1672,7 +1768,13 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
 
     # Everything has been reconstructed now. Creating a new select_series object, which has the averages that correspond to the data estimates 
     # To do this, generate total levels and divide the number of households  
-    avg_series = generate_average_series(data_dict, gdp_series, measures)
+    local avg_series
+    if data_name == "HANK"
+        @unpack gdp_series = obs_data
+        avg_series = deepcopy(gdp_series)
+    else
+        avg_series = generate_average_series(data_dict, gdp_series, measures)
+    end
 
     if plot == true
         within_stat_dict = generate_specific_plots(data_dict, ty, func_data, data_name, time_params, user_t, model_options, type, avg_series, gdp_series)
@@ -1693,7 +1795,11 @@ function generate_average_series(data_dict, gdp_series, measures)
 
     for meas in measures
         # Generate the level 
-        avg_series[!, meas*"_per_hh"] = vec(sum(data_dict[meas]["levels"]["data"], dims=1)' ./ tot_hhs)
+        try
+            avg_series[!, meas*"_per_hh"] = vec(sum(data_dict[meas]["levels"]["data"], dims=1)' ./ tot_hhs)
+        catch e
+            @warn "Could not compute average series for $meas. Error: $e"
+        end
     end
 
     # select!(avg_series, Not(:date))
@@ -1790,7 +1896,7 @@ function generate_shares_levels(data_pcf, model_options, gdp_series)
     With the means of the deciles representative of the distribution, we can compute the shares and levels of the distribution.
     """
     # Each decile represents the mean of 10 percentiles so we need to multiply it by 10 to get the levels of each decile 
-    @unpack measures, case, estimator, equivalized, bottom_coded = model_options
+    @unpack measures, case, estimator, equivalized, bottom_coded, tag = model_options
     if typeof(estimator) <: SeriesEstimator
         @unpack integral_pcf_grid = estimator
     else
@@ -1804,7 +1910,12 @@ function generate_shares_levels(data_pcf, model_options, gdp_series)
     lvls = zeros(grid_choice * D, T)
 
     # Housing 
-    tot_hhs = gdp_series[!, "tot_hhs"]
+    local tot_hhs
+    try
+        tot_hhs = gdp_series[!, "tot_hhs"]
+    catch e
+        tot_hhs = ones(T) .* 5000 # if not available, assume 1 household
+    end
 
     # The grid granularity defines the percent we need    
     n_grups = tot_hhs ./ grid_choice
@@ -2015,7 +2126,7 @@ function get_implicate!(data_vector, q_dict, draw, data_name, type, obs_data, fu
     elseif typeof(estimator) <: SeriesEstimator
         # Generate container to store the data of choice 
         new_data_pcf = [zeros(integral_pcf_grid, T) for _ in 1:D]
-        intervals = vcat([0.0], grid_points_pcf)
+        intervals = vcat([0.0] .+ 1e-6, grid_points_pcf)
 
         # We need to generate new data_pcf, which are the average quantiles over the intervals (e.g., deciles)
         for m in eachindex(new_data_pcf)
@@ -2106,10 +2217,10 @@ function export_table_to_tex_with_strings(measures, type)
         "excluding recent 20 quarters",
         "excluding housing cycle short",
         "every 4 years",
-        "PP CEX excluding housing cycle",
-        "PP CEX excluding housing cycle short",
-        "PP CEX excluding recent 20 quarters",
-        "PP CEX every 4 years"
+        # "PP CEX excluding housing cycle",
+        # "PP CEX excluding housing cycle short",
+        # "PP CEX excluding recent 20 quarters",
+        # "PP CEX every 4 years"
     ]
 
     # Import tables 
@@ -2130,7 +2241,7 @@ function export_table_to_tex_with_strings(measures, type)
             if header ∉ collect(keys(cycle_dict[first_m]))
                 nothing
             else
-                header_label = header == "excluding housing cycle" ? "Excluding Housing Cycle" : header == "excluding recent 20 quarters" ? "Excluding Last 4 Years" : header == "excluding housing cycle short" ? "Excluding Housing Cycle \\#2" : header == "PP CEX excluding housing cycle" ? "CEX Factor excluding housing cycle" : header == "PP CEX excluding housing cycle short" ? "CEX Factor excluding housing cycle short" : header == "PP CEX excluding recent 20 quarters" ? "CEX Factor excluding recent 20 quarters" : header == "PP CEX every 4 years" ? "CEX Factor every 4 years" : "Every 4 Years"
+                header_label = header == "excluding housing cycle" ? "Excluding Housing Cycle" : header == "excluding recent 20 quarters" ? "Excluding Last 4 Years" : header == "excluding housing cycle short" ? "Excluding Housing Cycle \\#2" : header == "PP CEX excluding housing cycle" ? "CEX Factor excluding housing cycle" : header == "PP CEX excluding housing cycle short" ? "CEX Factor excluding housing cycle short" : header == "PP CEX excluding recent 20 quarters" ? "CEX Factor excluding recent 20 quarters" : header == "PP CEX every 4 years" ? "CEX Factor every 4 years" : header == "excluding housing cycle wealth" ? "Excluding Housing Cycle Wealth" : "Every 4 Years"
 
                 # Add header section
                 table *= """

@@ -35,8 +35,9 @@ function reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, mode
     dts = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
     xaxis = 1:tot_periods
     init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    n_factors = size(proj, 2)
 
-    for i in axes(x_smoothed, 1)
+    for i in 1:n_factors
         Plots.plot!(
             xaxis[5:end],
             x_smoothed[i, 5:end],
@@ -48,39 +49,6 @@ function reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, mode
             legend=:best) #, xticks=(collect(1:20:tot_periods), [L"%$(date)"[1:5] * "\$" for (_,date) in enumerate(gdp_series[1:20:end, :time])]))
     end
     Plots.savefig(init_path * "/7_Results/factor_analysis/distributional_factors$tag.pdf")
-    # TODO: undo this later
-    # condition = isnan.(means[1])
-    # means[1][condition] .= 0 #TODO: maybe take the mean from PSID?
-
-    # # ------------------------------------------------------------------
-    # # 0.  Convenient indices into the 32-dim vector
-    # # ------------------------------------------------------------------
-    # K = factor_count                  # 8
-    # idx0 = 1:K                           # F_t
-    # idx1 = K+1:2K                      # F_{t-1}
-    # idx2 = 2K+1:3K                     # F_{t-2}
-    # idx3 = 3K+1:4K                     # F_{t-3}
-
-    # F_curr = x_smoothed[idx0, :]
-    # F_lag1 = x_smoothed[idx1, :]
-    # F_lag2 = x_smoothed[idx2, :]
-    # F_lag3 = x_smoothed[idx3, :]
-
-    # # ------------------------------------------------------------------
-    # # 1.  Quarterly reconstructions  (SIPP, CEX, instantaneous wealth)
-    # # ------------------------------------------------------------------
-    # ΓF_quarter = proj * F_curr              # 1002 × T  (or 970 × T for copula)
-
-    # # ------------------------------------------------------------------
-    # # 2.  Annual (PSID / SCF) reconstructions  – ¼·avg of four quarters
-    # # ------------------------------------------------------------------
-    # F_ann = 0.25 .* (F_curr + F_lag1 + F_lag2 + F_lag3)
-    # ΓF_annual = proj * F_ann                # same dimension as ΓF_quarter
-
-    # # ------------------------------------------------------------------
-    # # 3.  Wealth stock rows need only F_curr
-    # # ------------------------------------------------------------------
-    # ΓW_quarter = proj_wealth * F_curr       # if wealth has its own Γ
 
     X = Vector{Matrix{Float64}}(undef, number_of_dfs)
     T = size(x_smoothed, 2)
@@ -90,7 +58,7 @@ function reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, mode
 
     # Split by object, multiply by stds, reform object 
     add_variance!(estimator, X, stds, measures)
-    add_mean!(X, means, data_names, blind_to) # completely filled matrices
+    add_mean!(X, means) # completely filled matrices
 
     # Generate two X's: one with the trend and one with average trend in
 
@@ -105,11 +73,6 @@ function reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, mode
     t = collect(1:tot_periods)
     for j in eachindex(X)
         for t in 1:tot_periods
-            # X[j][:, t] = X[j][:, t] .+ βs[:,1,j] .+ βs[:,2,j] .* t 
-            # X[j][:, t] = X[j][:, t] .+ βs[:,1,j] .+ βs[:,2,j] .* t .+ βs[:,3,j] .* (2 .* t.^2 ./ tot_periods) # trend[j][:, t] #
-            # X[j][:, t] = X[j][:, t] .+ trend[j][:, t] #
-            # X[j][:, t] = X[j][:, t] .+ new_trend[j] 
-
             # For copula, weights do not seem to be affected
             X_dict["normal"][j][:, t] .+= trend[j][:, t] #
             X_dict["average"][j][:, t] .+= new_trend[j] # By adding the nanmean, we can generate estimates for all periods ... to check is how similar are the copula estimates across both
@@ -151,8 +114,8 @@ function reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, mode
 
     for (k, v) in X̄̄
         X̄̄_new[k] = Dict()
-        X̄̄_new[k]["normal"] = undo_functional_treatment(estimator, v[1], measures, time_params)
-        X̄̄_new[k]["average"] = undo_functional_treatment(estimator, v[2], measures, time_params)
+        X̄̄_new[k]["normal"] = undo_functional_treatment(estimator, v[1], measures)
+        X̄̄_new[k]["average"] = undo_functional_treatment(estimator, v[2], measures)
     end
 
     # n_out_of_bounds  = data_diagnostics(copulas, measures)
@@ -187,7 +150,7 @@ function state_transition(x_t, w_t, u_t, A, B)
 end
 
 
-function add_mean!(X, means, data_names, blind_to)  # Add mean by dataset 
+function add_mean!(X, means)  # Add mean by dataset 
     for j in eachindex(X)
         # name = data_names[j]
         # l_X = length(X)
@@ -436,9 +399,8 @@ function univariate_idct(X, gridp, measures, time_params)
 end
 
 
-function undo_functional_treatment(estimator, X, measures, time_params)
+function undo_functional_treatment(estimator, X, measures)
     """Break the data into copula and percentile functions. Then take the Inverse DCT of each them, at each point in time."""
-    @unpack tmin, tmax = time_params
     @unpack grid_pcf, grid_cop = estimator
 
 
@@ -637,11 +599,12 @@ function perform_proof_of_concept_reconstruction(df, source, years, gdp_series, 
         proj, pcs, M, _ = perform_pca(pool, measures, :functional_data, tag)
 
         # dealing with observed data and reconstructed, # Split by object, multiply by stds, reform object 
-        X̃ = proj * pcs
-        ΓF_σ = add_variance(estimator, X̃, stds, measures)
-        X = ΓF_σ .+ means[1]
+        X̃ = [proj * pcs]
+        add_variance!(estimator, X̃, stds, measures)
+        add_mean!(X̃, means)
 
         # Add trend back to only fully observed data, since reconstruction only depends on the fully observed data
+        X = X̃[1]
         for (i, t) in enumerate(estimation_id_full)
             X[:, i] .= X[:, i] .+ trend[:, t] #.+ βs[:,1] .+ βs[:,2] .* t .+ βs[:,3] .* (2 .* t.^2 ./ tot_periods) # 
         end
@@ -680,7 +643,7 @@ function perform_proof_of_concept_reconstruction(df, source, years, gdp_series, 
                 end
 
                 grid_points_pcf = select_grid_points(grid_size_data_pcf)
-                intervals = vcat([0.0], grid_points_pcf)
+                intervals = vcat([0.0] .+ 1e-6, grid_points_pcf)
 
                 # split the pcfs by measure
                 split_pcfs = [dv[2][I, :] for I in Iterators.partition(axes(dv[2], 1), grid_pcf)]
@@ -732,7 +695,7 @@ function perform_proof_of_concept_reconstruction(df, source, years, gdp_series, 
         end
 
         # Generate proof of concept figures for percentile functions 
-        gen_proof_of_concept_figure(d_data_dict, r_data_dict, model_options, time_p, estimation_id, sort(collect(keys(time_dict_k))))
+        gen_proof_of_concept_figure(d_data_dict, r_data_dict, model_options, time_p, estimation_id, sort(collect(keys(time_dict_k))), source)
     else
         nothing
     end
@@ -906,12 +869,11 @@ function integrate_quantile_functions!(new_data_pcf, split_pcfs, grid_pcf, inter
 end
 
 
-function interval_time_correction(confidence_intervals, periods, time_p, k, cutoff_bounds, model_options)
+function interval_time_correction(confidence_intervals, periods, time_p, k, freq)
     """
      The goal here is to subset the confidence intervals to the dates of estimation. 
     """
 
-    @unpack freq = model_options
     @unpack tmin, tmax, tot_years, tot_periods, time_dict, freq_type = time_p
 
     start = 1
@@ -1122,7 +1084,7 @@ function move_data_to_dict(df, periods, gdp_series, model_options, time_p, data_
         T = size(d_data_vector[2], 2)
         new_data_pcf = [zeros(grid_size_data_pcf, T) for _ in 1:D]
         grid_points_pcf = select_grid_points(grid_size_data_pcf)
-        intervals = vcat([0.0], grid_points_pcf)
+        intervals = vcat([0.0] .+ 1e-6, grid_points_pcf)
 
         # split the pcfs by measure
         split_pcfs = [d_data_vector[2][I, :] for I in Iterators.partition(axes(d_data_vector[2], 1), grid_pcf)]
@@ -1243,7 +1205,7 @@ end
 
 
 
-function store_functional_data(files, dfs, confidence_intervals, gdp_series, model_options, time_p, cutoff_bounds)
+function store_functional_data(files, dfs, gdp_series, model_options, time_p)
     @unpack year_vec, time_dict = time_p
     func_dict = Dict()
     data_sources = sort(collect(keys(files)))
@@ -1253,13 +1215,20 @@ function store_functional_data(files, dfs, confidence_intervals, gdp_series, mod
         func_dict[data_sources[k]] = move_data_to_dict(df, year_vec[k], gdp_series, model_options, time_p, data_sources[k], k)
     end
 
+    return func_dict
+end
+
+function store_confidence_intervals(files, confidence_intervals, freq, time_p)
+    @unpack year_vec, time_dict = time_p
+    data_sources = sort(collect(keys(files)))
+
     # Stores the confidence intervals
     for j in collect(keys(confidence_intervals))
         k = findall(x -> x == j, data_sources)[1]
-        confidence_intervals[j] = interval_time_correction(confidence_intervals[j], year_vec[k], time_p, k, cutoff_bounds[k], model_options)
+        confidence_intervals[j] = interval_time_correction(confidence_intervals[j], year_vec[k], time_p, k, freq)
     end
 
-    return FunctionalData(func_dict, confidence_intervals, year_vec, data_sources)
+    return confidence_intervals
 end
 
 
@@ -1369,8 +1338,6 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
         end
     end
 
-    # Getting the number of households per group 'g_'
-    gdp_series[!, "g_households"] = gdp_series[!, "tot_hhs"] ./ grid_pcf
 
     # Sampling from the distribution object. For each draw, compute the confidence intervals for quantiles, levels and shares 
     dim = length(measures)
@@ -1408,8 +1375,8 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
     id_x = eachindex(int_points)
     integrals_pre = precompute_integrals(grid_cop - 1, int_points)
 
-    # Threads.@threads for (y, yr) in enumerate(u_years)
     # Threads.@threads 
+    # Threads.@threads for y in e÷achindex(u_years)
     for y in eachindex(u_years)
         yr = u_years[y]
         println("$y of $(length(u_years))")
@@ -1421,8 +1388,8 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
         for actual_period in time_dict[yr]
             # Import data for this period
             period_data = filter(row -> row[freq_type] == actual_period, year_data_dict[yr])
-            boot_indices = rand(1:nrow(period_data), nrow(period_data), draws)
-            hhs_g = filter(row -> row.date >= QuarterlyDate(yr, actual_period), gdp_series)[!, "g_households"][1]
+            b_size = nrow(period_data) # source == "HANK" ? 5000 :
+            boot_indices = rand(1:nrow(period_data), b_size, draws)
 
             # Bootstrap 
             for s in 1:draws  # when you bootstrap, it should be the length of the sample
@@ -1449,22 +1416,21 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
                         end
                     end
 
-                elseif occursin("SCF", source)
-                    if yr < 1983
-                        b_sample = period_data[boot_indices[:, s], :]
+                    # elseif occursin("SCF", source)
+                    # if yr < 1983
+                    # b_sample = period_data[boot_indices[:, s], :]
 
-                    else
-                        # Generalize to be more about the data consisting of several imputations
-                        b_sample = deepcopy(period_data)
-                        b_sample[!, "newid"] = [parse(Int, string(row[:id])[1:end-1]) for row in eachrow(b_sample)]
-                        rep_draw = select(filter(row -> !ismissing(row["wgtI95W95_imp1_$s"]), rep_w), ["id", "wgtI95W95_imp1_$s"])
-                        b_sample = leftjoin(b_sample, rep_draw, on=:newid => :id, indicator=:source) # fully non-parametric bootstrap
+                    # else
+                    #     # Generalize to be more about the data consisting of several imputations
+                    #     b_sample = deepcopy(period_data)
+                    #     b_sample[!, "newid"] = [parse(Int, string(row[:id])[1:end-1]) for row in eachrow(b_sample)]
+                    #     rep_draw = select(filter(row -> !ismissing(row["wgtI95W95_imp1_$s"]), rep_w), ["id", "wgtI95W95_imp1_$s"])
+                    #     b_sample = leftjoin(b_sample, rep_draw, on=:newid => :id, indicator=:source) # fully non-parametric bootstrap
 
-                        filter!(row -> row.impnum == 1, b_sample)
-                        select!(b_sample, Not([:weight, :source]))
-                        rename!(b_sample, Symbol("wgtI95W95_imp1_$s") => :weight)
-
-                    end
+                    #     # filter!(row -> row.impnum == 1, b_sample)
+                    #     select!(b_sample, Not([:weight, :source]))
+                    #     rename!(b_sample, Symbol("wgtI95W95_imp1_$s") => :weight)
+                    # end
                 else
                     b_sample = period_data[boot_indices[:, s], :]
                 end
@@ -1493,90 +1459,111 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
                             # coef_boot[pcf_rows[m], count, s]               .= NaN
 
                         else
+                            @unpack integral_pcf_grid = estimator
+                            grid_points_pcf = select_grid_points(integral_pcf_grid) # avoids boundary issues
+                            intervals = vcat([0.0] .+ 1e-6, grid_points_pcf)
                             push!(obs_measures, meas)
 
                             # Find multiplier s.t. average in FRED is equal to average in the sample
                             avg_aggr = filter(row -> row.date >= QuarterlyDate(yr, actual_period), gdp_series)[!, meas*"_per_hh"][1]
-                            avg_data = mean(non_missing[:, meas], weights(non_missing[:, :weight]))
-                            multiplier = abs.(avg_aggr / avg_data)
 
-                            # IF the multiplier is too large, then the data is not reliable/representative
-                            if multiplier[1] > 20
-                                nothing
-                                # sub_boot_dict[meas]["quantiles"][:, s, count] .= NaN
-                                # coef_boot[pcf_rows[m], count, s]               .= NaN
+                            if occursin("SCF", source)
+                                # Over imputations
+                                if yr < 1983
+                                    imp_boot = zeros(grid_pcf, 5)
 
-                            else
-                                non_missing[!, meas] = non_missing[!, meas] .* multiplier
-                                tot_scale = avg_aggr .- mean(non_missing[:, meas], weights(non_missing[:, :weight])) # should be zero if data is all positive 
-                                non_missing[!, meas] .= non_missing[!, meas] .+ tot_scale # the average is corrected and ranks don't change.     
+                                    for ip in 1:5
+                                        # Get the data
+                                        non_missingᵢ = filter(x -> x.impnum == ip, non_missing)
 
-                                # DCT the CORRECTED quantile data
-                                if typeof(estimator) <: SeriesEstimator
-                                    @unpack integral_pcf_grid = estimator
-                                    grid_points_pcf = select_grid_points(integral_pcf_grid) # avoids boundary issues
-                                    intervals = vcat([0.0], grid_points_pcf)
+                                        # See if the data is severely off from the aggregate
+                                        avg_data = mean(non_missingᵢ[:, meas], weights(non_missingᵢ[:, :weight]))
+                                        multiplier = abs.(avg_aggr / avg_data)
+
+                                        if multiplier[1] > 20
+                                            nothing
+                                        end
+
+                                        non_missingᵢ[!, meas] = non_missingᵢ[!, meas] .* multiplier
+                                        tot_scale = avg_aggr .- mean(non_missingᵢ[:, meas], weights(non_missingᵢ[:, :weight])) # should be zero if data is all positive 
+                                        non_missingᵢ[!, meas] .= non_missingᵢ[!, meas] .+ tot_scale # the average is corrected and ranks don't change.
+
+                                        # sort 
+                                        sort!(non_missingᵢ, meas)
+
+                                        # First, transform series 
+                                        t_rv = inverse_hyperbolic_sine(non_missingᵢ[:, meas] ./ avg_aggr)
+
+                                        # Estimate weights 
+                                        imp_boot[:, ip] .= series_estimator(t_rv, non_missingᵢ[:, :weight], grid_pcf - 1)
+                                    end
+
+                                    # Average over coefficients -> generate quantiles
+                                    coef_boot[pcf_rows[m], count, s] .= mean(imp_boot, dims=2)
+
+                                    for i in 1:integral_pcf_grid
+                                        integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coef_boot[pcf_rows[m], count, s], grid_pcf - 1, u)) .* avg_aggr, intervals[i], intervals[i+1], rtol=1e-8)
+                                        sub_boot_dict[meas]["quantiles"][i, s, count] = integral[1] / (intervals[i+1] - intervals[i])
+                                    end
+                                else
+                                    avg_data = mean(non_missing[:, meas], weights(non_missing[:, :weight]))
+                                    multiplier = abs.(avg_aggr / avg_data)
+
+                                    if multiplier[1] > 20
+                                        nothing
+                                    end
+
+                                    non_missing[!, meas] = non_missing[!, meas] .* multiplier
+                                    tot_scale = avg_aggr .- mean(non_missing[:, meas], weights(non_missing[:, :weight])) # should be zero if data is all positive 
+                                    non_missing[!, meas] .= non_missing[!, meas] .+ tot_scale # the average is corrected and ranks don't change.     
 
                                     # sort 
                                     sort!(non_missing, meas)
 
-                                    if occursin("SCF", source)
-                                        if yr < 1983
-                                            imp_boot = zeros(grid_pcf, 5)
+                                    # First, transform series 
+                                    t_rv = inverse_hyperbolic_sine(non_missing[:, meas] ./ avg_aggr)
 
-                                            for ip in 1:5
-                                                non_missingᵢ = filter(x -> x.impnum == ip, non_missing)
-                                                sort!(non_missingᵢ, meas)
+                                    # Estimate weights 
+                                    coef_boot[pcf_rows[m], count, s] .= series_estimator(t_rv, non_missing[:, :weight], grid_pcf - 1)
 
-                                                # First, transform series 
-                                                t_rv = inverse_hyperbolic_sine(non_missingᵢ[:, meas] ./ avg_aggr)
 
-                                                # Estimate weights 
-                                                imp_boot[:, ip] .= series_estimator(t_rv, non_missingᵢ[:, :weight], grid_pcf - 1)
-                                            end
-                                            coef_boot[pcf_rows[m], count, s] .= mean(imp_boot, dims=2)
-                                        else
-                                            # First, transform series 
-                                            t_rv = inverse_hyperbolic_sine(non_missing[:, meas] ./ avg_aggr)
-
-                                            # Estimate weights 
-                                            coef_boot[pcf_rows[m], count, s] .= series_estimator(t_rv, non_missing[:, :weight], grid_pcf - 1)
-                                        end
-
-                                        # Generates the integral over the percentile function 
-                                        for i in 1:integral_pcf_grid
-                                            integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coef_boot[pcf_rows[m], count, s], grid_pcf - 1, u)) .* avg_aggr, intervals[i], intervals[i+1], rtol=1e-8)
-                                            sub_boot_dict[meas]["quantiles"][i, s, count] = integral[1] / (intervals[i+1] - intervals[i])
-                                        end
-
-                                    else
-                                        # First, transform series 
-                                        t_rv = inverse_hyperbolic_sine(non_missing[:, meas] ./ avg_aggr)
-
-                                        # Estimate weights 
-                                        coef_boot[pcf_rows[m], count, s] .= series_estimator(t_rv, non_missing[:, :weight], grid_pcf - 1)
-
-                                        # Generates the integral over the percentile function 
-                                        for i in 1:integral_pcf_grid
-                                            integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coef_boot[pcf_rows[m], count, s], grid_pcf - 1, u)) .* avg_aggr, intervals[i], intervals[i+1], rtol=1e-8)
-                                            sub_boot_dict[meas]["quantiles"][i, s, count] = integral[1] / (intervals[i+1] - intervals[i])
-                                        end
+                                    # Generates the integral over the percentile function 
+                                    for i in 1:integral_pcf_grid
+                                        integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coef_boot[pcf_rows[m], count, s], grid_pcf - 1, u)) .* avg_aggr, intervals[i], intervals[i+1], rtol=1e-8)
+                                        sub_boot_dict[meas]["quantiles"][i, s, count] = integral[1] / (intervals[i+1] - intervals[i])
                                     end
-                                else
-                                    m_sample, flag = assign_quantile_groups_for_bootstrap(non_missing, meas, estimator)
+                                end
+                            else
+                                avg_data = mean(non_missing[:, meas], weights(non_missing[:, :weight]))
 
-                                    for i in 1:grid_pcf
-                                        data_q = filter(x -> x[meas*"_quantile"] == i, m_sample)
-                                        sub_boot_dict[meas]["quantiles"][i, s, count] = mean(data_q[:, meas], weights(data_q[:, :weight]))
+                                multiplier = abs.(avg_aggr / avg_data)
+
+                                if multiplier[1] > 20
+                                    nothing
+                                end
+
+                                non_missing[!, meas] = non_missing[!, meas] .* multiplier
+                                tot_scale = avg_aggr .- mean(non_missing[:, meas], weights(non_missing[:, :weight])) # should be zero if data is all positive 
+                                non_missing[!, meas] .= non_missing[!, meas] .+ tot_scale # the average is corrected and ranks don't change.     
+
+                                # sort 
+                                sort!(non_missing, meas)
+
+                                # First, transform series 
+                                t_rv = inverse_hyperbolic_sine(non_missing[:, meas] ./ avg_aggr)
+
+                                # Estimate weights 
+                                coef_boot[pcf_rows[m], count, s] .= series_estimator(t_rv, non_missing[:, :weight], grid_pcf - 1)
+
+
+                                # Generates the integral over the percentile function 
+                                for i in 1:integral_pcf_grid
+                                    try
+                                        integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coef_boot[pcf_rows[m], count, s], grid_pcf - 1, u)) .* avg_aggr, intervals[i], intervals[i+1], rtol=1e-8)
+                                        sub_boot_dict[meas]["quantiles"][i, s, count] = integral[1] / (intervals[i+1] - intervals[i])
+                                    catch e
+                                        sub_boot_dict[meas]["quantiles"][i, s, count] = NaN
                                     end
-
-                                    coef_boot[pcf_rows[m], count, s] .= dct(inverse_hyperbolic_sine(sub_boot_dict[meas]["quantiles"][:, s, count] ./ avg_aggr))
-
-                                    # # Generate the different objects
-                                    # ind_of_groups = collect_indices_for_quantile_groups(grid_pcf)
-
-                                    # sub_boot_dict[meas]["levels"][:, s, count]    = vcat(sum(levels[ind_of_groups[1]]), sum(levels[ind_of_groups[2]]), sum(levels[ind_of_groups[3]]))
-                                    # sub_boot_dict[meas]["shares"][:, s, count]    = vcat(sum(shares[ind_of_groups[1]]), sum(shares[ind_of_groups[2]]), sum(shares[ind_of_groups[3]]))
                                 end
                             end
                         end
@@ -1588,51 +1575,47 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
                 XX = obs_dims == 2 ? [[int_points[i], int_points[j]] for i in id_x, j in id_x] : obs_dims == 3 ? [[int_points[i], int_points[j], int_points[k]] for i in id_x, j in id_x, k in id_x] : [1]
 
                 if dim == obs_dims
-                    if typeof(estimator) <: SeriesEstimator
-                        if occursin("SCF", source)
-                            # For now, we save the weights s.t. when we reconstruct any data afterward. Prevents the need to re-estimate the weights
-                            if yr < 1983
-                                temp_cop = zeros(grid_cop^dim, 5)
+                    if occursin("SCF", source)
+                        if yr < 1983
+                            temp_cop = zeros(grid_cop^dim, 5)
 
-                                for i in 1:5
-                                    period_dataᵢ = filter(row -> row.impnum == i, b_sample)
-                                    temp_cop[:, i] = get_copulas(period_dataᵢ, measures, obs_measures, estimator; with_immutable=true)
-                                end
-
-                                # Compute average over temp_cop 
-                                cop_weights = mean(temp_cop, dims=2)
-                                cop_weights = reshape(cop_weights, cop_size)
-
-                                sub_boot_dict["copula"][:, s, count] .= generate_copula_density(cop_weights, XX, id_x, integrals_pre, measures, obs_measures, grid_size_data_cop)[:]
-                                coef_boot[cop_rows, count, s] .= remove_immutable(cop_weights)
-
-                            else
-                                cop_weights = get_copulas(b_sample, measures, obs_measures, estimator; with_immutable=true)
-                                cop_weights = reshape(cop_weights, cop_size)
-
-                                sub_boot_dict["copula"][:, s, count] .= generate_copula_density(cop_weights, XX, id_x, integrals_pre, measures, obs_measures, grid_size_data_cop)[:]
-
-                                coef_boot[cop_rows, count, s] .= remove_immutable(cop_weights)
+                            for i in 1:5
+                                period_dataᵢ = filter(row -> row.impnum == i, b_sample)
+                                temp_cop[:, i] = get_copulas(period_dataᵢ, measures, obs_measures, estimator; with_immutable=true)
                             end
-                        else
-                            # cop_with_imm = get_copulas(b_sample, measures, obs_measures, estimator; with_immutable=true)
-                            # cop_mat = reshape(cop_with_imm, cop_size)
-                            # sub_boot_dict["copula"][:, s, count] .= undo_copula_treatment(cop_mat, estimator)[:]
-                            # coef_boot[cop_rows, count, s] .= remove_immutable(cop_mat)
-                            cop_weights = get_copulas(b_sample, measures, obs_measures, estimator; with_immutable=true)
+
+                            # Compute average over temp_cop 
+                            cop_weights = mean(temp_cop, dims=2)
                             cop_weights = reshape(cop_weights, cop_size)
 
                             sub_boot_dict["copula"][:, s, count] .= generate_copula_density(cop_weights, XX, id_x, integrals_pre, measures, obs_measures, grid_size_data_cop)[:]
                             coef_boot[cop_rows, count, s] .= remove_immutable(cop_weights)
 
+                        else
+                            try
+                                cop_weights = get_copulas(b_sample, measures, obs_measures, estimator; with_immutable=true)
+                                cop_weights = reshape(cop_weights, cop_size)
+
+                                sub_boot_dict["copula"][:, s, count] .= generate_copula_density(cop_weights, XX, id_x, integrals_pre, measures, obs_measures, grid_size_data_cop)[:]
+                                coef_boot[cop_rows, count, s] .= remove_immutable(cop_weights)
+
+                            catch e
+                                sub_boot_dict["copula"][:, s, count] .= NaN
+                                coef_boot[cop_rows, count, s] .= NaN
+                            end
+
                         end
                     else
-                        cop_with_imm = get_copulas(b_sample, measures, obs_measures, estimator; with_immutable=true)
-                        cop_mat = reshape(cop_with_imm, cop_size)
-                        sub_boot_dict["copula"][:, s, count] .= undo_copula_treatment(cop_mat, estimator)[:]
-                        coef_boot[cop_rows, count, s] .= remove_immutable(cop_mat)
+                        try
+                            cop_weights = get_copulas(b_sample, measures, obs_measures, estimator; with_immutable=true)
+                            cop_weights = reshape(cop_weights, cop_size)
+                            sub_boot_dict["copula"][:, s, count] .= generate_copula_density(cop_weights, XX, id_x, integrals_pre, measures, obs_measures, grid_size_data_cop)[:]
+                            coef_boot[cop_rows, count, s] .= remove_immutable(cop_weights)
+                        catch e
+                            sub_boot_dict["copula"][:, s, count] .= NaN
+                            coef_boot[cop_rows, count, s] .= NaN
+                        end
                     end
-
                 elseif obs_dims < dim && obs_dims >= 2
                     if typeof(estimator) <: SeriesEstimator # TODO: use multiple dispatch 
                         if occursin("SCF", source)
@@ -1660,12 +1643,15 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
                                 coef_boot[cop_rows, count, s] .= remove_immutable(cop_weights)
                             end
                         else
-                            cop_weights = get_copulas(b_sample, measures, obs_measures, estimator; with_immutable=true)
-                            cop_weights = reshape(cop_weights, cop_size)
-
-                            sub_boot_dict["copula"][:, s, count] .= generate_copula_density(cop_weights, XX, id_x, integrals_pre, measures, obs_measures, grid_size_data_cop)[:]
-
-                            coef_boot[cop_rows, count, s] .= remove_immutable(cop_weights)
+                            try
+                                cop_weights = get_copulas(b_sample, measures, obs_measures, estimator; with_immutable=true)
+                                cop_weights = reshape(cop_weights, cop_size)
+                                sub_boot_dict["copula"][:, s, count] .= generate_copula_density(cop_weights, XX, id_x, integrals_pre, measures, obs_measures, grid_size_data_cop)[:]
+                                coef_boot[cop_rows, count, s] .= remove_immutable(cop_weights)
+                            catch e
+                                sub_boot_dict["copula"][:, s, count] .= NaN
+                                coef_boot[cop_rows, count, s] .= NaN
+                            end
                         end
 
                     else
@@ -1714,7 +1700,7 @@ function eval_quantile_function(coefficients, order, u)
 end
 
 
-function clean_sub_boot_dict!(sub_boot_dict)
+function clean_sub_boot_dict!(sub_boot_dict) # TODO: do i even need this
     measures = setdiff(collect(keys(sub_boot_dict)), ["copula"])
 
     for meas in measures
@@ -1869,7 +1855,7 @@ function perform_proof_of_concept_Γ_comparison(MV, df_vec, gdp_series, time_p, 
             end
 
             grid_points_pcf = select_grid_points(grid_size_data_pcf)
-            intervals = vcat([0.0], grid_points_pcf)
+            intervals = vcat([0.0] .+ 1e-6, grid_points_pcf)
 
             # split the pcfs by measure
             split_pcfs = [dv[2][I, :] for I in Iterators.partition(axes(dv[2], 1), grid_pcf)]

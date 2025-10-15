@@ -12,6 +12,7 @@
 # using RecursiveArrayTools
 
 # using StaticArrays
+cd("/Users/lc/Dropbox/Distributional_Dynamics/5_Code")
 using Pkg
 Pkg.activate("env_dd_v19/")
 using ProgressMeter
@@ -110,6 +111,7 @@ include("MCMC.jl")
 # include("Diagnostics.jl")  # acceptance rate, Gelman and Rubin (1992), Geweke (1992) convergence statistics, traceplots
 # include("Reconstruction.jl")
 include("ReconstructionOLD.jl")
+include("HistoricalDecomposition.jl")
 include("IntervalEstimation.jl")
 include("Correlations.jl")
 include("CreateTimeSeries.jl")

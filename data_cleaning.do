@@ -974,12 +974,10 @@ rename quarter2 quarter
 
 drop if year == 2022
 drop if missing(weight)
-replace quarter = 4 // now all observations are in the same period per year 
+// replace quarter = 4 // now all observations are in the same period per year 
 
 
-export delimited id year quarter weight income consum nore_consumption finast liquid pdebt hdebt hhequiv using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX_all_q.csv", replace
-
-export delimited id year quarter weight income consum nore_consumption finast liquid pdebt hdebt hhequiv using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX_all.csv", replace
+export delimited id year quarter weight income consum nore_consumption finast liquid pdebt hdebt hhequiv using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX.csv", replace
 
 
 * Rename the weight variables and create a separate file for each year 
@@ -1002,12 +1000,6 @@ drop weight
 keep id year quarter finlwt* 
 export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/CEX/replicate_weights/CEX_replicate_weights.csv", replace
 
-* Observe every 4 years 
-import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX_all.csv", clear
-egen group_year = group(year)
-drop if mod(group_year , 4) != 2
-
-export delimited id year quarter weight income consum pdebt hdebt using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX.csv", replace //  finast liquid
 
 * Checking some stuff 
 import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX_all.csv", clear

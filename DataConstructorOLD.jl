@@ -17,7 +17,7 @@ function data_constructor(obs_data::ObservedData, model_options)
     """Prepares data, of any frequency, for estimation."""
 
     @unpack df_vec, gdp_series = obs_data
-    @unpack estimator, number_of_dfs, measures, information, equivalized, bottom_coded, blind_to = model_options
+    @unpack estimator, number_of_dfs, measures, information, equivalized, bottom_coded, blind_to, tag = model_options
 
     @unpack grid_pcf, grid_cop = estimator
 
@@ -224,11 +224,6 @@ end
 
 
 function select_data(df, measures, equivalized, bottom_coded, blind_to, key)
-    # From XLSX import 
-    # sheet                  = df["data"]
-    # dim                    = sheet.dimension
-    # data                   = DataFrame(sheet[dim], :auto)
-    # data                   = rename!(data, Symbol.(Vector(data[1,:])))[2:end,:]  # assigns first row as column names
 
     # From CSV import
     non_missing_cols = clean_data!(df, measures, equivalized, bottom_coded, blind_to, key)
@@ -908,6 +903,7 @@ function treat_quantile_functions(non_missing, rv, grid, grid_points, correction
 
     elseif typeof(estimator) <: SeriesEstimator
         sort!(non_missing_scaled, rv)
+
         t_rv = inverse_hyperbolic_sine(non_missing_scaled[:, rv] ./ correction)
         coefs = series_estimator(t_rv, non_missing_scaled[:, :weight], grid - 1) # -1 because the order starts at zero and otherwise, we'd have one extra coefficient
 

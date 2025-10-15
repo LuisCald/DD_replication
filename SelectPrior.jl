@@ -39,6 +39,7 @@ function estimate_prior(model_elements::StateSpaceModel, time_p::TimeParams, mod
         Uniform(-0.99, 0.99), # persistence of state LOM for aggregates
         Normal(0, 1), # variance of the variances - factors
         Normal(0, 1), # variance of the variances - aggregates
+        # Normal(2, 1.5) # hyperparameter for the shape of correlations of LKJ prior, ν
     ]
     # κ_0 = minn_params[1]  # specifying the prior variance of coefficients that correspond to own lags of endogenous variables
     # κ_1 = minn_params[2]  # specifying the size of the prior variance of endogenous variables, which do not correspond to own lags
@@ -71,13 +72,16 @@ function estimate_prior(model_elements::StateSpaceModel, time_p::TimeParams, mod
     ϕ_Y = log(exp(1 - ρ_Y^2) - 1)    # ⇒ identical mapping for the aggregate persistence
 
     # ───  Prior list  ──────────────────────────────────────────────────────────
-    σ_ϕ = hyper_par_final[4]
+    σ_ϕ = hyper_par_final[4] # These are already corrected
     σ_ϕ_Y = hyper_par_final[5]
+
+    corr_Ω_shape = 3 #1 + log(1 + exp(hyper_par_final[6])) # shape parameter of 2, meaning mild prior towards identity matrix
 
     priors = [
         MvNormal(prior_mean, V_prior),   # coefficients of A,B,C,D
         Normal(ϕ_F, σ_ϕ),               # prior for factor persistence
-        Normal(ϕ_Y, σ_ϕ_Y)                # prior for aggregate persistence
+        Normal(ϕ_Y, σ_ϕ_Y),               # prior for aggregate persistence
+        LKJCholesky(factor_count + agg_count, corr_Ω_shape),  # prior for factor correlations
     ]
 
     # For measurement equation
@@ -97,16 +101,17 @@ function estimate_prior(model_elements::StateSpaceModel, time_p::TimeParams, mod
     end
 
     # Errors
-    Ω_prior, Σ_prior = set_shock_priors(priors, factor_count, agg_count, n_param)
+    Ω_var, Ω_corr, Σ_prior = set_shock_priors(priors, factor_count, agg_count, n_param)
 
     # Final parameter vector
-    param_vector = [A_prior, B_prior, C_prior, D_prior, Ω_prior, Σ_prior]
+    param_vector = [A_prior, B_prior, C_prior, D_prior, Ω_var, Ω_corr, Σ_prior]
 
     # Getting indices for measurement error 
     meas_ind = extract_meas_ind(estimator, dimension)  # TODO: no need to worry about this 
 
     return Prior(priors, param_vector), meas_ind
 end
+
 
 
 function define_lower_bounds(boot_noise_processes)
@@ -543,24 +548,25 @@ function prioreval(par, priors, param_sizes)
     σ²_Ω = diag(par[2])
     σ²_Ωf = σ²_Ω[1:nf]
     σ²_Ωy = σ²_Ω[nf+1:end]
-    σ²_Σ = diag(par[3])
+    σ²_Σ = diag(par[4])
 
     ABCD_cond = all(insupport(priors[1], par[1]))
     Ωf_cond = all([insupport(priors[2], σ²_Ωf[i]) for i in eachindex(σ²_Ωf)])
     Ωy_cond = all([insupport(priors[3], σ²_Ωy[i]) for i in eachindex(σ²_Ωy)])
-    Σ_cond = all([insupport(priors[3+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
+    Ω_corr_cond = insupport(priors[4], par[3])
+    Σ_cond = all([insupport(priors[4+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
 
-    if ABCD_cond && Ωf_cond && Ωy_cond && Σ_cond
+    if ABCD_cond && Ωf_cond && Ωy_cond && Σ_cond && Ω_corr_cond
         # split covariance matrices into standard deviations and correlation matrices
         log_priorval = 0.0
         alarm = false
 
         log_priorval = sum(logpdf(priors[1], par[1]))  # very costly unfortunately
-
-        # Compute prior on variances 
         log_priorval += sum([logpdf(priors[2], σ²_Ωf[i]) for i in eachindex(σ²_Ωf)])
         log_priorval += sum([logpdf(priors[3], σ²_Ωy[i]) for i in eachindex(σ²_Ωy)])
-        log_priorval += sum([logpdf(priors[3+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
+        log_priorval += logpdf(priors[4], par[3])
+        log_priorval += sum([logpdf(priors[4+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
+
 
     else
         # println("not in support")

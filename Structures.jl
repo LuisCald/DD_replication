@@ -1,3 +1,23 @@
+# General helper that works even if start/stop aren't on Q1/Q4 boundaries
+# This is for the CEX, every 4 years
+function muted_quarters_between(start::QuarterlyDate, stop::QuarterlyDate)
+    y0, y1 = year(start), year(stop)
+
+    # keep every 4th year counting from the start year (y0)
+    is_kept_year(y) = (y - y0) % 4 == 0
+
+    # for partial edge years (if any)
+    qstart(y) = (y == y0) ? quarter(start) : 1
+    qstop(y) = (y == y1) ? quarter(stop) : 4
+
+    muted_years = filter(y -> !is_kept_year(y), y0:y1)
+
+    [QuarterlyDate(y, q)
+     for y in muted_years
+     for q in qstart(y):qstop(y)]
+end
+
+
 # File of Structures 
 function retrieve_data_files()
     local files::Dict
@@ -6,12 +26,14 @@ function retrieve_data_files()
             "SCF" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SCF.csv",
             "PSID" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/PSID.csv",
             "CEX" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/CEX.csv",
-            # "CEX" => raw"/home/luisc/Distributional_Dynamics/CEX.csv", 
             "CPS" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/CPS.csv",
             "CPS2" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/CPS2.csv",
             "SIPP1" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SIPP1.csv",
             "SIPP2" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SIPP2.csv",
             "SIPP3" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SIPP3.csv",
+
+            # "HANK" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/HANK.csv",
+            # "HANK full" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/HANK_full.csv",
 
             # "Test3000_100" => raw"/home/luisc/Distributional_Dynamics/SimData_3000_100.csv",
             # "Test3000_30" => raw"/home/luisc/Distributional_Dynamics/SimData_3000_30.csv",
@@ -54,6 +76,7 @@ function retrieve_aggregate_data(sheet)
     local aggregate_data::DataFrame
     if pwd()[1:2] == "/h"
         aggregate_data = DataFrame(XLSX.readtable(raw"/home/luisc/Distributional_Dynamics/2_Data_processing/aggregates_HHs_NPs.xlsx", sheet, header=true,))
+        # aggregate_data = DataFrame(XLSX.readtable(raw"/home/luisc/Distributional_Dynamics/2_Data_processing/HANK_shocks.xlsx", sheet, header=true,))
 
     elseif pwd()[1:2] == "/U"
         aggregate_data = DataFrame(XLSX.readtable(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates_HHs_NPs.XLSX", sheet, header=true,))
@@ -68,6 +91,7 @@ end
 function retrieve_rgdp()
     if pwd()[1:2] == "/h"
         aggregate_data = DataFrame(XLSX.readtable(raw"/home/luisc/Distributional_Dynamics/2_Data_processing/inflation_corrected_correction_series.xlsx", "data", header=true,))
+        # aggregate_data = DataFrame(XLSX.readtable(raw"/home/luisc/Distributional_Dynamics/2_Data_processing/HANK_correction_series.xlsx", "HANK_correction_series", header=true,))
 
     elseif pwd()[1:2] == "/U"
         aggregate_data = DataFrame(XLSX.readtable(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/inflation_corrected_correction_series.XLSX", "data", header=true,))
@@ -99,6 +123,7 @@ abstract type FakeEstimator <: AbstractEstimator end
 @with_kw struct ObservedData{S<:String,D<:DataFrame,NT<:NamedTuple} # X<:XLSX.XLSXFile}
     files::Dict{S,S} = retrieve_data_files()
     agg_data::D = retrieve_aggregate_data("stationary_series")
+    # agg_data::D = retrieve_aggregate_data("HANK_shocks")
     gdp_series::D = retrieve_rgdp()  # not just gdp, but many measure specific correction series
     df_vec::NT = retrieve_data(files)
 end
@@ -134,12 +159,13 @@ struct FakeKernelEstimator <: FakeEstimator end # for confidence_intervals
 
 # order for copula is 'grid_cop' + 1
 @with_kw mutable struct ModelOptions{AE<:AbstractEstimator,AP<:AbstractPrior,B<:Bool,S<:String,I<:Integer,VS<:Vector{String},D<:Dict,DS<:Dict{String,String}} #,
-    estimator::AE = SeriesEstimator(grid_pcf=11 + 1, grid_cop=11 + 1, integral_pcf_grid=10, integral_cop_grid=10) # 11 + 1 = order 11
-    # estimator::AE               = SeriesEstimator(grid_pcf = 14+1, grid_cop = 14+1, integral_pcf_grid = 10, integral_cop_grid = 10) # or "KDE" or "series" ,     
+    # estimator::AE = SeriesEstimator(grid_pcf=5 + 1, grid_cop=5 + 1, integral_pcf_grid=5, integral_cop_grid=5) # 11 + 1 = order 11
+    estimator::AE = SeriesEstimator(grid_pcf=11 + 1, grid_cop=11 + 1, integral_pcf_grid=10, integral_cop_grid=10) # or "KDE" or "series" ,     
     # prior::AP                   = Minnesota(hyperparameters = [0.2, 0.3, .001, 5, 2.0, 0.9])
     prior::AP = Minnesota(hyperparameters=[0.05, 0.1, 0.5, 0.1, 2.0, 0.9, 0.9]) # We use: 1,2,4,6
-    measures::VS = sort(["consum", "income", "wealth"]) # sort(["income", "consum", "liquid"])
-    number_of_dfs::I = 1
+    # measures::VS = sort(["liquid", "illiqd", "income"])
+    measures::VS = sort(["consum", "wealth", "income"])
+    number_of_dfs::I = 8
     plot_proof::B = false # to plot the proof of concept
     case::S = "A non-diag" # ["diag", "A non-diag", "A, Σ non-diag"]  
     blind_to::D = Dict() #Dict("PSID" => ["wealth"])
@@ -163,14 +189,39 @@ struct FakeKernelEstimator <: FakeEstimator end # for confidence_intervals
     bottom_coded::Vector{Any} = []
     rm_seasonality::B = true # TODO: basically if we use the entire CEX
     data_cutoffs::DS = Dict("begin" => "", "end" => "") # Define boundaries (extensive margin)
-    data_to_mute = Dict("begin" => "", "end" => "") # Intensive margin
-    logit_transform::B = false # TODO: doesnt work anyway 
-    compare_to_other_est::B = false # compare with other models 
-    tag::S = " additional factors" # " all AF"
+    # data_to_mute = Dict("begin" => QuarterlyDate(2020, 1), "end" => QuarterlyDate(2024, 1))  #Dict("begin" => "", "end" => "")
+    data_to_mute = Dict("begin" => "", "end" => "") #Dict("CEX" => muted_quarters_between(QuarterlyDate(1984, 1), QuarterlyDate(2021, 4)))
+    logit_transform::B = false # TODO: doesnt work anyway
+    compare_to_other_est::B = false # compare with other models
+    tag::S = " additional factors"
+    # tag::S = " HANK" # in process
+    # tag::S = " excluding housing cycle" # in process
+    # tag::S = " every 4 years" # TODO: change data_to_mute
+    # tag::S = " excluding recent 20 quarters"
+
+    # Models to do: changing distributional factors
+    ## 3 dist and 10 aggs = " less DF and AF" (in process)
+    ## 6 factors, 25 aggs = " 6 factors" (in process)
+    ## 7 factors, 25 aggs = " 7 factors" (in process)
+
+    # Models to do: changing aggs
+    ## 15 aggregate factors = " less AF" (in process)
+    ## 20 aggregate factors = " more AF" (in process)
+
+    # Other Models to do:
+    ## " excluding housing cycle short" (in process) # Dict("begin" => QuarterlyDate(2007, 4), "end" => QuarterlyDate(2011, 4))
+    ## " Γ all" = 10 factors (in process)
+    ## " Γ all 85" = 12 factors (in process)
+
+    # Once done, do:
+    ## set compare_to_other_est to true and then run export_table_to_tex_with_strings(measures, :from_mcmc) from the baseline
+    ## do historical decomposition
+    ## do variance decomposition
+    ## do " best aggs" case
 end
 
 
-# List of models:
+# List of models: PP CEX is for adding a projection factor from CEX
 # " PP CEX excluding housing cycle"
 # " PP CEX excluding housing cycle short"
 # " PP CEX excluding recent 20 quarters"
@@ -189,9 +240,10 @@ end
 # " 6 factors"
 # " 7 factors"
 # " additional factors" 
+# " excluding housing cycle wealth" # Dict("begin" => QuarterlyDate(2004, 4), "end" => QuarterlyDate(2009, 4))
 # " excluding housing cycle" # Dict("begin" => QuarterlyDate(2004, 4), "end" => QuarterlyDate(2009, 4))
 # " excluding housing cycle short" # Dict("begin" => QuarterlyDate(2007, 4), "end" => QuarterlyDate(2011, 4))
-# " every 4 years" 
+# " every 4 years" # data_to_mute = Dict("CEX" => muted_quarters_between(QuarterlyDate(1984, 1), QuarterlyDate(2021, 4)))
 # " excluding recent 20 quarters" # #Dict("begin" => QuarterlyDate(2020, 1), "end" => QuarterlyDate(2024, 1)) 
 # " higher order15" 
 
@@ -327,18 +379,18 @@ mutable struct StateSpaceModel{A<:Array{Float64},V<:Vector{Float64},VV<:Vector{V
     boot_noise_processes
 end
 
-mutable struct FunctionalData{D<:Dict,VI<:Vector{Vector{Int64}},VS<:Vector{String}}
+mutable struct FunctionalData{D<:Dict,VS<:Vector{String}}
     func_dict::D
     confidence_intervals::D
-    year_vec::VI
+    year_vec
     data_sources::VS
 end
 
 # Structure for defining the prior 
 #mutable struct Prior{VS<:Vector{Distribution{Multivariate, Continuous}}, V<:Vector{AbstractMatrix{Float64}}}
-mutable struct Prior{V<:Vector{AbstractArray{Float64}}}
+mutable struct Prior
     priors
-    param_vector::V
+    param_vector
 end
 
 

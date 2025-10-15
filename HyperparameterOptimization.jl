@@ -65,7 +65,19 @@ function hyperparameter_optimization(hyperpriors, model_elements, time_p, model_
     if file_exists
         hyper_par_obj = jldopen(hyper_file_name, "r")
 
-        return hyper_par_obj["hyper_par_final"], hyper_par_obj["d_chains"], hyper_par_obj["lprobs"]
+        # Setting the hyperparameters
+        hyper_to_export = copy(hyper_par_obj["hyper_par_final"])
+
+        hyperparameters[1] = 0.05 #log(exp(hyper_par_final[1])+1) # κ0
+        hyperparameters[2] = hyper_to_export[1] #cdf.(Normal(0,1), hyper_par_final[1]) #1 / (1 + exp(-hyper_par_final[1]))
+        hyperparameters[6] = hyper_to_export[2] #2 .* (cdf.(Normal(0,1), hyper_to_export[3])) - 1
+        hyperparameters[7] = hyper_to_export[3]
+        hyper_to_export[4] = log(exp(hyper_to_export[4]) + 1) #−log(1 − (cdf.(Normal(0,1), hyper_to_export[4])))
+        hyper_to_export[5] = log(exp(hyper_to_export[5]) + 1) #−log(1 − (cdf.(Normal(0,1), hyper_to_export[5])))
+        @pack! prior = hyperparameters
+
+
+        return hyper_to_export, hyper_par_obj["d_chains"], hyper_par_obj["lprobs"]
     end
 
     # Save the old params
@@ -88,10 +100,6 @@ function hyperparameter_optimization(hyperpriors, model_elements, time_p, model_
         hyperparameters[6] = hyperparams[2]
         hyperparameters[7] = hyperparams[3]
 
-        # Remap variance params
-        hyperparams[4] = log(exp(hyperparams[4]) + 1)
-        hyperparams[5] = log(exp(hyperparams[5]) + 1)
-
         # Estimate the hyperprior
         hyperprior, meas_ind, alarm, logP = get_hyperprior(model_elements, model_options, hyperparams, hyperpriors)
 
@@ -113,11 +121,12 @@ function hyperparameter_optimization(hyperpriors, model_elements, time_p, model_
 
     nchain = length(hyperpriors) * 6 # a sane default
     init_chains = draw_from_hyperprior(hyperpriors, nchain) # n_p by n_chains
-    niter = 500
+    niter = 1000
 
     # off you go sampling
     DIME_chains, lprobs, _ = RunDIME(LogProbParallel, init_chains, niter, progress=true, aimh_prob=0.1)
-    hyper_par_final = mean(DIME_chains[end, :, :][:, :], dims=1)
+    # hyper_par_final = mean(DIME_chains[end, :, :][:, :], dims=1)
+    hyper_par_final = find_mode(DIME_chains, lprobs)
 
     # Save file of DIME_chains, lprobs, and hyper_par_final
     jldsave(init_path * "/7_Results/" * m_label * "$tag" * "/from_mcmc/bayesian_convergence/" * "hyperparameter_opt.jld2"; d_chains=DIME_chains, lprobs=lprobs, hyper_par_final=hyper_par_final)
@@ -166,7 +175,17 @@ function get_hyperprior(model_elements, model_options, hyperparams, hyperpriors)
         ϕ_F = log(exp(1 - ρ_F^2) - 1)
         ϕ_Y = log(exp(1 - ρ_Y^2) - 1)
 
-        priors = [MvNormal(prior_mean, V_prior), Normal(ϕ_F, hyperparams[4]), Normal(ϕ_Y, hyperparams[5])]
+        # Remap variance params, since they can be negative
+        v_F = log(exp(hyperparams[4]) + 1)
+        v_Y = maximum([log(exp(hyperparams[5]) + 1), 0.1]) # Otherwise, it shrinks this extremely and returns basically negative infinity for prioreval()
+        corr_Ω_shape = 2 #1 + log(1 + exp(hyperparams[6])) # shape parameter of 2, meaning mild prior towards identity matrix
+
+        priors = [
+            MvNormal(prior_mean, V_prior),
+            Normal(ϕ_F, v_F),
+            Normal(ϕ_Y, v_Y),
+            LKJCholesky(factor_count + agg_count, corr_Ω_shape)
+        ] # shape parameter of 2, meaning mild prior towards identity matrix
 
         ϕₘ = log(exp(1) - 1)
         for _ in 1:number_of_dfs
@@ -191,8 +210,8 @@ function get_hyperprior(model_elements, model_options, hyperparams, hyperpriors)
 
 
     n_param = number_of_dfs * n_objs + agg_count
-    Ω_prior, Σ_prior = set_shock_priors(priors, factor_count, agg_count, n_param)
-    param_vector = [A_prior, B_prior, C_prior, D_prior, Ω_prior, Σ_prior]
+    Ω_var, Ω_corr, Σ_prior = set_shock_priors(priors, factor_count, agg_count, n_param)
+    param_vector = [A_prior, B_prior, C_prior, D_prior, Ω_var, Ω_corr, Σ_prior]
 
     # Getting indices for measurement error 
     meas_ind = extract_meas_ind(estimator, dimension)  # TODO: no need to worry about this 
@@ -218,7 +237,7 @@ function generate_marginals(DIME_chains, m_label, tag)
         # if exp_vec[i] == 1
         #     filt_chain = exp.(filt_chain)
         # end
-        Plots.plot(filt_chain, lc=:black, color=:orange, fa=0.8, xformatter=:latex, yformatter=:latex, lt=:barhist, legend=false)
+        Plots.plot(filt_chain, lc=:black, color=:orange, fa=0.8, xformatter=:latex, yformatter=:latex, lt=:barhist, legend=false, xtickfontsize=14, ytickfontsize=14, guidefontsize=14)
         Plots.savefig(init_path * "/7_Results/" * m_label * "$tag" * "/from_mcmc/bayesian_convergence/" * "hyperparameter_optimization_$i.pdf")
     end
 end

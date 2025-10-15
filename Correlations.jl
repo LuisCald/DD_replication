@@ -28,8 +28,10 @@ function create_micro_df(copula_obj, pcfs, data_tag, k, folder, time_params, met
     cop_ind = copula_case(measures, measures)
 
     # For each year ...
-    p = Progress(T, desc="Creating micro data for $k")
+    # p = Progress(T, desc="Creating micro data for $k")
     # Threads.@threads 
+
+    println("Creating micro data for $k")
     for y in eachindex(q_dates)
         if any(isfinite, copula_obj[cop_ind..., y])
             # Make dataframe 
@@ -38,12 +40,12 @@ function create_micro_df(copula_obj, pcfs, data_tag, k, folder, time_params, met
             micro_DF[!, "time"] .= q_dates[y]
 
             append!(micro_full_df, micro_DF)
-            next!(p)
+            # next!(p)
         else
             nothing
         end
     end
-    finish!(p)
+    # finish!(p)
 
     # Sort dataframe by time 
     try
