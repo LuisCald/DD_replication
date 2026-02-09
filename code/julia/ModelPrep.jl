@@ -600,7 +600,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
             # Generate confidence intervals 
             # For HANK, also estimate Monte Carlo (finite-sample) noise by bootstrapping the simulated microdata
             # within each period, then combine it with empirical measurement noise.
-            sub_boot_dict, DCT_boot = estimate_confidence_intervals!(data, objects, series, year_vec[j], time_dict[j], freq_type[j], estimator, measures, draws, gdp_series, source; noise_draws=hank_noise_draws)
+            sub_boot_dict, DCT_boot = estimate_confidence_intervals!(data, objects, series, year_vec[j], time_dict[j], freq_type[j], estimator, measures, draws, gdp_series, source; noise_draws=hank_noise_draws, sd_scale=0.0)
 
             # Save the sub_boot_dict and DCT_boot using jld2 
             JLD2.save(ci_file_name, "ci", sub_boot_dict)
