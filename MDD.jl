@@ -13,7 +13,7 @@
 #     """
 #     H is the negative hessian at the posterior mode.
 #     """
-#     init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+#     init_path = BASE_PATH
 #     model_post = jldopen(init_path * "/posterior_draws" * "/" * m_label * "_$model.jld2")
 #     θ_mode = find_mode(model_post["d_chains"], model_post["lprobs"])
 
@@ -78,7 +78,7 @@
 
 function run_mdd(tag, model_elements, m_label, param_sizes, priors, meas_ind, Σ_ids, model_options)
     # Import chains
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     model_mcmc = jldopen(init_path * "/posterior_draws" * "/" * m_label * "_$tag.jld2")
 
     # Compute the harmonic mean first
@@ -88,7 +88,7 @@ function run_mdd(tag, model_elements, m_label, param_sizes, priors, meas_ind, Σ
     mdd_bs = bridge_sampler(model_mcmc, model_elements, param_sizes, priors, meas_ind, Σ_ids, model_options)
 
     # Save in a jld2 file
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     jldsave(init_path * "/7_Results/MDD" * "/" * "mdd_$tag.jld2"; mdd_hm=mdd_hm, mdd_bs=mdd_bs)
 end
 

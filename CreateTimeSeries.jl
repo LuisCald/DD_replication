@@ -114,7 +114,7 @@ function export_raw_data(data_dict, estimator, source, measures, time_p, tag)
 
         # Create DataFrame for the current measure
         m_label = measures_folder(measures)
-        init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+        init_path = BASE_PATH
         path = init_path * "/7_Results/$m_label" * tag * "/other_results/raw_data/"
         f_cols = filter(e -> e != "time", names(df))
         subset!(df, (f_cols .=> ByRow(x -> !(x isa Number && isnan(x))))...)
@@ -176,7 +176,7 @@ function generate_copula_plots(data_dict, func_data, data_name, tmin, tmax, grid
     dimension = length(measures)
     dts = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
     folder = type == :optimization ? "from_optimization" : "from_mcmc"
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label/$folder/copulas/"
 
     # Plotting copulas for 3 separate years 
@@ -416,7 +416,7 @@ function get_estimates_for_comparison(data_name, ty, time_p, measures, estimator
         return Dict()
     else
         @unpack year_vec = time_p
-        init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+        init_path = BASE_PATH
         objects = sort(["quantiles", "levels", "shares"])
         meas_folder = measures_folder(measures)
 
@@ -590,7 +590,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
     base_jump, end_jump = find_subset_frame(smin, smax, tmin, tmax)
     m_label = measures_folder(measures)
     folder = type == :optimization ? "from_optimization" : "from_mcmc"
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/plots/"
 
     local bot, mid, top
@@ -1767,7 +1767,7 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
         # Export micro-data
         create_micro_df(copulas, data_pcf, data_tag, data_name, folder, time_params, model_options) #TODO: check that the order is correct for the pcfs 
 
-        init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+        init_path = BASE_PATH
         path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/data"
 
         # Export functional data. For 'detrended', the marginals itself are uninformative. It is later divided by the average, which is when its informative.
@@ -2101,7 +2101,7 @@ end
 function generate_microdata_implicates(draws, k, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources, tag)
     micro_full_df = DataFrame()
     m_label = measures_folder(measures)
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     @unpack estimator = model_options
     @unpack integral_pcf_grid = estimator
     # Generate draws 
@@ -2310,7 +2310,7 @@ end
 function export_table_to_tex_with_strings(measures, type)
     m_label = measures_folder(measures)
     folder = type == :optimization ? "from_optimization" : "from_mcmc"
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/plots/"
 
     # Get first letter and capitalize from 'measures'
@@ -2406,7 +2406,7 @@ end
 
 
 function generate_correlations_table_for_external_comparisons(data_choice, measures, tag, type, series_type)
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     meas_folder = measures_folder(measures)
     corr_path = init_path * "/7_Results/$(meas_folder)$(tag)/$type/plots/correlations"
     ext_corr = jldopen(corr_path * "/external_correlations.jld2", "r")["ext_corr"]

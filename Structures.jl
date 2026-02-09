@@ -25,18 +25,10 @@ function retrieve_data_files()
     local files::Dict
 
 
-    if pwd()[1:2] == "/h"
-        base_path = "/home/luisc/Distributional_Dynamics/2_Data_processing/"
-        files = Dict(
-            # "SCF" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SCF.csv",
-            # "PSID" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/PSID.csv",
-            # "CEX" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/CEX.csv",
-            # "CPS" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/CPS.csv",
-            # "CPS2" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/CPS2.csv",
-            # "SIPP1" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SIPP1.csv",
-            # "SIPP2" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SIPP2.csv",
-            # "SIPP3" => raw"/home/luisc/Distributional_Dynamics/2_Data_processing/SIPP3.csv",
+    base_path = DATA_PROCESSING * "/"
 
+    if Sys.islinux()
+        files = Dict(
             # "HANK full $(GLOBAL_ECON)" => joinpath(base_path, "HANK_full_economy_$(GLOBAL_ECON).csv"),
 
             "HANK a $(GLOBAL_ECON)" => joinpath(base_path, "HANK_PSID_$(GLOBAL_ECON).csv"),
@@ -44,41 +36,26 @@ function retrieve_data_files()
             "HANK c $(GLOBAL_ECON)" => joinpath(base_path, "HANK_CEX_$(GLOBAL_ECON).csv"),
             "HANK d $(GLOBAL_ECON)" => joinpath(base_path, "HANK_SCF_$(GLOBAL_ECON).csv"),
             # "HANK e $(GLOBAL_ECON)" => joinpath(base_path, "HANK_SIPP_$(GLOBAL_ECON).csv"),
-
-            # "Test3000_100" => raw"/home/luisc/Distributional_Dynamics/SimData_3000_100.csv",
-            # "Test3000_30" => raw"/home/luisc/Distributional_Dynamics/SimData_3000_30.csv",
-            # "Test3000_20" => raw"/home/luisc/Distributional_Dynamics/SimData_3000_20.csv",
-            # "Test3000_10" => raw"/home/luisc/Distributional_Dynamics/SimData_3000_10.csv",
-            # "Test1000_100" => raw"/home/luisc/Distributional_Dynamics/SimData_1000_100.csv",
-            # "Test1000_30" => raw"/home/luisc/Distributional_Dynamics/SimData_1000_30.csv",
-            # "Test1000_20" => raw"/home/luisc/Distributional_Dynamics/SimData_1000_20.csv",
-            # "Test1000_10" => raw"/home/luisc/Distributional_Dynamics/SimData_1000_10.csv",
-            # "Test500_100" => raw"/home/luisc/Distributional_Dynamics/SimData_500_100.csv",
-            # "Test500_30" => raw"/home/luisc/Distributional_Dynamics/SimData_500_30.csv",
-            # "Test500_20" => raw"/home/luisc/Distributional_Dynamics/SimData_500_20.csv",
-            # "Test500_10" => raw"/home/luisc/Distributional_Dynamics/SimData_500_10.csv",
         )
-    elseif pwd()[1:2] == "/U"
-        base_path = "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/"
+    elseif Sys.isapple()
         files = Dict(
             # "HANK full 1" => joinpath(base_path, "HANK_full_economy_1.csv"),
 
-            # "SCF" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF.csv",
-            "PSID" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID.csv",
-            # "CEX" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX_all.csv", # batching all to 4th quarter
-            # "CEX_all_q" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX_all_q.csv",
-            # "CEX" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX.csv",
-            # "CPS" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CPS.csv",
-            # "CPS2" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CPS2.csv",
-            # "SIPP1" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP1.csv",
-            # "SIPP2" => raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP2.csv",
+            "PSID" => joinpath(base_path, "PSID.csv"),
+            # "CEX" => joinpath(base_path, "CEX_all.csv"), # batching all to 4th quarter
+            # "CEX_all_q" => joinpath(base_path, "CEX_all_q.csv"),
+            # "CEX" => joinpath(base_path, "CEX.csv"),
+            # "CPS" => joinpath(base_path, "CPS.csv"),
+            # "CPS2" => joinpath(base_path, "CPS2.csv"),
+            # "SIPP1" => joinpath(base_path, "SIPP1.csv"),
+            # "SIPP2" => joinpath(base_path, "SIPP2.csv"),
         )
     else
         # Windows
         files = Dict(
-            # "SCF" => raw"C:\Dropbox\Distributional_Dynamics\2_Data_processing\SCF.XLSX", 
-            "CEX" => raw"C:\Dropbox\Distributional_Dynamics\2_Data_processing\CEX.csv",
-            "PSID" => raw"C:\Dropbox\Distributional_Dynamics\2_Data_processing\PSID.csv",
+            # "SCF" => joinpath(base_path, "SCF.XLSX"),
+            "CEX" => joinpath(base_path, "CEX.csv"),
+            "PSID" => joinpath(base_path, "PSID.csv"),
         )
     end
     return files
@@ -87,19 +64,16 @@ end
 
 function retrieve_aggregate_data(sheet)
     local aggregate_data::DataFrame
+    base_path = DATA_PROCESSING * "/"
 
-    if pwd()[1:2] == "/h"
-        base_path = "/home/luisc/Distributional_Dynamics/2_Data_processing/"
+    if Sys.islinux()
         try
-            # aggregate_data = DataFrame(XLSX.readtable(raw"/home/luisc/Distributional_Dynamics/2_Data_processing/aggregates_HHs_NPs.xlsx", sheet, header=true,))
             aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "HANK_shocks_economy_$(GLOBAL_ECON).xlsx"), sheet, header=true,))
         catch e
             # Read as .csv if .xlsx fails
             aggregate_data = CSV.read(joinpath(base_path, "HANK_shocks_economy_$(GLOBAL_ECON).csv"), DataFrame)
         end
-
-    elseif pwd()[1:2] == "/U"
-        base_path = "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/"
+    elseif Sys.isapple()
         try
             aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "aggregates_HHs_NPs.XLSX"), sheet, header=true,))
             # aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "HANK_shocks_economy_1.xlsx"), sheet, header=true,))
@@ -108,8 +82,7 @@ function retrieve_aggregate_data(sheet)
             aggregate_data = CSV.read(joinpath(base_path, "HANK_shocks_economy_1.csv"), DataFrame)
         end
     else
-        aggregate_data = DataFrame(XLSX.readtable(raw"C:\Dropbox\Distributional_Dynamics\2_Data_processing\aggregates_HHs_NPs.XLSX", sheet, header=true,))
-        # aggregate_data = CSV.read(joinpath(base_path, "HANK_shocks_economy_1.csv"), DataFrame)
+        aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "aggregates_HHs_NPs.XLSX"), sheet, header=true,))
     end
 
     return aggregate_data
@@ -119,17 +92,16 @@ end
 
 function retrieve_rgdp()
     local aggregate_data
-    if pwd()[1:2] == "/h"
-        base_path = "/home/luisc/Distributional_Dynamics/2_Data_processing/"
+    base_path = DATA_PROCESSING * "/"
+
+    if Sys.islinux()
         try
-            # aggregate_data = DataFrame(XLSX.readtable(raw"/home/luisc/Distributional_Dynamics/2_Data_processing/inflation_corrected_correction_series.xlsx", "data", header=true,))
             aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "HANK_correction_series_$(GLOBAL_ECON).xlsx"), "HANK_correction_series", header=true,))
         catch e
             # Read as .csv if .xlsx fails
             aggregate_data = CSV.read(joinpath(base_path, "truth_data_$(GLOBAL_ECON).csv"), DataFrame)
         end
-    elseif pwd()[1:2] == "/U"
-        base_path = "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/"
+    elseif Sys.isapple()
         try
             aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "inflation_corrected_correction_series.XLSX"), "data", header=true,))
             # aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "HANK_correction_series_1.xlsx"), "HANK_correction_series", header=true,))
@@ -138,8 +110,7 @@ function retrieve_rgdp()
             aggregate_data = CSV.read(joinpath(base_path, "HANK_correction_series_1.csv"), DataFrame)
         end
     else
-        aggregate_data = DataFrame(XLSX.readtable(raw"C:\Dropbox\Distributional_Dynamics\2_Data_processing\inflation_corrected_correction_series.XLSX", "data", header=true,))
-        # aggregate_data = CSV.read(joinpath(base_path, "HANK_correction_series_1.csv"), DataFrame)
+        aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "inflation_corrected_correction_series.XLSX"), "data", header=true,))
     end
     # Replace "consumption" in names with "consum"
     for col in names(aggregate_data)

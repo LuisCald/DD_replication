@@ -56,7 +56,7 @@ function create_micro_df(copula_obj, pcfs, data_tag, k, folder, time_params, met
 
     # Export the data 
     m_label = measures_folder(measures)
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/data"
     equiv = equivalized == true ? "eq" : ""
     botcod = !isempty(bottom_coded) ? "bc" : ""
@@ -173,7 +173,7 @@ function kendalls_tau(copula_obj, pcfs, k, folder, time_params, method_options, 
     line_sty = [:solid :dash :dot :dashdot :dashdotdot]
 
     # Export 
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label/$folder/data"
     CSV.write(path * "/" * k * "_kendalls_tau" * "$label" * ".csv", select(kend_tau, "time", :))
     CSV.write(path * "/" * k * "_pearson" * "$label" * ".csv", select(pwcorr, "time", :))
@@ -941,7 +941,7 @@ function compute_tail_dependence(copula_obj, pcfs, data_name, folder, time_param
         label = "_$case" * "_$equiv" * "$botcod"
 
         # Export 
-        init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+        init_path = BASE_PATH
         path = init_path * "/7_Results/$m_label/$folder/data"
         CSV.write(path * "/" * data_name * "_tail_dependence" * "$label" * ".csv", select(tail_dep, "time", :))
 
@@ -1026,7 +1026,7 @@ function compute_tail_dependence(copula_obj, pcfs, data_name, folder, time_param
         equiv = equivalized == true ? "eq" : ""
         botcod = !isempty(bottom_coded) ? "bc" : ""
         label = "_$case" * "_$equiv" * "$botcod"
-        init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+        init_path = BASE_PATH
         path = init_path * "/7_Results/$m_label/$folder/data"
 
         # Export tail_dep_l and tail_dep_u to excel # TODO: to check indices 

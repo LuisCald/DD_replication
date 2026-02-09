@@ -428,7 +428,7 @@ function plot_forecasts(data_dt, data_dt_r, ty, func_data, obs_data, avg_series,
 
     # Path situation 
     folder = type == :optimization ? "from_optimization" : "from_mcmc"
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * tag * "/$folder/plots/"
 
     # Common annual series 
@@ -1040,7 +1040,7 @@ function plot_iterative_forecasts(dataset_choice, data_dt, data_dt_r, func_data,
 
     # Path situation 
     folder = type == :optimization ? "from_optimization" : "from_mcmc"
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * tag * "/$folder/plots/"
 
     # # Common annual series 

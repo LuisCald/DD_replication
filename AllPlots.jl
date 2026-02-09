@@ -66,7 +66,7 @@ function gen_proof_of_concept_copulas(d_data_dict::Dict, r_data_dict::Dict, sour
     colons = ntuple(_ -> (:), D)
 
     # Path stuff 
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     m_label = measures_folder(measures)
     path = init_path * "/7_Results/proof_of_concept/$m_label/"
 
@@ -336,7 +336,7 @@ function gen_proof_of_concept_figure(d_data_dict::Dict, r_data_dict::Dict, model
     fully_obs_id = estimation_id #.- estimation_id[1] .+ 1
 
     # Define path to save figures
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     m_label = measures_folder(measures)
     path = init_path * "/7_Results/proof_of_concept/$m_label/"
 

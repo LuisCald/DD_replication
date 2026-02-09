@@ -57,7 +57,7 @@ function hyperparameter_optimization(hyperpriors, model_elements, time_p, model_
     @unpack hyperparameters = prior
 
     # First, check if the file exists first 
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     m_label = measures_folder(measures)
     hyper_file_name = init_path * "/7_Results/" * m_label * "$tag" * "/from_mcmc/bayesian_convergence/" * "hyperparameter_opt.jld2"
     file_exists = isfile(hyper_file_name)

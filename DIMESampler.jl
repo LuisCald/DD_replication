@@ -28,7 +28,7 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     # @pack! model_elements = G
 
     #         # Save the matrices first
-    #         init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    #         init_path = BASE_PATH
     #         file_name = init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/parameter_vectors/solution" * "$label" * ".jld2" 
 
     #         JLD2.save(file_name, "matrices", [A_new,B_new, Ω_new, Δ_new, G_new, likeli_vec, Δ_log])
@@ -68,7 +68,7 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     DIME_chains = DIME_chains[end-to_keep+1:end, :, :] #     chains = Array{Float64,3}(undef, niter, nchain, ndim)
 
     # Save the chains, the log probabilities, and the proposal distribution
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     jldsave(init_path * "/posterior_draws" * "/" * m_label * "_$tag.jld2"; d_chains=DIME_chains, lprobs=lprobs, propdist=propdist)
     # jldopen(init_path * "/posterior_draws" * "/" * m_label * "_$tag" * ".jld2", "r")
 
@@ -103,7 +103,7 @@ function generate_marginals_for_hyperparameters(DIME_chains, m_label, tag)
     # Subset to hyperparameters
     DIME_chains = DIME_chains[:, :, end-5:end]
 
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     for i in axes(DIME_chains, 3)
         # Identify the bottom 5% quantile along the dimension 
         long_chain = vec(DIME_chains[:, :, i])

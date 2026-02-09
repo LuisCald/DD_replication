@@ -67,7 +67,7 @@ function SSM_optimize(model_elements, model_options, mcmc_options, diagnostics_o
 
     @info("Entering MCMC step for $tag...")
     all_chains, mcmc_acceptance_rate = run_MCMC(par_final, model_elements, model_options, mcmc_options, param_sizes, priors, meas_ind, Σ_ids, label, m_label, tag)
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     jldsave(init_path * "/3D_" * m_label * "_$tag.jld2"; all_chains)
     @unpack par_mcmc, parameter_chain, bounds = all_chains  # These are parameter bounds 
     # mcmc_like           = SSM(par_mcmc)
@@ -348,7 +348,7 @@ function run_optimizer(SSM, param_vector, label, m_label, dimension, grid, case)
 end
 
 function get_initializer()
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     other_path = init_path * "/7_Results/income_and_wealth/from_optimization/solution2D_diag_shares and levels_eqbc.csv"
     param_vector = vec(Matrix(CSV.read(other_path, DataFrame, header=0)))
     return param_vector
@@ -687,7 +687,7 @@ function construct_bounds(param_vector, param_sizes, case)
 end
 
 function get_hessian(label, m_label, tag)
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     inv_hessian = Matrix(CSV.read(init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/hessians/hessian_$label.csv", header=false, DataFrame))
     return inv_hessian
 end
@@ -814,20 +814,20 @@ end
 
 function store_optim_estimate(params, label, m_label, data_cutoffs, tag)
     end_year = data_cutoffs["end"] != "" ? data_cutoffs["end"][1:4] : "all"
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
 
     DelimitedFiles.writedlm(init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/parameter_vectors/solution" * "$label" * "_$end_year" * ".csv", params, ',')
 end
 
 function store_posterior_mean(posterior_mean, label, m_label, tag)
     for j in eachindex(posterior_mean)
-        init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+        init_path = BASE_PATH
         DelimitedFiles.writedlm(init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/parameter_vectors/posterior_mean_" * "$label" * "$j.csv", posterior_mean[j], ',')
     end
 end
 
 function store_hessian(hessian, label, m_label, tag)
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     DelimitedFiles.writedlm(init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/hessians/hessian_" * "$label.csv", hessian, ',')
 end
 

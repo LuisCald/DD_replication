@@ -997,7 +997,7 @@ function retrieve_data(prefixes::Vector{String}, is_interview_survey::Bool, from
         if verbose
             @info("Downloading survey referring to year $(t)");
         end
-        download_folder = "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/CEX" #mktempdir(prefix="ce_pumd_", cleanup=true);
+        download_folder = RAW_DATA * "/CEX" #mktempdir(prefix="ce_pumd_", cleanup=true);
         survey_id       = get_csv_files(string(t), is_interview_survey, download_folder);
         new_entries     = csv_files_to_dataframes(survey_id, download_folder, prefixes);
         for i=1:n_prefixes
@@ -1112,7 +1112,7 @@ function import_specific_file(years, prefixes, verbose=true, additional_file=fal
         if verbose
             @info("Downloading additional file, referring to year $(t)");
         end
-        download_folder = "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/CEX" #mktempdir(prefix="ce_pumd_", cleanup=true);
+        download_folder = RAW_DATA * "/CEX" #mktempdir(prefix="ce_pumd_", cleanup=true);
         ref_year        = string(t)
         survey_id       = "intrvw$(ref_year[end-1:end])" * "/expn$(ref_year[end-1:end])"
         new_entries     = csv_files_to_dataframes(survey_id, download_folder, prefixes, additional_file);

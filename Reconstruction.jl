@@ -34,7 +34,7 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
     Plots.plot()
     dts = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
     xaxis = 1:tot_periods
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     n_factors = size(proj, 2)
 
     for i in 1:n_factors
@@ -1318,7 +1318,7 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
     I have generate the pcfs for the higher granularity (to compare the reconstructions to) and the pcfs of the lower granularity, so when i export the data, 
     the copula weights correspond to the appropriate pcfs ... For now, i estimate both at the same granularity and comback to this later."""
 
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
 
     # Find the choice of grid points for the confidence intervals
     @unpack grid_pcf, grid_cop = estimator
@@ -2195,7 +2195,7 @@ function gen_proof_of_concept_figure_Γ_comparison(d_data_dict, r_data_dict, mod
     fully_obs_id = estimation_id #.- estimation_id[1] .+ 1
 
     # Define path to save figures
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     m_label = measures_folder(measures)
     path = init_path * "/7_Results/proof_of_concept/$m_label/"
 

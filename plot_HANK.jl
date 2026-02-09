@@ -29,7 +29,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
     base_jump, end_jump = find_subset_frame(smin, smax, tmin, tmax)
     m_label = measures_folder(measures)
     folder = type == :optimization ? "from_optimization" : "from_mcmc"
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/plots/"
 
     # Estimation dates
@@ -46,7 +46,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
     # file_name_raw_data = "/home/luisc/Distributional_Dynamics/7_Results/illiqd_and_income_and_liquid HANK full $(economy_number)/from_mcmc/data/HANK_full_$(economy_number).jld2"
     # func_dict_full_hank = jldopen(file_name_raw_data, "r")["data"]
     # Import truth
-    truth_file = "/home/luisc/Distributional_Dynamics/2_Data_processing/truth_data_$(economy_number).csv"
+    truth_file = DATA_PROCESSING * "/truth_data_$(economy_number).csv"
     truth_data = CSV.read(truth_file, DataFrame)
 
     # # Find the bounds of each 
@@ -298,7 +298,7 @@ function generate_quantiles_shares_levels_HANK_full(data_dict, ty, func_data, da
     base_jump, end_jump = find_subset_frame(smin, smax, tmin, tmax)
     m_label = measures_folder(measures)
     folder = type == :optimization ? "from_optimization" : "from_mcmc"
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/plots/"
 
     # Estimation dates
@@ -516,7 +516,7 @@ function get_estimates_for_comparison_HANK(data_name, ty, time_p, measures, esti
     plot_name = data_name
 
     @unpack year_vec = time_p
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     objects = sort(["quantiles", "levels", "shares"])
     meas_folder = measures_folder(measures)
 
