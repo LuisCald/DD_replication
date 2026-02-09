@@ -15,8 +15,12 @@
 # Auto-detect: if pwd() ends with a code subdirectory, go up
 function _detect_base_path()
     p = pwd()
-    # If we're in 5_Code or code/julia, go up to the project root
-    if endswith(p, "5_Code") || endswith(p, "code/julia") || endswith(p, "code\\julia")
+    # If we're in code/julia (inside 5_Code), go up three levels to Distributional_Dynamics/
+    if endswith(p, "code/julia") || endswith(p, "code\\julia")
+        return dirname(dirname(dirname(p)))
+    end
+    # If we're in 5_Code directly, go up one level to Distributional_Dynamics/
+    if endswith(p, "5_Code")
         return dirname(p)
     end
     # Legacy layout: check if parent directory ends with "Dynamics"
