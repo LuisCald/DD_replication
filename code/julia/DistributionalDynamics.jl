@@ -14,7 +14,7 @@
 # using StaticArrays
 # cd("/Users/lc/Dropbox/Distributional_Dynamics/5_Code")
 using Pkg
-Pkg.activate("env_dd_v19/")
+Pkg.activate(joinpath(@__DIR__, "env"))
 using ProgressMeter
 using QuadGK
 using Distributed
