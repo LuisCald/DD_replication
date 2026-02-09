@@ -26,6 +26,57 @@ forvalues yr = 19(3)22 {
 	export delimited /Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/replicate_weights/replicate_weights_20`yr'.csv, replace
 }
 
+**# SCF illiquid share in top 30
+*-----------------------------
+* 1) Make an "illiquid" measure consistent with your wealth/assets (exclude pensions)
+*-----------------------------
+gen illiqd_nopen = (house - hdebt) + (oest - oestdebt) ///
+                 + vehi + ffabus + life ///
+                 + (bnd - savbnd)   // keep this term only if you truly want non-savings bonds in illiquid
+
+* If you prefer bonds treated as financial (recommended for a clean liquid vs illiquid split), use instead:
+* gen illiqd_nopen = (house - hdebt) + (oest - oestdebt) + vehi + ffabus + life
+
+*-----------------------------
+* 2) Define top 30% by wealth within implicate (SCF has multiple implicates)
+*    (If you want one cutoff pooling implicates, see option B below.)
+*-----------------------------
+* Weighted wealth deciles within impnum (and year, if relevant)
+drop if impnum != 1 
+keep if year == 2019
+xtile wdec = wealth [aw=weight], nq(10)
+
+* Top 30% = deciles 8,9,10
+gen top30w = (wdec >= 8) if !missing(wdec)
+label define top30 0 "Bottom 70%" 1 "Top 30% wealth"
+label values top30w top30
+
+*-----------------------------
+* 3) Construct totals and shares
+*-----------------------------
+gen total_port = liquid + finast + illiqd_nopen
+gen sh_liquid  = liquid / total_port
+gen sh_illq    = illiqd_nopen / total_port
+gen sh_fin     = finast / total_port
+
+* Optional: handle weird denominators / negatives
+replace sh_liquid = . if total_port<=0
+replace sh_illq   = . if total_port<=0
+replace sh_fin    = . if total_port<=0
+
+*-----------------------------
+* 4) Weighted summaries: levels and portfolio shares
+*-----------------------------
+mean liquid finast illiqd_nopen total_port sh_liquid sh_fin sh_illq [aw=weight], over(top30w)
+
+* If you want percentiles (medians etc.)
+centile sh_liquid sh_illq sh_fin [aw=weight], centile(10 25 50 75 90) by(top30w)
+
+* Quick check: fraction with "low liquid share" among top 30
+gen lowliq = (sh_liquid < 0.05) if !missing(sh_liquid)
+mean lowliq [aw=weight] if top30w==1
+
+
 
 **# SCF 
 cd /Users/lc/Dropbox/Distributional_Dynamics

@@ -13,10 +13,191 @@ function total_grid_points(N::Int, G::Int)
 end
 
 
+"""Infer the source ordering embedded in a saved sigma filename.
+
+Expected patterns include e.g.
+`..._series_CEX_and_CPS_and_PSID_all.jld2` or
+`..._quintiles_series_CEX_and_CPS2_and_SIPP1_all.jld2`.
+
+Returns an empty vector if the pattern is not recognized.
+"""
+function sigma_sources_from_path(path::AbstractString)
+    base = basename(path)
+    namestr = replace(base, r"^.*_series_" => "", r"_all\.jld2$" => "")
+    df_map = split(namestr, "_and_")
+    return df_map
+end
+
+
+"""Map a simulated HANK dataset name to its target empirical dataset name."""
+function hank_target_dataset(df_name::AbstractString)
+    if occursin("HANK a", df_name)
+        return "PSID"
+    elseif occursin("HANK b", df_name)
+        return "CPS"
+    elseif occursin("HANK c", df_name)
+        return "CEX"
+    elseif occursin("HANK d", df_name)
+        return "SCF"
+    elseif occursin("HANK e", df_name)
+        return "SIPP1"
+    else
+        return ""
+    end
+end
+
+
+"""Compute the standard deviation of `v` ignoring NaNs."""
+function _nanstd(v::AbstractVector{<:Real})
+    s = 0.0
+    s2 = 0.0
+    n = 0
+    @inbounds for x in v
+        if !isnan(x)
+            n += 1
+            s += x
+            s2 += x * x
+        end
+    end
+    n <= 1 && return NaN
+    μ = s / n
+    # numerically safe-ish variance
+    var = max(0.0, (s2 - n * μ * μ) / (n - 1))
+    return sqrt(var)
+end
+
+
+
+
+"""Perturb coefficients with independent N(0, sd^2) noise (per coefficient and period).
+
+Accepted `sd` inputs:
+
+- K×T×D array of *draws* (e.g. empirical bootstrap coefficient draws). In this case we
+  estimate a time-invariant per-coefficient SD by demeaning within each period across draws
+  and pooling the within-period variance across time.
+- K×T or K×1 array of SDs (used directly / pooled across time).
+"""
+@inline function _nanstd_view(x)
+    n = 0
+    mean = 0.0
+    m2 = 0.0
+    @inbounds for v in x
+        if !isnan(v)
+            n += 1
+            δ = v - mean
+            mean += δ / n
+            m2 += δ * (v - mean)
+        end
+    end
+    return n > 1 ? sqrt(m2 / (n - 1)) : NaN
+end
+
+# Carry/back-fill NaNs in-place for a 1D row; returns whether the row had any non-NaN.
+function _carry_fill_row!(row)
+    T = length(row)
+
+    first_idx = 0
+    @inbounds for t in 1:T
+        if !isnan(row[t])
+            first_idx = t
+            break
+        end
+    end
+    first_idx == 0 && return (false, 0)
+
+    n_filled = 0
+    first_val = row[first_idx]
+
+    @inbounds for t in 1:(first_idx-1)
+        if isnan(row[t])
+            row[t] = first_val
+            n_filled += 1
+        end
+    end
+
+    @inbounds for t in (first_idx+1):T
+        if isnan(row[t])
+            row[t] = row[t-1]
+            n_filled += 1
+        end
+    end
+
+    return (true, n_filled)
+end
+
+# Build K×T SD matrix from either draws (K×Tn×Dn) or precomputed SDs (K×T or K×1).
+function _build_sds(sd, K::Int, T::Int)
+    Tn = size(sd, 2)
+    @assert T <= Tn "by_period=true requires sd time dimension ≥ size(X,2)"
+
+    sds = fill(NaN, K, Tn)
+
+    @inbounds for k in 1:K, t in 1:Tn
+        sds[k, t] = _nanstd_view(@view sd[k, t, :])
+    end
+
+    n_filled = 0
+    n_all_missing = 0
+    @inbounds for k in 1:K
+        row = @view sds[k, :]
+        ok, filled = _carry_fill_row!(row)
+        if ok
+            n_filled += filled
+        else
+            n_all_missing += 1
+        end
+    end
+
+    n_filled > 0 && @info "Filled $n_filled missing SD entries by carry/back-fill"
+    n_all_missing > 0 && @info "$n_all_missing coefficients had no SD information at any time"
+
+    return sds
+end
+
+# --- main ------------------------------------------------------------------
+
+function perturb_coefficients_sd!(
+    X::AbstractMatrix,
+    sd;
+    rng=Random.default_rng(),
+    scale::Real=1.0,
+    by_period::Bool=true,
+)
+    by_period || error("by_period=false is no longer supported; use period-by-period SDs")
+
+    K, T = size(X)
+    @assert size(sd, 1) == K
+
+    sds = _build_sds(sd, K, T)
+
+    n_no_sd = 0
+    @inbounds @views for t in 1:T
+        xcol = X[:, t]
+        for k in 1:K
+            x = xcol[k]
+            if !isnan(x)
+                s = sds[k, t]
+                if !isnan(s) && s > 0
+                    xcol[k] = x + scale * s * randn(rng)
+                else
+                    n_no_sd += 1
+                end
+            end
+        end
+    end
+
+    n_no_sd > 0 && @info "$n_no_sd coefficients had non-positive/NaN SD; left unperturbed"
+    return X
+end
+
+
 function data_constructor(obs_data::ObservedData, model_options)
     """Prepares data, of any frequency, for estimation."""
 
-    @unpack df_vec, gdp_series = obs_data
+    # sigma_invhalf_path=nothing, sigma_sources=nothing, rng=Random.default_rng(), sigma_noise_scale::Real=1.0
+
+    @unpack files, df_vec, gdp_series = obs_data
     @unpack estimator, number_of_dfs, measures, information, equivalized, bottom_coded, blind_to, tag = model_options
 
     @unpack grid_pcf, grid_cop = estimator
@@ -34,10 +215,18 @@ function data_constructor(obs_data::ObservedData, model_options)
     # Create dictionary that stores the years and quarters of the sample data
     time_dict = Dict()
 
+    un_perturbed_dfs = Vector{Matrix{Float64}}(undef, number_of_dfs)
+
     # For each dataset ... 
     for (j, df) in enumerate(df_vec.data)
         df_name = df_vec.df_names[j]
         time_dict[j] = Dict()
+
+        # Quickly: rename "consumption" to "consum" if it exists
+        if "consumption" ∈ names(df)
+            rename!(df, "consumption" => "consum")
+        end
+
         data, non_missing_cols = select_data(df, measures, equivalized, bottom_coded, blind_to, df_name)
 
         # Stores years of measurements based on 'information' criteria  
@@ -132,10 +321,118 @@ function data_constructor(obs_data::ObservedData, model_options)
         end
         # Concatenate topologies 
         dfs[j] = vcat(copulas, vcat(pcfs...))
+
+        un_perturbed_dfs[j] = deepcopy(dfs[j])
+
+        # If requested, inject empirical-style coefficient noise into simulated HANK datasets.
+        # Priority: if SDs-from-draws are provided for the target dataset, use those.
+        # Otherwise fall back to the dataset-specific block from Σ̂⁻¹² (block diagonal across sources).
+        if occursin("HANK", df_name)
+            target = hank_target_dataset(df_name)
+            noise_df_files = infer_noise_paths(files, model_options)
+
+            # Import noise file 
+            noise_df = jldopen(noise_df_files[target], "r")["noise"]
+
+            # perturb coefficients
+            dfs[j] = perturb_coefficients_sd!(dfs[j], noise_df)
+        end
     end
 
-    return dfs, time_vec, time_dict, freq_type
+    return dfs, un_perturbed_dfs, time_vec, time_dict, freq_type
 end
+
+
+function infer_noise_paths(files::Dict{String,String}, model_options::ModelOptions)
+    isempty(files) && return Dict{String,String}()
+
+    any_path = first(values(files))
+    base_dir = dirname(any_path)                      # .../2_Data_processing
+    noise_dir = joinpath(base_dir, "noise_distributions")
+
+    m_label = _noise_measures_label(model_options.measures)
+    grid_tag = _noise_grid_tag(model_options.estimator)
+    end_year = get(model_options.data_cutoffs, "end", "") != "" ? String(model_options.data_cutoffs["end"])[1:4] : "all"
+    ci_tag = model_options.tag == " higher order15" ? model_options.tag : ""
+
+    out = Dict{String,String}()
+    for src in infer_empirical_sources(files)
+        ci_source = occursin("SCF", src) ? "SCF" : src
+        fname = "noise_draws_" * m_label * grid_tag * "_" * ci_source * "_" * end_year * ci_tag * ".jld2"
+        out[src] = joinpath(noise_dir, fname)
+    end
+
+    return out
+end
+
+"""Infer which empirical datasets are implied by the provided `files` mapping.
+
+This is primarily intended for HANK runs where keys look like "HANK a 2" but
+file basenames look like "HANK_PSID_2.csv".
+"""
+function infer_empirical_sources(files::Dict{String,String})
+    sources = Set{String}()
+    known = Set(["PSID", "CPS", "CEX", "SCF", "CPS2", "SIPP1", "SIPP2", "SIPP3"])
+
+    for (k, p) in files
+        if k in known
+            push!(sources, k)
+        end
+
+        b = basename(p)
+        if occursin("HANK_", b)
+            occursin("HANK_PSID", b) && push!(sources, "PSID")
+            occursin("HANK_CPS_", b) && push!(sources, "CPS")
+            occursin("HANK_CEX", b) && push!(sources, "CEX")
+            occursin("HANK_SCF", b) && push!(sources, "SCF")
+            occursin("HANK_CPS2", b) && push!(sources, "CPS2")
+            occursin("HANK_SIPP1", b) && push!(sources, "SIPP1")
+            occursin("HANK_SIPP2", b) && push!(sources, "SIPP2")
+            occursin("HANK_SIPP3", b) && push!(sources, "SIPP3")
+        end
+    end
+
+    return sort!(collect(sources))
+end
+
+
+
+function _noise_grid_tag(estimator)
+    grid_choice = typeof(estimator) <: SeriesEstimator ? estimator.integral_pcf_grid : estimator.grid_pcf
+    est_tag = typeof(estimator) <: SeriesEstimator ? "_series" : typeof(estimator) <: KernelEstimator ? "_kernel" : typeof(estimator) <: HistogramEstimator ? "_hist" : "_notagyet"
+
+    local grid_granularity
+    if grid_choice == 10
+        grid_granularity = "_deciles"
+    elseif grid_choice == 5
+        grid_granularity = "_quintiles"
+    elseif grid_choice == 100
+        grid_granularity = "_percentiles"
+    elseif grid_choice == 20
+        grid_granularity = "_ventiles"
+    else
+        # Fallback (rare): encode raw grid_choice
+        grid_granularity = "_grid$(grid_choice)"
+    end
+
+    return grid_granularity * est_tag
+end
+
+
+
+function _noise_measures_label(measures::AbstractVector{<:AbstractString})
+    label = ""
+    sorted_measures = sort(collect(measures))
+    for (i, meas) in enumerate(sorted_measures)
+        if i < length(sorted_measures)
+            label *= String(meas) * "_and_"
+        else
+            label *= String(meas)
+        end
+    end
+    return label
+end
+
 
 
 function generate_mesh(grid_points, dimension)
@@ -386,17 +683,6 @@ function select_grid_points(grid)
 
     # Add an epsilon to the bottom and subtract an epsilon from the top
     grid_points[end] = grid_points[end] - 1e-6
-
-    # # To avoid boundary issues
-    # if grid <= 20
-    #     grid_points[end]       = .99
-    # else
-    #     grid_points[end]       = (1 + grid_points[end-1]) / 2
-    # end
-
-    # # elseif grid_type == "chebyshev"
-    # #     grid_points            = chebyshev_nodes(grid)
-    # # end
 
     return grid_points
 end

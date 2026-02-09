@@ -20,7 +20,7 @@
 # log normal prior more appealing, as it was more difficult to deal with the tail behavior of the inverted chi-squared 
 # with low degrees of freedom.
 
-function estimate_prior(model_elements::StateSpaceModel, time_p::TimeParams, model_options::ModelOptions)
+function estimate_prior(model_elements::StateSpaceModel, model_options::ModelOptions)
     """Implements an independent Normal-Cauchy prior. """
 
     # Unloading 
@@ -32,31 +32,32 @@ function estimate_prior(model_elements::StateSpaceModel, time_p::TimeParams, mod
     number_of_dfs = length(MV)
     dimension = length(measures)
 
+    # Define hyperpriors
     hyperpriors = [
         # Minnesota parameters 
-        Uniform(0.2, 0.99), # specifying the size of the prior variance of endogenous variables, which do not correspond to own lags
-        Uniform(-0.99, 0.99), # persistence of state LOM
-        Uniform(-0.99, 0.99), # persistence of state LOM for aggregates
+        # Uniform(0.2, 0.99), # specifying the size of the prior variance of endogenous variables, which do not correspond to own lags
+        # Uniform(-0.99, 0.99), # persistence of state LOM
+        # Uniform(-0.99, 0.99), # persistence of state LOM for aggregates
+        Normal(0, 5),
+        Normal(0, 5),
+        Normal(0, 5),
         Normal(0, 1), # variance of the variances - factors
         Normal(0, 1), # variance of the variances - aggregates
-        # Normal(2, 1.5) # hyperparameter for the shape of correlations of LKJ prior, ν
+        Normal(0, 2) # hyperparameter for the shape of correlations of LKJ prior, ν
     ]
-    # κ_0 = minn_params[1]  # specifying the prior variance of coefficients that correspond to own lags of endogenous variables
-    # κ_1 = minn_params[2]  # specifying the size of the prior variance of endogenous variables, which do not correspond to own lags
-    # κ_2 = minn_params[3]  # specifying the size of the prior variance of non-deterministic exogenous terms
-    # κ_3 = minn_params[4]  # specifying the size of the prior variance of deterministic terms
-    # κ_4 = minn_params[5]  # specifying the function exponent of h(lags) = lags^κ_4. "lag decay rate"
-    # κ_5 = minn_params[6]  # persistence of state LOM
-    # κ_6 = minn_params[7]  # persistence of state LOM for aggregates
 
-    hyper_par_final, DIME_chains, _ = hyperparameter_optimization(hyperpriors, model_elements, time_p, model_options)
-    generate_marginals(DIME_chains, m_label, tag)
+    # Initial hyperparameters
+    hyper_params = [0.5, 0.5, 0.5, 0.5, 0.5, 3.0] # initial values for the hyperparameters
 
-    println("Hyperparameters: ", hyper_par_final)
-    println("Hyperparameters: ", hyperparameters)
+    # For Minnesota prior
+    hyperparameters[1] = 0.05
+    hyperparameters[2] = hyper_params[1]
+    hyperparameters[6] = hyper_params[2]
+    hyperparameters[7] = hyper_params[3]
+    hyper_params[4] = log(exp(hyper_params[4]) + 1)
+    hyper_params[5] = log(exp(hyper_params[5]) + 1)
 
-    # Construct prior hyperparameters
-    @unpack hyperparameters = prior
+    # Get initial parameter values
     prior_mean, A_prior, B_prior, C_prior, D_prior, V_prior = minnesota_prior(hyperparameters, pcs, u, lags, estimator)  # TODO: assumes aggs only have 1 lag
 
     # For measurement error
@@ -72,11 +73,12 @@ function estimate_prior(model_elements::StateSpaceModel, time_p::TimeParams, mod
     ϕ_Y = log(exp(1 - ρ_Y^2) - 1)    # ⇒ identical mapping for the aggregate persistence
 
     # ───  Prior list  ──────────────────────────────────────────────────────────
-    σ_ϕ = hyper_par_final[4] # These are already corrected
-    σ_ϕ_Y = hyper_par_final[5]
+    σ_ϕ = hyper_params[4] # These are already corrected
+    σ_ϕ_Y = hyper_params[5]
 
-    corr_Ω_shape = 3 #1 + log(1 + exp(hyper_par_final[6])) # shape parameter of 2, meaning mild prior towards identity matrix
+    corr_Ω_shape = 1 + log(1 + exp(hyper_params[6])) # shape parameter of 2, meaning mild prior towards identity matrix
 
+    # Defining initial priors
     priors = [
         MvNormal(prior_mean, V_prior),   # coefficients of A,B,C,D
         Normal(ϕ_F, σ_ϕ),               # prior for factor persistence
@@ -100,11 +102,14 @@ function estimate_prior(model_elements::StateSpaceModel, time_p::TimeParams, mod
         push!(priors, Normal(phi_Y_star, s_phi_Y))
     end
 
-    # Errors
+    # Pushing hyperpriors to the end of the priors list
+    push!(priors, hyperpriors...)
+
+    # Get initial parameters: Errors
     Ω_var, Ω_corr, Σ_prior = set_shock_priors(priors, factor_count, agg_count, n_param)
 
     # Final parameter vector
-    param_vector = [A_prior, B_prior, C_prior, D_prior, Ω_var, Ω_corr, Σ_prior]
+    param_vector = [A_prior, B_prior, C_prior, D_prior, Ω_var, Ω_corr, Σ_prior, hyper_params]
 
     # Getting indices for measurement error 
     meas_ind = extract_meas_ind(estimator, dimension)  # TODO: no need to worry about this 
@@ -556,16 +561,22 @@ function prioreval(par, priors, param_sizes)
     Ω_corr_cond = insupport(priors[4], par[3])
     Σ_cond = all([insupport(priors[4+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
 
-    if ABCD_cond && Ωf_cond && Ωy_cond && Σ_cond && Ω_corr_cond
+    hyper_cond = all([insupport(priors[end-length(par[5])+i], par[5][i]) for i in eachindex(par[5])])
+
+    if ABCD_cond && Ωf_cond && Ωy_cond && Σ_cond && Ω_corr_cond && hyper_cond
         # split covariance matrices into standard deviations and correlation matrices
         log_priorval = 0.0
         alarm = false
 
+        # Log-prior value
         log_priorval = sum(logpdf(priors[1], par[1]))  # very costly unfortunately
         log_priorval += sum([logpdf(priors[2], σ²_Ωf[i]) for i in eachindex(σ²_Ωf)])
         log_priorval += sum([logpdf(priors[3], σ²_Ωy[i]) for i in eachindex(σ²_Ωy)])
         log_priorval += logpdf(priors[4], par[3])
         log_priorval += sum([logpdf(priors[4+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
+
+        # Log-hyperprior value
+        log_priorval += sum([logpdf(priors[end-length(par[5])+i], par[5][i]) for i in eachindex(par[5])])
 
 
     else

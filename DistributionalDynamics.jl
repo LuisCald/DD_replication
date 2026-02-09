@@ -12,7 +12,7 @@
 # using RecursiveArrayTools
 
 # using StaticArrays
-cd("/Users/lc/Dropbox/Distributional_Dynamics/5_Code")
+# cd("/Users/lc/Dropbox/Distributional_Dynamics/5_Code")
 using Pkg
 Pkg.activate("env_dd_v19/")
 using ProgressMeter
@@ -82,7 +82,7 @@ using FiniteDiff
 using Latexify
 using BlackBoxOptim
 using KissSmoothing
-# using RCall
+using RCall
 using NaNStatistics
 using JuMP
 using HiGHS
@@ -125,6 +125,7 @@ include("EM.jl")
 include("RobustProjection.jl")
 include("HyperparameterOptimization.jl")
 include("MDD.jl")
+include("FEVD.jl")
 
 # include("IRFs")
 

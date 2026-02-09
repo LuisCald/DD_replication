@@ -229,14 +229,14 @@ function compare_to_external_sources(dv, ty, func_data, obs_data, user_params, t
                                     yformatter=:latex,
                                     ylabel=L"\textrm{Cyclical\,\,Component}",
                                     xticks=(xa[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(dts[1:40:end])]),
-                                    label=L"\textrm{Model}",
+                                    label="",#label=L"\textrm{Model}",
                                     lc=:red,
                                     la=opacities[xx],
                                     xtickfontsize=14,
                                     ytickfontsize=14,
                                     legendfontsize=10,
                                     guidefontsize=14,
-                                    legend=:best,
+                                    legend=false,
                                     lw=4, dpi=500
                                 )
 
@@ -682,8 +682,8 @@ function compare_to_DFA(dv, ty, time_params, type, case, measures, func_dict, gd
                     legendfontsize=10,
                     guidefontsize=14,
                     xticks=(collect(axes(deviations_r))[1][1:plot_int:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(xaxis[1:plot_int:end])]),
-                    legend=series_y[q][1] == "top" ? :best : false, #:outertopright,
-                    label=L"\textrm{Model}",#L"\textrm{%$(k)\,\,Approximation}",
+                    legend=false, #series_y[q][1] == "top" ? :best : false, #:outertopright,
+                    label="", #L"\textrm{Model}",#L"\textrm{%$(k)\,\,Approximation}",
                     # label = L"\textrm{%$(k)\,-\,DFA\,-\, ρ: %$(ρ)}",
                     lw=4, dpi=500
                 )
@@ -696,7 +696,7 @@ function compare_to_DFA(dv, ty, time_params, type, case, measures, func_dict, gd
                     ls=select_linestyle("DFA"),
                     lw=4,
                     legendmarkerstroke=2,
-                    label=L"\textrm{DFA}",
+                    label="", #L"\textrm{DFA}",
                 )
 
                 # Plots.plot!(
@@ -735,12 +735,12 @@ function compare_to_DFA(dv, ty, time_params, type, case, measures, func_dict, gd
                         xformatter=:latex,
                         yformatter=:latex,
                         xticks=(collect(axes(dt[2][k][j]["wealth"]))[1][1:plot_int:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(xaxis[1:plot_int:end])]),
-                        legend=:best,
+                        legend=false,
                         xtickfontsize=10,
                         ytickfontsize=10,
                         legendfontsize=10,
                         guidefontsize=14,
-                        label=L"\textrm{Model}",
+                        label="", #L"\textrm{Model}",
                         # label = L"\textrm{%$(k)\,-\,DFA\,-\, corr.: %$(ρ)}",
                         lw=4, dpi=500
                     )
@@ -869,9 +869,9 @@ function compare_to_data(dv, ty, func_data, obs_data, user_t, time_params, model
     dates = Dict()
 
     # Common annual series 
-    top = Dict("consensus" => Dict())
-    bot = Dict("consensus" => Dict())
-    mid = Dict("consensus" => Dict())
+    top = Dict()
+    bot = Dict()
+    mid = Dict()
 
     for dt in [top, bot, mid]
         for source in data_sources
@@ -884,12 +884,12 @@ function compare_to_data(dv, ty, func_data, obs_data, user_t, time_params, model
                 dt[source*"_obs"][obj] = Dict()
                 dt[source]["lb"][obj] = Dict()
                 dt[source]["ub"][obj] = Dict()
-                dt["consensus"][obj] = Dict()
+                # dt["consensus"][obj] = Dict()
             end
         end
-        for obj in ["shares", "quantiles"]
-            dt["consensus"][obj] = Dict()
-        end
+        # for obj in ["shares", "quantiles"]
+        #     dt["consensus"][obj] = Dict()
+        # end
     end
 
     # Defining the series 
@@ -936,10 +936,10 @@ function compare_to_data(dv, ty, func_data, obs_data, user_t, time_params, model
         # @info(dates[meas])
         for obj in ["shares", "quantiles"] #TODO: levels?
 
-            # Adjust frequencies, Confine to dates
-            top["consensus"][obj][meas] = subset_to_cutoff(dv["consensus"][ty][meas][obj]["common series"][series["top"]], dates[meas], tmin, tmax, obj, agg_corr)
-            bot["consensus"][obj][meas] = subset_to_cutoff(dv["consensus"][ty][meas][obj]["common series"][series["bot"]], dates[meas], tmin, tmax, obj, agg_corr)
-            mid["consensus"][obj][meas] = subset_to_cutoff(dv["consensus"][ty][meas][obj]["common series"][series["mid"]], dates[meas], tmin, tmax, obj, agg_corr)
+            # # Adjust frequencies, Confine to dates
+            # top["consensus"][obj][meas] = subset_to_cutoff(dv["consensus"][ty][meas][obj]["common series"][series["top"]], dates[meas], tmin, tmax, obj, agg_corr)
+            # bot["consensus"][obj][meas] = subset_to_cutoff(dv["consensus"][ty][meas][obj]["common series"][series["bot"]], dates[meas], tmin, tmax, obj, agg_corr)
+            # mid["consensus"][obj][meas] = subset_to_cutoff(dv["consensus"][ty][meas][obj]["common series"][series["mid"]], dates[meas], tmin, tmax, obj, agg_corr)
 
 
             # Adjust frequencies, Confine to dates

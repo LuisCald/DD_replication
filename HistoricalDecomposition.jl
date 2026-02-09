@@ -7,7 +7,7 @@
 Same as before.
 """
 function build_selectors(r::Int, q::Int)
-    n = 4r + q
+    n = r + q
     J = zeros(eltype(1.0), r, n)
     id_mat = diagm(ones(eltype(1.0), r))
     J[:, 1:r] .= id_mat
@@ -15,7 +15,7 @@ function build_selectors(r::Int, q::Int)
     S_f[1:r, 1:r] .= id_mat
     S_y = zeros(eltype(1.0), n, q)
     id_mat = diagm(ones(eltype(1.0), q))
-    S_y[4r+1:4r+q, 1:q] .= id_mat
+    S_y[r+1:r+q, 1:q] .= id_mat
     return J, S_f, S_y, n
 end
 
@@ -38,178 +38,160 @@ function smoothed_innovations(x_smooth::AbstractMatrix, Φ::AbstractMatrix; x0=n
     return ε
 end
 
+
 """
-    historical_decomp_factors(Φ; r, q, ε̂=nothing, x_smooth=nothing, x0=nothing,
-                              splitting=:group,
-                              factor_names=nothing, agg_names=nothing)
+Historical decomposition for f_t using *structural* shocks identified by a blocked Cholesky.
 
-Historical contributions to f_t from:
-- factor shocks (η_t ∈ ℝ^r),
-- aggregate shocks (ζ_t ∈ ℝ^q),
-- optional initial state x0.
+- dε_smoothed: reduced-form innovations (n×T) from the smoother
+- Ω: covariance matrix of reduced-form innovations (n×n), consistent with dε_smoothed ordering
+- shock_order:
+    :agg_first  -> [Aggregates, Distributional] (aggregates ordered first)
+    :dist_first -> [Distributional, Aggregates]
 
-Arguments:
-- If `ε̂` is not provided, pass `x_smooth` and it will be computed.
-- `splitting`:
-    :group     -> returns grouped matrices (cf, cy, c0) as before,
-                  and a 3D cube with shocks [:factors, :aggregate, :initial]
-    :by_shock  -> returns a 3D cube separating each of the r+q shocks + initial
-- `factor_names` and `agg_names` (Vectors of Symbols) are optional labels for shocks.
-
-Returns NamedTuple:
-  (cf, cy, c0, fhat, recon, maxerr, cube, order, ids)
-
-- `cube` is r × T × S, where S is:
-    S = 3          if splitting = :group
-    S = r + q (+1) if splitting = :by_shock (the +1 is for :initial when x0 is provided)
-- `order` :: Vector{Symbol} lists shock names in the 3rd dim order of `cube`
-- `ids` is a NamedTuple mapping each factor name to its index (for plotting convenience)
+Returns the same outputs as your original function, but cf/cy/cube are based on structural shocks.
 """
-# HD = historical_decomp_factors(L; r, q, ε̂=εhat, x_smooth=xsm, x0=x0,
-#     splitting=:by_shock,
-#     factor_names=[:f1, :f2, :f3],   # optional
-#     agg_names=[:y1, :y2])           # optional
-
-function historical_decomp_factors(Φ, r, q, dε_smoothed, x_smoothed; splitting::Symbol=:group)
-
-    J, S_f, S_y, n = build_selectors(r, q)
+function historical_decomp_factors_blockchol(
+    Φ, r::Int, q::Int,
+    dε_smoothed::AbstractMatrix,
+    x_smoothed::AbstractMatrix,
+    Ω::AbstractMatrix;
+    splitting::Symbol=:group,
+    shock_order::Symbol=:agg_first
+)
+    # Selectors in your companion structure (n = 4r + q)
+    J, S_f, S_y, n = build_selectors(r, q)  # from your HistoricalDecomposition.jl :contentReference[oaicite:2]{index=2}
     T = size(dε_smoothed, 2)
+    @assert size(dε_smoothed, 1) == n "dε_smoothed must be n×T with n = r + q"
+    @assert size(Ω, 1) == n && size(Ω, 2) == n "Ω must be n×n"
 
-    # Default names
-    factor_names = Symbol.("f", 1:r)
-    agg_names = Symbol.("y", 1:q)
-    x0 = zeros(eltype(Φ), n)  # if no initial, just zeros
+    # Build shock selector matrix S in desired ordering
+    # Columns correspond to shocks; rows correspond to innovation vector positions.
+    if shock_order === :agg_first
+        S = hcat(S_y, S_f)   # [Aggregates, Distributional]
+        agg_idx = 1:q
+        dist_idx = (q+1):(q+r)
+        order = splitting === :group ? [:aggregate, :factors] : vcat(Symbol.("y", 1:q), Symbol.("f", 1:r))
+    elseif shock_order === :dist_first
+        S = hcat(S_f, S_y)   # [Distributional, Aggregates]
+        dist_idx = 1:r
+        agg_idx = (r+1):(r+q)
+        order = splitting === :group ? [:factors, :aggregate] : vcat(Symbol.("f", 1:r), Symbol.("y", 1:q))
+    else
+        error("shock_order must be :agg_first or :dist_first")
+    end
 
-    # Running states for grouped pieces (your original outputs)
-    zf = zeros(eltype(Φ), n)   # due to factor shocks (grouped)
-    zy = zeros(eltype(Φ), n)   # due to aggregate shocks (grouped)
-    z0 = zeros(eltype(Φ), n)
+    # Block-Cholesky impact matrix: u_t = B * e_t
+    B = get_structural_mat(Ω, S, r, q; type=:block_cholesky, shock_order=shock_order)  # from FEVD.jl :contentReference[oaicite:3]{index=3}
+    Bsmall = S' * B  # (r+q)×(r+q); since B = S*Bsmall and S'S = I
 
+    # Outputs
     cf = zeros(eltype(Φ), r, T)
     cy = zeros(eltype(Φ), r, T)
     c0 = zeros(eltype(Φ), r, T)
-    fhat = (J * x_smoothed)
+    fhat = J * x_smoothed
 
-    # Optional per-shock tracking
+    # Running state contributions
+    zf = zeros(eltype(Φ), n)   # due to distributional structural shocks
+    zy = zeros(eltype(Φ), n)   # due to aggregate structural shocks
+    z0 = zeros(eltype(Φ), n)
+
+    # Per-shock tracking
     per_shock = splitting === :by_shock
-    Zf = per_shock ? zeros(eltype(Φ), n, r) : nothing
-    Zy = per_shock ? zeros(eltype(Φ), n, q) : nothing
+    Z = per_shock ? zeros(eltype(Φ), n, r + q) : nothing
 
-    # Prepare cube
-    if splitting === :group
-        S = 2   # factors, aggregate
-    elseif splitting === :by_shock
-        S = r + q
-    else
-        error("splitting must be :group or :by_shock")
-    end
-    cube = zeros(eltype(Φ), r, T, S)
-
-    # Order of shocks (for the cube's 3rd dimension)
-    if splitting === :group
-        order = [:factors, :aggregate]
-    else
-        order = vcat(factor_names, agg_names)
-    end
-
-    # Indices in cube for convenience
-    idx_factors = splitting === :group ? 1 : (1:r)
-    idx_aggregate = splitting === :group ? 2 : (r+1:r+q)
+    # Cube
+    Sdim = splitting === :group ? 2 : (r + q)
+    cube = zeros(eltype(Φ), r, T, Sdim)
 
     @inbounds for t in 1:T
-        # splitting reduced-form innovations
-        ηt = S_f' * dε_smoothed[:, t]           # r
-        ζt = S_y' * dε_smoothed[:, t]           # q
+        # Reduced-form innovations in the selected rows, in the same order as S
+        u_small = S' * dε_smoothed[:, t]          # (r+q)
+        e_t = Bsmall \ u_small                    # structural shocks (r+q), orthogonal
 
-        # --- Grouped recursions (for cf, cy, c0)
-        zf = Φ * zf + S_f * ηt
-        zy = Φ * zy + S_y * ζt
-        if x0 !== nothing
-            z0 = Φ * z0
-        end
+        # Innovations attributable to each block (in full n-dim innovation space)
+        u_agg = B[:, agg_idx] * view(e_t, agg_idx)
+        u_dist = B[:, dist_idx] * view(e_t, dist_idx)
+
+        # Recursions
+        zf = Φ * zf + u_dist
+        zy = Φ * zy + u_agg
+        z0 = Φ * z0
 
         @views cf[:, t] .= J * zf
         @views cy[:, t] .= J * zy
-        if x0 !== nothing
-            @views c0[:, t] .= J * z0
-        end
+        @views c0[:, t] .= J * z0
 
-        # --- Per-shock recursions for cube
         if per_shock
-            # propagate each column independently
-            Zf = Φ * Zf + S_f * Diagonal(ηt)   # n×r
-            Zy = Φ * Zy + S_y * Diagonal(ζt)   # n×q
-
-            # write factor-shock slices
-            for j in 1:r
-                @views cube[:, t, j] .= J * view(Zf, :, j)
-            end
-            # write aggregate-shock slices
-            for j in 1:q
-                @views cube[:, t, r+j] .= J * view(Zy, :, j)
+            # Track each structural shock separately
+            for j in 1:(r+q)
+                @views Z[:, j] .= Φ * view(Z, :, j) .+ B[:, j] .* e_t[j]
+                @views cube[:, t, j] .= J * view(Z, :, j)
             end
         else
-            # grouped: factors, aggregate, optional initial
-            @views cube[:, t, 1] .= cf[:, t]
-            @views cube[:, t, 2] .= cy[:, t]
+            # grouped cube
+            if shock_order === :agg_first
+                @views cube[:, t, 1] .= cy[:, t]  # aggregate first
+                @views cube[:, t, 2] .= cf[:, t]
+            else
+                @views cube[:, t, 1] .= cf[:, t]
+                @views cube[:, t, 2] .= cy[:, t]
+            end
         end
     end
 
     recon = c0 .+ cf .+ cy
     maxerr = maximum(abs.(recon .- fhat))
 
-    # ids: map factor variable names to row indices for plotting
-    ids = (; (factor_names[i] => i for i in 1:r)...)
+    ids = (; (Symbol("f$i") => i for i in 1:r)...)
 
     return (cf=cf, cy=cy, c0=c0, fhat=fhat, recon=recon, maxerr=maxerr,
         cube=cube, order=order, ids=ids)
 end
 
 
-function plot_hist_decomp(vars_to_plot, HDs_to_plot, order, ids, timeline)
+# function plot_hist_decomp(vars_to_plot, HDs_to_plot, order, ids, timeline)
 
-    r, T, S = size(HDs_to_plot)
+#     r, T, S = size(HDs_to_plot)
 
-    # which shocks (3rd-dim slices) to include
-    shocks_syms = order
-    # Map symbols in shocks_syms to their positions in `order`
-    pos = map(shocks_syms) do s
-        i = findfirst(==(s), order)
-        @assert i !== nothing "Shock $(s) not found in `order`"
-        i
-    end
-    Ssel = length(pos)
-    x_axis = collect(1:length(timeline))
+#     # which shocks (3rd-dim slices) to include
+#     shocks_syms = order
+#     # Map symbols in shocks_syms to their positions in `order`
+#     pos = map(shocks_syms) do s
+#         i = findfirst(==(s), order)
+#         @assert i !== nothing "Shock $(s) not found in `order`"
+#         i
+#     end
+#     Ssel = length(pos)
+#     x_axis = collect(1:length(timeline))
 
-    legend_labels = splitting == :group ? [L"\textrm{Distribution}" L"\textrm{Aggregates}"] : Matrix(String.(shocks_syms))
-    for (k, (sym, title_str)) in enumerate(vars_to_plot)
-        i = getproperty(ids, sym)  # row index for this factor
+#     legend_labels = splitting == :group ? [L"\textrm{Distribution}" L"\textrm{Aggregates}"] : Matrix(String.(shocks_syms))
+#     for (k, (sym, title_str)) in enumerate(vars_to_plot)
+#         i = getproperty(ids, sym)  # row index for this factor
 
-        # Gather contributions for each selected shock: Ssel × |timeline|
-        # (we’ll transpose for bar(...) which expects series in columns)
-        contrib = Array{eltype(cube)}(undef, Ssel, length(timeline))
-        for (j, sidx) in enumerate(pos)
-            @views contrib[j, :] = cube[i, 1:length(timeline), sidx]
-        end
+#         # Gather contributions for each selected shock: Ssel × |timeline|
+#         # (we’ll transpose for bar(...) which expects series in columns)
+#         contrib = Array{eltype(cube)}(undef, Ssel, length(timeline))
+#         for (j, sidx) in enumerate(pos)
+#             @views contrib[j, :] = cube[i, 1:length(timeline), sidx]
+#         end
 
-        # Stacked bars per time index
-        p = groupedbar(x_axis, contrib'; bar_position=:stack, color=[:blue :orange], labels=legend_labels, xticks=(x_axis[1:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(timeline[1:20:end])]), xformatter=:latex, yformatter=:latex, fontsize=14)
-        # bar_width=0.5, 
+#         # Stacked bars per time index
+#         p = groupedbar(x_axis, contrib'; bar_position=:stack, color=[:blue :orange], labels=legend_labels, xticks=(x_axis[1:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(timeline[1:20:end])]), xformatter=:latex, yformatter=:latex, fontsize=14)
+#         # bar_width=0.5, 
 
-        # Zero line for reference
-        hline!(p, [zero(eltype(contrib))]; lw=0.5, alpha=0.6, label=false)
+#         # Zero line for reference
+#         hline!(p, [zero(eltype(contrib))]; lw=0.5, alpha=0.6, label=false)
 
-        # # Optional overlay of total (sum across selected shocks)
-        # if overlay_total
-        #     tot = vec(sum(contrib; dims=1))
-        #     plot!(p, timeline, tot; lw=1.5, label="Total")
-        # end
+#         # # Optional overlay of total (sum across selected shocks)
+#         # if overlay_total
+#         #     tot = vec(sum(contrib; dims=1))
+#         #     plot!(p, timeline, tot; lw=1.5, label="Total")
+#         # end
 
-        Plots.savefig(p, "/home/luisc/Distributional_Dynamics/5_Code/historical_decomposition_$(sym).pdf")
-    end
-end
+#         Plots.savefig(p, "/home/luisc/Distributional_Dynamics/5_Code/historical_decomposition_$(sym).pdf")
+#     end
+# end
 
-using DataFrames, Statistics, StatsBase, Dates
 
 """
     make_hd_tables(cube, order, ids, years, quarters;
@@ -247,7 +229,6 @@ Returns
 -------
 (table_by_decade::DataFrame, table_by_event::DataFrame)
 """
-using DataFrames, Statistics
 
 """
     make_hd_tables(cube, order, ids, years, quarters;
@@ -318,16 +299,17 @@ function make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=
     @assert length(years) == T && length(quarters) == T "years/quarters must match T"
 
     # Identify per-shock vs grouped
-    is_factor_shock(s::Symbol) = startswith(String(s), factor_prefix)
-    is_agg_shock(s::Symbol) = startswith(String(s), agg_prefix)
+    is_factor_shock(s::Symbol) = occursin(r"^f\d+$", String(s))  # f1, f2, ...
+    is_agg_shock(s::Symbol) = occursin(r"^y\d+$", String(s))  # y1, y2, ...
 
     factor_slices = findall(s -> is_factor_shock(s), order)
     agg_slices = findall(s -> is_agg_shock(s), order)
+
     idx_group_f = findfirst(==(Symbol(:factors)), order)
     idx_group_y = findfirst(==(Symbol(:aggregate)), order)
 
     has_pershock = !isempty(factor_slices) || !isempty(agg_slices)
-    has_grouped = idx_group_f !== nothing || idx_group_y !== nothing
+    has_grouped = (idx_group_f !== nothing) || (idx_group_y !== nothing)
 
     # Reconstructed total series for each factor: sum across shocks (dim=3)
     cube = abs.(cube)   # work with absolute contributions
@@ -335,6 +317,11 @@ function make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=
     @inbounds for i in 1:r
         @views recon[i, :] = sum(cube[i, :, :], dims=2)[:]   # (T,)
     end
+    # recon = Array{eltype(cube)}(undef, r, T)
+    # @inbounds for i in 1:r
+    #     @views recon[i, :] = sum(cube[i, :, :], dims=2)[:]   # signed total
+    # end
+
 
     # Build decades (labels like "1990s")
     years_unique = sort(unique(years))
@@ -350,39 +337,6 @@ function make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=
         d0 = b === nothing ? (y ÷ 10) * 10 : decade_bounds[b]
         decade_label[t] = "$(d0)s"
     end
-
-    # Event anchors — replicate your Stata distances
-    dist2dotcom = (quarters .- 1) .+ (years .- 2001) .* 4   # 2001Q1
-    dist2greatrecession = (quarters .- 4) .+ (years .- 2007) .* 4   # 2007Q4
-    dist2covid = (quarters .- 4) .+ (years .- 2019) .* 4   # 2019Q4
-    dist2gulf = (quarters .- 3) .+ (years .- 1990) .* 4   # 1990Q3
-    dist2iran = (quarters .- 3) .+ (years .- 1981) .* 4   # 1981Q3
-    dist2oil = (quarters .- 4) .+ (years .- 1973) .* 4   # 1973Q4
-    dist2unemp = (quarters .- 4) .+ (years .- 1969) .* 4   # 1969Q4
-
-    # default_events = Dict(
-    #     "Dot-com (2001Q1)" => (-8:12),
-    #     "Great Recession (2007Q4)" => (-8:12),
-    #     "COVID (2019Q4)" => (-8:12),
-    #     "Gulf War (1990Q3)" => (-8:12),
-    #     "Iran crisis (1981Q3)" => (-8:12),
-    #     "Oil embargo (1973Q4)" => (-8:12),
-    #     "Unemployment peak (1969Q4)" => (-8:12),
-    # )
-
-    if event_windows !== nothing
-        default_events = event_windows
-    end
-
-    event_dists = Dict(
-        "Dotcom" => dist2dotcom, # (2001Q1)
-        "Great Recession" => dist2greatrecession, # (2007Q4)
-        "COVID" => dist2covid, # (2019Q4)
-        "Gulf War" => dist2gulf, # (1990Q3)
-        "Double-Dip" => dist2iran, # (1981Q3)
-        "Oil Embargo" => dist2oil, # (1973Q4)
-        "Unemployment Recession" => dist2unemp, # (1969Q4)
-    )
 
     # Return three source series for target i over a mask: (own, other, aggs)
     function contrib_own_other_agg(i::Int, mask::AbstractVector{Bool})
@@ -431,6 +385,36 @@ function make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=
             VarSharePct=[vs(own), vs(other), vs(aggs)])
     end
 
+    # function summarize_window(i::Int, mask::AbstractVector{Bool})
+    #     own, other, aggs = contrib_own_other_agg(i, mask)
+
+    #     # signed total contribution over the window
+    #     @views total = recon[i, mask]
+
+    #     denom = sum(total .^ 2) + eps()   # "energy" of the total
+
+    #     share(x) = 100 * sum(x .^ 2) / denom
+
+    #     DataFrame(; Source=["OwnFactor", "OtherFactors", "Aggregates"],
+    #         VarSharePct=[share(own), share(other), share(aggs)])
+    # end
+
+    # function summarize_window(i::Int, mask::AbstractVector{Bool})
+    #     own, other, aggs = contrib_own_other_agg(i, mask)
+    #     @views total = recon[i, mask]
+    #     println(sum(total .^ 2))
+
+    #     E(x) = sum(x .^ 2)
+    #     denom = E(own) + E(other) + E(aggs) + eps()   # no cancellation
+
+    #     share(x) = 100 * E(x) / denom
+
+    #     DataFrame(; Source=["OwnFactor", "OtherFactors", "Aggregates"],
+    #         VarSharePct=[share(own), share(other), share(aggs)])
+    # end
+
+
+
     # ---------- By DECADE ----------
     rows_dec = DataFrame(TargetFactor=String[], Decade=String[],
         Source=String[], VarSharePct=Float64[])
@@ -448,26 +432,6 @@ function make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=
     end
     sort!(rows_dec, [:TargetFactor, :Decade, :Source])
 
-    # ---------- By EVENT WINDOWS ----------
-    # rows_evt = DataFrame(TargetFactor=String[], Event=String[], Window=String[],
-    #     Source=String[], VarSharePct=Float64[])
-    # for (event_name, win) in default_events
-    #     dist = event_dists[event_name]
-    #     winvec = collect(win)
-    #     for (sym, i) in pairs(ids)
-    #         tf_name = String(sym)
-    #         mask = in.(dist, Ref(winvec))
-    #         if any(mask)
-    #             summ = summarize_window(i, mask)
-    #             summ.TargetFactor .= tf_name
-    #             summ.Event .= event_name
-    #             summ.Window .= string(first(win), ":", last(win), " qtrs")
-    #             append!(rows_evt, summ)
-    #         end
-    #     end
-    # end
-
-    # using Dates, DataFrames, Plots
 
     # ---- Build NBER labels + masks once (ensures consistent strings everywhere) ----
     fmtq(y, m) = "$(y)Q$(((m-1) ÷ 3) + 1)"
@@ -550,7 +514,7 @@ function make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=
             p1 = groupedbar(cats[1:4], X[1:4, :];
                 bar_position=:dodge, bar_width=0.8,
                 label=[L"\textrm{Distribution}" L"\textrm{Aggregates}"],
-                ylabel=L"\textrm{Variance\,\, share\, (\%)}",
+                ylabel=L"\textrm{Historical\,\, share\, (\%)}",
                 xformatter=:latex,
                 yformatter=:latex,
                 legend=false,
@@ -568,7 +532,7 @@ function make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=
                 bar_position=:dodge, bar_width=0.8,
                 label=[L"\textrm{Distribution}" L"\textrm{Aggregates}"],
                 legend=false,
-                ylabel=L"\textrm{Variance\,\, share\, (\%)}",
+                ylabel=L"\textrm{Historical\,\, share\, (\%)}",
                 xformatter=:latex,
                 yformatter=:latex,
                 color=color_for_plot,
@@ -589,48 +553,56 @@ function make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=
     return rows_dec, rows_nber
 end
 
+# A, B, C, D, Ω_var, Ω_corr, Σ = matrisize(par_final[1:end-6], param_sizes)
+# r_dist = param_sizes[1][1]
+# q_agg = param_sizes[2][2]
 
+# # Example
+# Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)  # softplus transformation
+# mat_Ω_corr = Matrix(Ω_corr)
+# Ω = Ω_var * mat_Ω_corr * Ω_var'
 
-# Example
-A, B, C, D, Ω_big, Σ = matrisize(par_final, param_sizes)
-r, q = size(B)
-nₛ = 4r + q
-Tval = eltype(A)
+# r, q = size(B)
+# nₛ = 4r + q
+# Tval = eltype(A)
 
-# --------- constant matrices ------------------------------------
-AI = Matrix{Tval}(I, r, r)
+# using Plots, StatsPlots
+# @unpack u = model_elements
+# smoother_res, logV, alarm = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
+# @unpack x_smoothed, x_filtered, dε_smoothed = smoother_res               # F̂_t   (nF × T)
 
-Φ = zeros(Tval, nₛ, nₛ)
-@views begin
-    Φ[1:r, 1:r] .= A
-    Φ[1:r, 4r+1:4r+q] .= B
-    Φ[r+1:2r, 1:r] .= AI
-    Φ[2r+1:3r, r+1:2r] .= AI
-    Φ[3r+1:4r, 2r+1:3r] .= AI
-    Φ[4r+1:end, 1:r] .= C
-    Φ[4r+1:end, 4r+1:end] .= D
-end
+# AI = Matrix{Tval}(I, r, r);
 
-using Plots, StatsPlots
-smoother_res, logV, alarm = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options; smooth=true)
-@unpack x_smoothed, x_filtered, dε_smoothed = smoother_res               # F̂_t   (nF × T)
-HD = historical_decomp_factors(Φ, r, q, dε_smoothed, x_smoothed, splitting=:by_shock)
-timeline = QuarterlyDate(user_t[1]["year"], user_t[1]["quarter"]):Quarter(1):QuarterlyDate(user_t[2]["year"], user_t[2]["quarter"])
+# Φ = zeros(Tval, nₛ, nₛ);
+# @views begin
+#     Φ[1:r, 1:r] .= A
+#     Φ[1:r, 4r+1:4r+q] .= B
+#     Φ[r+1:2r, 1:r] .= AI
+#     Φ[2r+1:3r, r+1:2r] .= AI
+#     Φ[3r+1:4r, 2r+1:3r] .= AI
+#     Φ[4r+1:end, 1:r] .= C
+#     Φ[4r+1:end, 4r+1:end] .= D
+# end
 
-# suppose:
-cube = HD.cube
-order = HD.order
-ids = HD.ids
-T = length(timeline)
+# ids_sub = vcat(1:r, 4r+1:4r+q);  # indices of nonzero shock rows
+# Φ_sub = Φ[ids_sub, ids_sub];  # truncate zero rows/cols if q < full q
 
-# vars_to_plot = [(:f1, "Factor 1"), (:f2, "Factor 2"), (:f3, "Factor 3"), (:f4, "Factor 4"), (:f5, "Factor 5"), (:f6, "Factor 6"), (:f7, "Factor 7"), (:f8, "Factor 8")]
+# dε_smoothed_sub = dε_smoothed[ids_sub, :]
+# x_smoothed_sub = x_smoothed[ids_sub, :]
 
-# plt = plot_hist_decomp(vars_to_plot, cube, order, ids, timeline)
+# HD = historical_decomp_factors_blockchol(Φ_sub, r, q, dε_smoothed_sub, x_smoothed_sub, Ω)
 
+# timeline = QuarterlyDate(user_t[1]["year"], user_t[1]["quarter"]):Quarter(1):QuarterlyDate(user_t[2]["year"], user_t[2]["quarter"])
 
-# Given your outputs:
-years = year.(timeline)
-quarters = quarter.(timeline)   # length T, values 1..4
+# # suppose:
+# cube = HD.cube
+# order = HD.order
+# ids = HD.ids
+# T = length(timeline)
 
-table_by_decade, table_by_event = make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=true)
+# # Given your outputs:
+# years = year.(timeline)
+# quarters = quarter.(timeline)   # length T, values 1..4
+
+# table_by_decade, table_by_event = make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=true)
 

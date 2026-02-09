@@ -11,8 +11,11 @@ const func_data, time_params, model_elements = estimation_prep(obs_data, model_o
 println("finished prepping data")
 const (param_vector, param_sizes, priors, meas_ind, Σ_ids) = set_params(model_elements, time_params, model_options)
 println("finished setting priors")
-SSM(par) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
-SSM(par, _) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
+
+# Extract hyperpriors
+hyperpriors = priors[end-5:end]
+SSM(par) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
+SSM(par, _) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
 
 # Generate plots 
 kind_of_plots = :mcmc
@@ -33,14 +36,14 @@ println("finished optimization")
 @unpack data_sources = func_data
 user_t = (deepcopy(tmin), deepcopy(tmax))
 opttag = "from_mcmc"
-logV, alarm = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options)
+logV, alarm = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options)
 
 local dv
 if tag == "Γ estimated"
     A_new, B_new, Ω_new, Δ_new, G_new, likeli_vec, Δ_log = run_EM_algorithm(param_vector, param_sizes, meas_ind, Σ_ids, model_elements, model_options)
     dv, _ = reconstruct_data_short(A_new, B_new, Ω_new, Δ_new, G_new, likeli_vec, Δ_log, model_elements, obs_data, model_options, time_params, data_sources; reconstruction_to_show=false, dε_smoothed=false)
 else
-    dv, _ = reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
+    dv, _ = reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
 end
 
 within_stat_dict = Dict()
@@ -49,15 +52,16 @@ include("CreateTimeSeries.jl")
 include("Validation.jl")
 for (c, k) in enumerate(keys(dv))
     within_stat_dict[k] = Dict()
-    for ty in ["normal", "average"]
+    # for ty in ["normal", "average"]
+    for ty in ["normal"]
         within_stat_dict[k][ty], dv[k][ty] = export_functional_data(dv[k][ty], ty, k, kind_of_plots, obs_data, func_data, time_params, user_t, model_options, false, true)
 
         if c == length(keys(dv)) && ty == "normal"
             init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
             dict_path = init_path * "/7_Results/$m_label" * "$tag" * "/$opttag/plots/"
             compare_to_data(dv, ty, func_data, obs_data, user_t, time_params, model_options, kind_of_plots, label)
-            if tag != " HANK"
-                export_combined_stat_dict_to_latex(within_stat_dict, [measures..., "copula"], dict_path, label) # [measures..., "copula"]
+            export_combined_stat_dict_to_latex(within_stat_dict, [measures..., "copula"], dict_path, label) # [measures..., "copula"]
+            if !occursin(" HANK", tag)
                 compare_to_external_sources(dv, ty, func_data, obs_data, user_t, time_params, model_options, kind_of_plots, label)
             end
         end
@@ -66,6 +70,7 @@ end
 println("done!")
 
 # Generate Correlations Table 
+type = "from_mcmc"
 export_table_to_tex_with_strings(measures, :from_mcmc)
 generate_correlations_table_for_external_comparisons("SCF", measures, tag, type, "cycle")
 
@@ -76,9 +81,87 @@ folder = "/home/luisc/Distributional_Dynamics/7_Results/MDD/"
 jld2_files = [f for f in readdir(folder) if endswith(f, ".jld2")]
 
 for file in jld2_files
+    println("Processing file: ", file)
     dd = jldopen(folder * file, "r")
     println("harmonic mean", dd["mdd_hm"])
     println("bridge sampler", dd["mdd_bs"])
+end
+
+
+# sizes: Φ (n×n), J (r×n), B (n×(r_dist+q_agg))
+A, B, C, D, Ω_var, Ω_corr, Σ = matrisize(par_final[1:end-6], param_sizes)
+r_dist = param_sizes[1][1]
+q_agg = param_sizes[2][2]
+
+# Example
+Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)  # softplus transformation
+mat_Ω_corr = Matrix(Ω_corr)
+Ω = Ω_var * mat_Ω_corr * Ω_var'
+
+r, q = size(B)
+nₛ = 4r + q
+Tval = eltype(A)
+
+# Getting priors
+# priors = get_priors(model_elements, model_options, hyper_params)
+# push!(priors, hyperpriors...)
+
+# Get controls 
+@unpack u = model_elements
+smoother_res, logV, alarm = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
+@unpack x_smoothed, dε_smoothed = smoother_res
+
+# Y = x_smoothed[vcat(collect(1:8), collect(33:57)), :]; #
+# Y = vcat(x_smoothed[collect(1:8), :], u);
+# p = 1;
+# y = Y';
+# (T, K) = size(y);
+# X = y;
+# y = transpose(y);
+# Y = y[:, p+1:T];
+# X = lagmatrix(X, p)';
+# β = (Y * X') / (X * X');
+# ϵ = Y - β * X;
+# Σ_var = ϵ * ϵ' / (T - p * K - 1);
+
+# --------- constant matrices ------------------------------------
+AI = Matrix{Tval}(I, r, r);
+
+Φ = zeros(Tval, nₛ, nₛ);
+@views begin
+    Φ[1:r, 1:r] .= A
+    Φ[1:r, 4r+1:4r+q] .= B
+    Φ[r+1:2r, 1:r] .= AI
+    Φ[2r+1:3r, r+1:2r] .= AI
+    Φ[3r+1:4r, 2r+1:3r] .= AI
+    Φ[4r+1:end, 1:r] .= C
+    Φ[4r+1:end, 4r+1:end] .= D
+end
+
+ids_sub = vcat(1:r, 4r+1:4r+q);  # indices of nonzero shock rows
+Φ_sub = Φ[ids_sub, ids_sub];  # truncate zero rows/cols if q < full q
+
+tbl = fevd_dist_vs_agg(model_elements, model_options, obs_data, Φ_sub, Ω; r, q, horizon=1, factor_names=nothing, shock_order=:agg_first)
+# tbl = fevd_dist_vs_agg(model_elements, model_options, obs_data, Φ_sub, Ω; r, q, horizon=20, factor_names=nothing, shock_order=:dist_first)
+
+# LaTeX export
+latex_str = pretty_table(tbl, backend=Val(:latex), tf=tf_latex_default)
+
+# Write to a .tex file
+open("fevd_table.tex", "w") do io
+    write(io, latex_str)
+end
+
+function VAR_fit(y::AbstractArray, p::Int64)
+    (T, K) = size(y)
+    X = y
+    y = transpose(y)
+    Y = y[:, p+1:T]
+    X = lagmatrix(X, p)'
+    β = (Y * X') / (X * X')
+    ϵ = Y - β * X
+    Σ = ϵ * ϵ' / (T - p * K - 1)
+    return diag(Σ)
 end
 
 
@@ -129,128 +212,4 @@ cex_quarters = QuarterlyDate(1984, 1):Quarter(1):QuarterlyDate(2021, 4)
 dvec = filter(x -> x ∉ periods_to_remove, cex_quarters)
 
 filtering_criteria = Dict("periods_to_remove" => periods_to_remove)
-perform_forecast("CEX", par_final, param_sizes, priors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_t, func_data, kind_of_plots, ["extensive", "data_only"])
-
-
-
-A, B, C, D, Ω_big, _ = matrisize(par_final, param_sizes)
-
-r, q = size(B) # number of factors and controls
-big_zero = zeros(eltype(A), size(A))
-big_zero_b = zeros(eltype(B), size(B))
-AI = Matrix{eltype(A)}(I, size(A, 1), size(A, 1))  # Identity matrix of the same type as A
-
-
-L = [A B;
-    C D]
-
-# New procedure for variance decomposition
-@unpack u = model_elements
-@unpack case = model_options
-smoother_res, logV, alarm = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options; smooth=true)
-@unpack x_smoothed, x_filtered = smoother_res               # F̂_t   (nF × T)
-@unpack u = model_elements
-X_choice = x_filtered
-Y = u
-
-A, B, C, D, Ω, _ = matrisize(par_final, param_sizes)
-r, q = size(B) # number of factors and controls
-# e = X_choice[:, 2:end] - A * X_choice[:, 1:end-1] - B * Y[:, 1:end-1] # residuals
-# Ω = cov(e; dims=2)                # Var(ε_t)  (nF × nF)
-Ωf = Ω[1:r, 1:r]  # Factor covariance matrix
-Ωy = Ω[r+1:end, r+1:end]  # Control covariance
-
-A_star = A + B * (I - D)^(-1) * C
-IA = (I - A_star)^(-1)
-var_F = IA * Ωf * IA' + IA * (B * (I - D)^(-1)) * (B * (I - D)^(-1))' * IA'
-var_Y = IA * (B * (I - D)^(-1)) * Ωy * (B * (I - D)^(-1))' * IA'
-
-part_f = tr(IA * Ωf * IA')
-part_y = tr(IA * (B * (I - D)^(-1)) * (B * (I - D)^(-1))' * IA')
-tot_var = part_f + part_y
-share_f = part_f / tot_var
-share_y = part_y / tot_var
-
-
-
-
-
-
-ϵ = 1e-10
-P_big = lyapd(L, Ω_big)   # (4nF+ny) × (4nF+ny)  PSD
-Ωf = Ω_big[1:r, 1:r]  # Factor covariance matrix
-Ωy = Ω_big[r+1:end, r+1:end]  # Control covariance
-G = inv((I - A) - B * inv(I - D) * C)
-M = B * inv(I - D)           # convenient shorthand
-V_F = G * Ωf * G'
-V_Y = G * M * Ωy * M' * G'
-V_tot = V_F + V_Y
-tr(V_F) / tr(V_tot)  # Fraction of variance explained by factors
-
-
-
-# Perform Variance Decomposition
-smoother_res, logV, alarm = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options; smooth=true)
-@unpack x_smoothed, x_filtered = smoother_res               # F̂_t   (nF × T)
-@unpack u = model_elements
-
-X_choice = x_smoothed
-# --- 1.  VAR(1) residuals and their covariance -----------------------------
-# e = X_choice[:, 2:end] .- L * X_choice[:, 1:end-1]     # (r+q) × (T-1)
-A, B, C, D, Ω, _ = matrisize(par_final, param_sizes)
-Ω[diagind(Ω)] = log.(exp.(Ω[diagind(Ω)]) .+ 1)
-Ω_full = Ω # Diagonal(diag(cov(e; dims = 2)))                               # (r+q) × (r+q)
-
-nx = size(A, 1)                         # = r  (number of factors)
-nq = size(D, 1)                         # = q  (idiosyncratic AR processes)
-
-Ω_x = Ω_full[1:nx, 1:nx]     # Var(η^x_t)
-Ω_ε = Ω_full[nx+1:end, nx+1:end]     # Var(η^ε_t)
-# (cross blocks are zero in most DSGE/FA set-ups; grab them too if not)
-
-# --- 2.  Reduced-form factor VAR -------------------------------------------
-A_star = A + B * ((I - D) \ C)          # == A here because C == 0
-IA = inv(I - A_star)                   # (I - A*)^{-1}
-
-# --- 3.  “Multiplier” from ε-innovations into x_t ---------------------------
-G = B * ((I - D) \ I(nq))                 # = B (I‒D)^{-1}
-
-# --- 4.  Unconditional variance of factors and shares ----------------------
-var_F = IA * Ω_x * IA' + IA * G * Ω_ε * G' * IA'
-
-part_f = tr(IA * Ω_x * IA')       # contribution of η^x shocks
-part_y = tr(IA * G * Ω_ε * G' * IA')    # contribution of η^ε shocks
-tot_var = part_f + part_y
-
-share_f = part_f / tot_var
-share_y = part_y / tot_var
-
-# New procedure for variance decomposition
-@unpack u = model_elements
-@unpack case = model_options
-smoother_res, logV, alarm = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options; smooth=true)
-@unpack x_smoothed, x_filtered = smoother_res               # F̂_t   (nF × T)
-@unpack u = model_elements
-X_choice = x_filtered
-
-for i in axes(x_filtered, 1)
-    Plots.plot(x_filtered[i, :], label="F_$i", xlabel="Time", ylabel="Value", title="Filtered State Variable $i")
-    Plots.plot!(x_smoothed[i, :], label="F̂_$i", linestyle=:dash)
-    if i > 8
-        Plots.plot!(u[i-8, :], label="Y_$i", linestyle=:dot)
-    end
-    Plots.savefig("filtered_state_variable_$i.pdf")
-end
-
-
-# off_diagonal_indices = setdiff(1:19^2, diagind(A))
-# θ_cop[off_diagonal_indices] .= 0  
-n = param_sizes[1][1]
-b = param_sizes[2][2]
-A = reshape(par_final[1:n*n], (n, n))
-B = reshape(par_final[n*n+1:n*n+n*b], (n, b))
-Ω = Diagonal(par_final[n*n+n*b+1:n*n+n*b+n])
-Σ = Diagonal(par_final[end-param_sizes[4][1]+1:end])
-
-
-
+perform_forecast("CEX", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_t, func_data, kind_of_plots, ["extensive", "data_only"])

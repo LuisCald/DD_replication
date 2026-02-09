@@ -3,6 +3,7 @@
 # ------------------------------------------------------------------------------------------
 
 using Random, DataFrames, CSV, StatsBase, Parameters, PeriodicalDates, Dates
+using StatsBase: sample, Weights
 
 # Reproducibility (optional)
 Random.seed!(1234)
@@ -19,7 +20,7 @@ exovars = [getfield(sr_full.indexes, s) for s in shock_syms]  # Vector{Int}
 stds = [getfield(m_par, Symbol("σ_", s)) for s in shock_syms]  # Vector{Float64}
 
 # 3) Simulation settings
-T = 1000   # total length
+T = 1900   # total length
 burnin = 900    # dropped from outputs
 initval = stds   # innovation scale (you can override, e.g. 0.01 .* ones(length(exovars)))
 
@@ -46,64 +47,39 @@ shocks_df, micro_df = generate_microdata(
     n_par=sr_full.n_par,
 )
 
-# Plot averages for each variable over time (optional)
-# using Plots
-# micro_df.date = QuarterlyDate.(micro_df.year, micro_df.quarter)
-# avg_df = combine(groupby(micro_df, :date), names(micro_df, Not([:date, :id, :weight, :year, :quarter])) .=> mean .=> names(micro_df, Not([:date, :id, :weight, :year, :quarter])))
-# Plots.plot(avg_df.date, avg_df.liquid, label="C")
-# Plots.plot(avg_df.date, avg_df.illiqd, label="Y")
-# Plots.plot(avg_df.date, avg_df.income, label="K")
+# We need to split both micro_df and shocks_df into 10 chunks of 100 periods and denote each chunk with "_i"
+n_chunks = 10
+periods = unique(micro_df.t)
 
-# Paths for outputs
-data_path = "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing"
-CSV.write(joinpath(data_path, "HANK_full.csv"), micro_df)
-CSV.write(joinpath(data_path, "HANK_shocks.csv"), shocks_df)
+chunk_size = Int(length(periods) / n_chunks)
 
-# Import the HANK.csv
-hank_df = CSV.read(joinpath(data_path, "HANK_full.csv"), DataFrame)
-hank_df.time = QuarterlyDate.(hank_df.year, hank_df.quarter)
-avg_df = combine(groupby(hank_df, :time), names(hank_df, Not([:time, :id, :weight, :year, :quarter])) .=> mean .=> names(hank_df, Not([:time, :id, :weight, :year, :quarter])) .* "_per_hh")
-CSV.write(joinpath(data_path, "HANK_correction_series.csv"), avg_df)
+for i in 1:n_chunks
+    # Defining the time periods
+    start_period = periods[(i-1)*chunk_size+1]
+    end_period = periods[i*chunk_size]
 
-# Integrate out income, aggregating weight
-hank_df_agg = combine(groupby(hank_df, :time), :weight => sum => :weight, :income => sum => :income)
+    # Defining the different chunks
+    micro_chunk = filter(row -> row.t >= start_period && row.t <= end_period, micro_df)
+    shocks_chunk = filter(row -> row.t >= start_period && row.t <= end_period, shocks_df)
 
-# Drop 75% of the time periods 
-using StatsBase: sample, Weights
-n_periods = length(unique(hank_df.time))
-n_keep = Int(round(0.25 * n_periods))
-keep_periods = sample(1:n_periods, Weights(fill(1.0, n_periods)), n_keep; replace=false)
-actual_periods = sort(collect(unique(hank_df.time)))[keep_periods]
-filter!(row -> row.time in actual_periods, hank_df)
-sort!(hank_df, [:time, :id])
+    # Create year and quarter columns
+    micro_chunk.time = QuarterlyDate.(micro_chunk.year, micro_chunk.quarter)
 
+    # Create average per household variables
+    avg_df = combine(groupby(micro_chunk, :time), names(micro_chunk, Not([:time, :id, :weight, :year, :quarter])) .=> mean .=> names(micro_chunk, Not([:time, :id, :weight, :year, :quarter])) .* "_per_hh")
+    CSV.write(joinpath(data_path, "HANK_correction_series_$(i).csv"), avg_df)
 
-# For each quarter, either set to missing 1 measure (10%), 2 measure (10%) or none (80%).
-for period in unique(hank_df.time)
-    n_missing = rand() < 0.1 ? 1 : rand() < 0.2 ? 2 : 0
-    missing_measures = sample([:income, :liquid, :illiqd], n_missing; replace=false)
-    for col in missing_measures
-        hank_df[!, col][hank_df.time.==period] .= NaN
-    end
+    # Export the chunks to CSV
+    CSV.write(joinpath(data_path, "HANK_full_economy_$(i).csv"), micro_chunk)
+    CSV.write(joinpath(data_path, "HANK_shocks_economy_$(i).csv"), shocks_chunk)
+
 end
 
-# Now, for 5 random periods, set 1 measure entirely to NaN
-# Random.seed!(42)  # For reproducibility
-# random_periods = sample(collect(unique(hank_df.time)), 5; replace=false)
-# measures = [:income, :liquid, :illiqd, :income, :liquid]
-# for (period, measure) in zip(random_periods, measures)
-#     filter!(row -> !(row.time == period && !isnan(row[measure])), hank_df)
-# end
+# Now the idea is to create 4 different datasets with different subsamples of households and frequencys:
+# 1) Quarterly data with only income and liquid assets for 1000 households
+# 2) Annual data with only income, 60k households
+# 3) Triennial data with only liquid and illiquid assets, 20k households
+# 4) Biennial data with income and liquid for half the time and all variables for the remaining time, 5k households
 
-# Count how many observations have all 3 measures observed based on NaNs
-complete_cases = ((!isnan).(hank_df.income)) .& ((!isnan).(hank_df.liquid)) .& ((!isnan).(hank_df.illiqd))
-sum(complete_cases)
-CSV.write(joinpath(data_path, "HANK.csv"), hank_df)
-
-# Return observation count per quarter, per measure
-obs_count_df = combine(groupby(hank_df, :time),
-    :income => x -> sum((!isnan).(x)) => :income_obs,
-    :liquid => x -> sum((!isnan).(x)) => :liquid_obs,
-    :illiqd => x -> sum((!isnan).(x)) => :illiqd_obs,
-)
-CSV.write(joinpath(data_path, "HANK_obs_count.csv"), obs_count_df)
+for i in 1:n_chunks
+    # Create the first dataset

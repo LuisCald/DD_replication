@@ -1,11 +1,11 @@
 
 # Trying Gregor's method 
-function SSM(model_elements, param_sizes, priors, meas_ind, Σ_ids, model_options)
+function SSM(model_elements, param_sizes, hyperpriors, meas_ind, Σ_ids, model_options)
     # Convert matrix into a sequence of vectors 
     # vp = [par[:, i] for i in axes(par, 2)]
 
     function _SSM(par)
-        return likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
+        return likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
     end
     # _SSM.(vp)
 end
@@ -16,8 +16,10 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     m_label = measures_folder(measures)
 
     # First run tenative optimization
-    BBO(par) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
+    hyperpriors = priors[end-5:end] #TODO: hardcoded
+    BBO(par) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
     par_final = run_black_box_opt(BBO, param_vector, param_sizes, priors, measures)
+    hyper_params = par_final[end-5:end] #TODO: hardcoded
 
     # A_new,B_new,Ω_new,Δ_new,G_new, likeli_vec, Δ_log = run_EM_algorithm(param_vector, param_sizes, meas_ind, Σ_ids, model_elements, model_options)
     # @unpack G = model_elements
@@ -44,12 +46,14 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     # Δ_new_vec = convert_Δ_new_to_vec(Δ_new, model_options, model_elements)
     # par_final = convert.(Float64, vcat(A_new[:], B_new[:], diag(Ω_new), Δ_new_vec))
 
-    log_likeli = SSM(model_elements, param_sizes, priors, meas_ind, Σ_ids, model_options)
+    log_likeli = SSM(model_elements, param_sizes, hyperpriors, meas_ind, Σ_ids, model_options)
 
     # Run MCMC using Gregor's paper 
     LogProbParallel(x) = pmap(log_likeli, eachslice(x, dims=2))  # running an ensemble in parallel (ensemble of chains)
 
     nchain = length(param_vector) * 4 # a sane default
+    priors = get_priors(model_elements, model_options, hyper_params)
+    push!(priors, hyperpriors...) # add hyperpriors to the end of the priors list
     init_chains = draw_from_prior(param_sizes, priors, nchain)
 
     # Replace several chains with the best candidate from the optimization
@@ -66,6 +70,7 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     # Save the chains, the log probabilities, and the proposal distribution
     init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
     jldsave(init_path * "/posterior_draws" * "/" * m_label * "_$tag.jld2"; d_chains=DIME_chains, lprobs=lprobs, propdist=propdist)
+    # jldopen(init_path * "/posterior_draws" * "/" * m_label * "_$tag" * ".jld2", "r")
 
     # Store paramter vector
     par_final = find_mode(DIME_chains, lprobs)
@@ -81,10 +86,38 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     Plots.savefig(init_path * "/7_Results/" * m_label * "$tag" * "/from_mcmc/bayesian_convergence/log_probs.pdf")
 
     # MDD 
-    run_mdd(tag, model_elements, m_label, param_sizes, priors, meas_ind, Σ_ids, model_options)
+    try
+        run_mdd(tag, model_elements, m_label, param_sizes, priors, meas_ind, Σ_ids, model_options)
+    catch e
+        @warn "MDD computation failed with error: $e"
+    end
+
+    # Plotting hyperparameter marginals
+    generate_marginals_for_hyperparameters(DIME_chains, m_label, tag)
 
     return par_final
 end
+
+
+function generate_marginals_for_hyperparameters(DIME_chains, m_label, tag)
+    # Subset to hyperparameters
+    DIME_chains = DIME_chains[:, :, end-5:end]
+
+    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    for i in axes(DIME_chains, 3)
+        # Identify the bottom 5% quantile along the dimension 
+        long_chain = vec(DIME_chains[:, :, i])
+        qb = quantile(long_chain, 0.05)
+        qt = quantile(long_chain, 0.95)
+        filt_chain = long_chain[(long_chain.>qb).&(long_chain.<qt)]
+        # if exp_vec[i] == 1
+        #     filt_chain = exp.(filt_chain)
+        # end
+        Plots.plot(filt_chain, lc=:black, color=:orange, fa=0.8, xformatter=:latex, yformatter=:latex, lt=:barhist, legend=false, xtickfontsize=14, ytickfontsize=14, guidefontsize=14)
+        Plots.savefig(init_path * "/7_Results/" * m_label * "$tag" * "/from_mcmc/bayesian_convergence/" * "hyperparameter_optimization_$i.pdf")
+    end
+end
+
 
 # # Save just the last 25% of iterations 
 # last_25p    = round(Int, niter * 0.25)

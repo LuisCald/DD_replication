@@ -18,8 +18,8 @@
 # κ_4   = minn_params[5]  # specifying the function exponent of h(lags) = lags^κ_4. "lag decay rate"
 # κ_5   = minn_params[6]  # persistence of state LOM
 
-# SSM(par)     = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
-# SSM(par,_)   = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
+# SSM(par)     = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
+# SSM(par,_)   = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
 
 # hyperpriors = [
 #     # Minnesota parameters
@@ -219,25 +219,4 @@ function get_hyperprior(model_elements, model_options, hyperparams, hyperpriors)
     logP, alarm2 = hyper_prioreval(hyperparams, hyperpriors)
 
     return Prior(priors, param_vector), meas_ind, alarm + alarm2, logP
-end
-
-# hyper_par_final = hyperparameter_optimization(hyperpriors, model_elements, time_params, model_options)
-
-# Plot the marginals of each parameter 
-
-# Remove the top and bottom 5% of the chains
-function generate_marginals(DIME_chains, m_label, tag)
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
-    for i in axes(DIME_chains, 3)
-        # Identify the bottom 5% quantile along the dimension 
-        long_chain = vec(DIME_chains[:, :, i])
-        qb = quantile(long_chain, 0.1)
-        qt = quantile(long_chain, 0.9)
-        filt_chain = long_chain[(long_chain.>qb).&(long_chain.<qt)]
-        # if exp_vec[i] == 1
-        #     filt_chain = exp.(filt_chain)
-        # end
-        Plots.plot(filt_chain, lc=:black, color=:orange, fa=0.8, xformatter=:latex, yformatter=:latex, lt=:barhist, legend=false, xtickfontsize=14, ytickfontsize=14, guidefontsize=14)
-        Plots.savefig(init_path * "/7_Results/" * m_label * "$tag" * "/from_mcmc/bayesian_convergence/" * "hyperparameter_optimization_$i.pdf")
-    end
 end

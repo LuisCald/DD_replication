@@ -21,8 +21,8 @@ function SSM_optimize(model_elements, model_options, mcmc_options, diagnostics_o
     # Define bounds 
     # lb, ub       = construct_bounds(param_vector, param_sizes, case)
 
-    SSM(par) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
-    SSM(par, _) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
+    SSM(par) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
+    SSM(par, _) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
 
     # function SSM(model_elements, param_sizes, priors, meas_ind, model_options)
     #     # Convert matrix into a sequence of vectors 
@@ -214,14 +214,22 @@ end
 function draw_from_prior(param_sizes, priors, nchain)
     nf = param_sizes[1][1]  # number of factors
     ny = param_sizes[2][2]  # number of controls
-    nΣ = param_sizes[6][1]
+    nΣ = param_sizes[7][1]
 
     # Draw from prior for state equation + shocks
     A_B_C_D = rand(priors[1], nchain)  # a matrix 
     Ωf = hcat([rand(priors[2], nf) for _ in 1:nchain]...)
     Ωy = hcat([rand(priors[3], ny) for _ in 1:nchain]...)
-    Σ = hcat([rand.(priors[4:3+nΣ]) for _ in 1:nchain]...)
-    θ = vcat(A_B_C_D, Ωf, Ωy, Σ)
+
+    # 4. Draw the FULL Cholesky matrix from the LKJ prior
+    L_draws = [rand(priors[4]).L for _ in 1:nchain]
+
+    # 5. CONVERT the drawn L matrix INTO the unconstrained parameter vector u
+    ΩC = hcat([Lcorr_to_u(L) for L in L_draws]...) # <--- THIS IS THE FIX
+
+    Σ = hcat([rand.(priors[5:4+nΣ]) for _ in 1:nchain]...)
+    H = hcat([rand.(priors[end-5:end]) for _ in 1:nchain]...)
+    θ = vcat(A_B_C_D, Ωf, Ωy, ΩC, Σ, H)
     return θ
 end
 
@@ -750,8 +758,8 @@ function construct_hessian(par_final, model_elements, param_sizes, priors, meas_
     @unpack compute_hessian = mcmc_options
 
     local inv_hessian
-    SSM(par) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
-    SSM(par, _) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
+    SSM(par) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
+    SSM(par, _) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
 
     if compute_hessian == true
         @info("Computing Hessian ...")

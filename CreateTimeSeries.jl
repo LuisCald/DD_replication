@@ -156,7 +156,9 @@ function generate_specific_plots(data_dict, ty, func_data, data_name, time_param
     #     generate_copula_plots(d1, func_data, data_name, tmin, tmax, grid_choice_cop, type, measures, label, posterior_bounds)
     # end
 
-    if data_name == "HANK"
+    # if occursin("HANK full", tag)
+    #     within_stat_dict = generate_quantiles_shares_levels_HANK_full(data_dict, ty, func_data, data_name, smin, smax, tmin, tmax, estimator, label, type, measures, time_params, select_series, gdp_series, posterior_bounds, compare_to_other_est, tag, freq)
+    if occursin("HANK", tag)
         within_stat_dict = generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_name, smin, smax, tmin, tmax, estimator, label, type, measures, time_params, select_series, gdp_series, posterior_bounds, compare_to_other_est, tag, freq)
     else
         within_stat_dict = generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_name, smin, smax, tmin, tmax, estimator, label, type, measures, time_params, select_series, gdp_series, posterior_bounds, compare_to_other_est, tag)
@@ -265,7 +267,18 @@ function get_obs_meas(func_dict, data_name, measures; top="top10")
     return obs_meas
 end
 
-function fill_data_dicts(dd, measures, pushup, pushdown)
+function fill_data_dicts(dd, measures, pushup, pushdown, estimator)
+    if typeof(estimator) <: SeriesEstimator
+        @unpack integral_pcf_grid = estimator
+    else
+        @unpack grid_pcf = estimator
+    end
+    grid_choice = typeof(estimator) <: SeriesEstimator ? integral_pcf_grid : grid_pcf
+
+    top_k = grid_choice == 10 ? "top10" : grid_choice == 5 ? "top20" : grid_choice == 100 ? "top10" : grid_choice == 20 ? "top10" : error("Grid size not supported")
+    mid_k = "next40"
+    bot_k = grid_choice == 10 ? "bottom50" : grid_choice == 5 ? "bottom40" : grid_choice == 100 ? "bottom50" : grid_choice == 20 ? "bottom50" : error("Grid size not supported")
+
     data_dict = Dict()
     # data_dict["copulas"] = Dict()
 
@@ -280,9 +293,9 @@ function fill_data_dicts(dd, measures, pushup, pushdown)
                 data_dict[meas][o] = Dict()
                 data_dict[meas][o]["data"] = dd[meas][o]["data"][:, pushup.value:end-pushdown.value]
                 data_dict[meas][o]["common series"] = Dict()
-                data_dict[meas][o]["common series"]["top10"] = dd[meas][o]["common series"]["top10"][pushup.value:end-pushdown.value]
-                data_dict[meas][o]["common series"]["next40"] = dd[meas][o]["common series"]["next40"][pushup.value:end-pushdown.value]
-                data_dict[meas][o]["common series"]["bottom50"] = dd[meas][o]["common series"]["bottom50"][pushup.value:end-pushdown.value]
+                data_dict[meas][o]["common series"][top_k] = dd[meas][o]["common series"][top_k][pushup.value:end-pushdown.value]
+                data_dict[meas][o]["common series"][mid_k] = dd[meas][o]["common series"][mid_k][pushup.value:end-pushdown.value]
+                data_dict[meas][o]["common series"][bot_k] = dd[meas][o]["common series"][bot_k][pushup.value:end-pushdown.value]
             end
         end
     elseif pushup.value >= 0 && pushdown.value < 0
@@ -295,9 +308,9 @@ function fill_data_dicts(dd, measures, pushup, pushdown)
                 data_dict[meas][o] = Dict()
                 data_dict[meas][o]["data"] = hcat(dd[meas][o]["data"][:, pushup.value:end], fill!(Array{Float64}(undef, size(dd[meas][o]["data"], 1), abs(pushdown.value)), NaN))
                 data_dict[meas][o]["common series"] = Dict()
-                data_dict[meas][o]["common series"]["top10"] = vcat(dd[meas][o]["common series"]["top10"][pushup.value:end], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
-                data_dict[meas][o]["common series"]["next40"] = vcat(dd[meas][o]["common series"]["next40"][pushup.value:end], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
-                data_dict[meas][o]["common series"]["bottom50"] = vcat(dd[meas][o]["common series"]["bottom50"][pushup.value:end], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
+                data_dict[meas][o]["common series"][top_k] = vcat(dd[meas][o]["common series"][top_k][pushup.value:end], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
+                data_dict[meas][o]["common series"][mid_k] = vcat(dd[meas][o]["common series"][mid_k][pushup.value:end], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
+                data_dict[meas][o]["common series"][bot_k] = vcat(dd[meas][o]["common series"][bot_k][pushup.value:end], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
             end
         end
 
@@ -319,9 +332,9 @@ function fill_data_dicts(dd, measures, pushup, pushdown)
                 data_dict[meas][o] = Dict()
                 data_dict[meas][o]["data"] = hcat(fill!(Array{Float64}(undef, size(dd[meas][o]["data"], 1), abs(pushup.value)), NaN), dd[meas][o]["data"], fill!(Array{Float64}(undef, size(dd[meas][o]["data"], 1), abs(pushdown.value)), NaN))
                 data_dict[meas][o]["common series"] = Dict()
-                data_dict[meas][o]["common series"]["top10"] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"]["top10"], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
-                data_dict[meas][o]["common series"]["next40"] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"]["next40"], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
-                data_dict[meas][o]["common series"]["bottom50"] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"]["bottom50"], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
+                data_dict[meas][o]["common series"][top_k] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"][top_k], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
+                data_dict[meas][o]["common series"][mid_k] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"][mid_k], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
+                data_dict[meas][o]["common series"][bot_k] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"][bot_k], fill!(Array{Float64}(undef, abs(pushdown.value)), NaN))
             end
         end
 
@@ -335,9 +348,9 @@ function fill_data_dicts(dd, measures, pushup, pushdown)
                 data_dict[meas][o] = Dict()
                 data_dict[meas][o]["data"] = hcat(fill!(Array{Float64}(undef, size(dd[meas][o]["data"], 1), abs(pushup.value)), NaN), dd[meas][o]["data"])[1:end-pushdown.value]
                 data_dict[meas][o]["common series"] = Dict()
-                data_dict[meas][o]["common series"]["top10"] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"]["top10"])[1:end-pushdown.value]
-                data_dict[meas][o]["common series"]["next40"] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"]["next40"])[1:end-pushdown.value]
-                data_dict[meas][o]["common series"]["bottom50"] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"]["bottom50"])[1:end-pushdown.value]
+                data_dict[meas][o]["common series"][top_k] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"][top_k])[1:end-pushdown.value]
+                data_dict[meas][o]["common series"][mid_k] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"][mid_k])[1:end-pushdown.value]
+                data_dict[meas][o]["common series"][bot_k] = vcat(fill!(Array{Float64}(undef, abs(pushup.value)), NaN), dd[meas][o]["common series"][bot_k])[1:end-pushdown.value]
             end
         end
     end
@@ -500,7 +513,7 @@ function get_estimates_for_comparison(data_name, ty, time_p, measures, estimator
             pushup = QuarterlyDate(tmin["year"], tmin["quarter"]) - QuarterlyDate(min_time) # Tricky part is if min_time is later than tmin ... I guess i could add NaNs for missing periods. Makes sense!
             pushdown = QuarterlyDate(max_time) - QuarterlyDate(tmax["year"], tmax["quarter"]) # max_time solved similarly
 
-            estimates_dict[tag] = fill_data_dicts(estimates_dict2, measures, pushup, pushdown)
+            estimates_dict[tag] = fill_data_dicts(estimates_dict2, measures, pushup, pushdown, estimator)
             # println(tag)
             # println(min_time)
             # println(max_time)
@@ -790,7 +803,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                     Plots.plot!(xaxis[cond],
                         c_data[2],
                         fillrange=c_data[3],
-                        fillalpha=0.1,
+                        fillalpha=0.2,
                         fillcolor=:red,
                         la=0.0,
                         lc=:white,
@@ -956,7 +969,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                 Plots.plot!(xaxis[cond_cex],
                                     c_data[2],
                                     fillrange=c_data[3],
-                                    fillalpha=0.1,
+                                    fillalpha=0.2,
                                     fillcolor=obj != "top" ? palette(:glasbey_bw_n256)[j] : select_color(plot_name),
                                     la=0.0,
                                     lc=:white,
@@ -1116,7 +1129,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                             c_int_lb(cond_cex),
                                             fillrange=c_int_ub(cond_cex),
                                             la=0.0,
-                                            fillalpha=0.1,
+                                            fillalpha=0.2,
                                             fillcolor=:red,
                                             dpi=500,
                                             label=""
@@ -1742,8 +1755,6 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
     E[!, "time"] = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
 
     # Generate microdata 
-
-
     # Export Kendall's Tau as well 
     # if plot == true
     #     kendalls_tau(data_cop, data_pcf, data_name, folder, time_params, model_options, false, true, func_data, gdp_series)
@@ -1769,10 +1780,11 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
     # Everything has been reconstructed now. Creating a new select_series object, which has the averages that correspond to the data estimates 
     # To do this, generate total levels and divide the number of households  
     local avg_series
-    if data_name == "HANK"
+    if occursin("HANK", data_name)
         @unpack gdp_series = obs_data
         avg_series = deepcopy(gdp_series)
     else
+        println(data_name)
         avg_series = generate_average_series(data_dict, gdp_series, measures)
     end
 
@@ -1818,31 +1830,56 @@ Export a LaTeX table with aggregated statistics for multiple datasets.
 - `label`: Label to append to the filename.
 """
 
+# Helper: return the dict that contains the per-measure stats (usually the "normal" one)
+function _within_stats(stat_dict, dataset; regime::String="normal")
+    d = stat_dict[dataset]
+
+    # Case 1: stat_dict[dataset]["normal"]
+    if isa(d, AbstractDict) && haskey(d, regime)
+        return d[regime]
+    end
+
+    # Case 2: stat_dict[dataset][something]["normal"] (e.g. ["a"]["normal"])
+    if isa(d, AbstractDict)
+        # fast-path for your known key
+        if haskey(d, "a") && isa(d["a"], AbstractDict) && haskey(d["a"], regime)
+            return d["a"][regime]
+        end
+
+        # generic fallback: find the first sub-dict that has the regime key
+        for (_, sub) in d
+            if isa(sub, AbstractDict) && haskey(sub, regime)
+                return sub[regime]
+            end
+        end
+    end
+
+    error("Could not find \"$regime\" stats for dataset=$(dataset). Top-level keys: $(collect(keys(d)))")
+end
+
 function export_combined_stat_dict_to_latex(stat_dict, measures, path, label)
-    # Determine the number of datasets
-    datasets = keys(stat_dict)
+    datasets = collect(keys(stat_dict))
     num_datasets = length(datasets)
 
-    # Start LaTeX table
+    # Optional: escape underscores for LaTeX headers
+    dataset_names = [replace(string(d), "_" => "\\_") for d in datasets]
+
     latex_table = L"\begin{tabular}{|" * "c"^(num_datasets + 2) * "}\n\\hline\n"
-    header_row = "Measure & " * join(datasets, " & ") * " & Overall & " * L"\\ \hline\n"
+    header_row = "Measure & " * join(dataset_names, " & ") * " & Overall & " * L"\\ \hline\n"
     latex_table *= L"%$(header_row)"
 
-    # Loop over measures
     for measure in measures
-        row_data = measure
+        row_data = string(measure)
 
-        # For each measure + copula, generate overall within-stat
-        overall_num = 0
-        overall_den = 0
+        overall_num = 0.0
+        overall_den = 0.0
 
-        # Loop over datasets
         for dataset in datasets
-            within_stat_dict = stat_dict[dataset]["normal"]
+            within_stat_dict = _within_stats(stat_dict, dataset; regime="normal")
 
-            # Aggregate value calculation
             if haskey(within_stat_dict, measure)
-                numerator, denominator = 0, 0
+                numerator, denominator = 0.0, 0.0
+
                 if measure != "copula"
                     for (_, series) in within_stat_dict[measure]
                         for (_, ratio) in series
@@ -1852,43 +1889,113 @@ function export_combined_stat_dict_to_latex(stat_dict, measures, path, label)
                         end
                     end
                     aggregate_value = round(numerator / denominator, digits=2) * 100
-                    overall_num += numerator
-                    overall_den += denominator
                 else
                     num, den = split(within_stat_dict["copula"], "/")
                     numerator += parse(Float64, num)
                     denominator += parse(Float64, den)
-
                     aggregate_value = denominator != 0 ? ceil(numerator * 100 / denominator) : "-"
-                    overall_num += numerator
-                    overall_den += denominator
                 end
+
+                overall_num += numerator
+                overall_den += denominator
             else
-                aggregate_value = "-"  # Measure not present in this dataset
-                overall_num += 0
-                overall_den += 0
+                aggregate_value = "-"
             end
 
             row_data *= " & $aggregate_value %"
         end
 
-        overall_ratio = Int(ceil(overall_num * 100 / overall_den))
-
+        overall_ratio = overall_den != 0 ? Int(ceil(overall_num * 100 / overall_den)) : "-"
         row_data *= " & $overall_ratio %"
-
         row_data *= L" \\\\ \\hline"
+
         latex_table *= L"%$(row_data)\n"
     end
 
-    # Closing the table environment
     latex_table *= L"\end{tabular}"
     filename = path * "combined_stat_" * label * ".tex"
 
-    # Write to file
     open(filename, "w") do file
         write(file, string(latex_table))
     end
 end
+
+# function export_combined_stat_dict_to_latex(stat_dict, measures, path, label)
+#     # Determine the number of datasets
+#     datasets = keys(stat_dict)
+#     num_datasets = length(datasets)
+
+#     # Start LaTeX table
+#     latex_table = L"\begin{tabular}{|" * "c"^(num_datasets + 2) * "}\n\\hline\n"
+#     header_row = "Measure & " * join(datasets, " & ") * " & Overall & " * L"\\ \hline\n"
+#     latex_table *= L"%$(header_row)"
+
+#     # Loop over measures
+#     for measure in measures
+#         row_data = measure
+
+#         # For each measure + copula, generate overall within-stat
+#         overall_num = 0
+#         overall_den = 0
+
+#         # Loop over datasets
+#         for dataset in datasets
+#             within_stat_dict = stat_dict[dataset]["normal"]
+
+#             # Aggregate value calculation
+#             if haskey(within_stat_dict, measure)
+#                 numerator, denominator = 0, 0
+#                 if measure != "copula"
+#                     for (_, series) in within_stat_dict[measure]
+#                         for (_, ratio) in series
+#                             num, den = split(ratio, "/")
+#                             numerator += parse(Float64, num)
+#                             denominator += parse(Float64, den)
+#                         end
+#                     end
+#                     aggregate_value = round(numerator / denominator, digits=2) * 100
+#                     overall_num += numerator
+#                     overall_den += denominator
+#                 else
+#                     num, den = split(within_stat_dict["copula"], "/")
+#                     numerator += parse(Float64, num)
+#                     denominator += parse(Float64, den)
+
+#                     aggregate_value = denominator != 0 ? ceil(numerator * 100 / denominator) : "-"
+#                     overall_num += numerator
+#                     overall_den += denominator
+#                 end
+#             else
+#                 aggregate_value = "-"  # Measure not present in this dataset
+#                 overall_num += 0
+#                 overall_den += 0
+#             end
+
+#             row_data *= " & $aggregate_value %"
+#         end
+
+#         local overall_ratio
+#         try
+#             overall_ratio = Int(ceil(overall_num * 100 / overall_den))
+#         catch e
+#             overall_ratio = "-"
+#         end
+
+#         row_data *= " & $overall_ratio %"
+
+#         row_data *= L" \\\\ \\hline"
+#         latex_table *= L"%$(row_data)\n"
+#     end
+
+#     # Closing the table environment
+#     latex_table *= L"\end{tabular}"
+#     filename = path * "combined_stat_" * label * ".tex"
+
+#     # Write to file
+#     open(filename, "w") do file
+#         write(file, string(latex_table))
+#     end
+# end
 
 
 function generate_shares_levels(data_pcf, model_options, gdp_series)

@@ -1,1 +1,109 @@
-* # ignore everything, or edit as you wish
+## ------------------------------------------------------------
+## Distributional_Dynamics/5_Code
+## Keep source code tracked; ignore data, figures, and build artifacts.
+## ------------------------------------------------------------
+
+# macOS / editor noise
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Temp / logs
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*.bak
+*~
+
+# Julia artifacts
+*.jl.cov
+*.jl.mem
+*.ji
+.julia/
+
+# Common build/output folders
+bld/
+build/
+dist/
+out/
+tmp/
+
+## ----------------------
+## Data files (common)
+## ----------------------
+*.csv
+*.tsv
+*.tab
+*.dta
+*.sav
+*.por
+*.sas7bdat
+*.rds
+*.feather
+*.parquet
+*.arrow
+*.h5
+*.hdf5
+*.nc
+*.mat
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.jld
+*.jld2
+
+# Archives often used to store raw data
+*.zip
+*.7z
+*.tar
+*.gz
+*.bz2
+*.xz
+*.rar
+
+## ----------------------
+## Figures / outputs
+## ----------------------
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.gif
+*.bmp
+*.svg
+*.eps
+
+# Animations
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# Generated LaTeX artifacts (keep real .tex sources tracked)
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+
+# Generated tables commonly produced by scripts in this repo
+combined_stat_*.tex
+consensus_within_stat_*.tex
+*_correlations_table_*.tex
+external_correlations_*.tex
+avg_corr_hank.tex

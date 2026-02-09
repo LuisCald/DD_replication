@@ -19,19 +19,19 @@ function create_stat_dict(data_sources, measures)
 end
 
 
-function perform_forecast(dataset_choice, par_final, param_sizes, priors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type, forecast_type)
+function perform_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type, forecast_type)
     if forecast_type[1] == "iterative"
-        return perform_iterative_forecast(dataset_choice, par_final, param_sizes, priors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, type)
+        return perform_iterative_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, type)
 
     elseif forecast_type[1] == "clumpy"
-        perform_clumpy_forecast(dataset_choice, par_final, param_sizes, priors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type)
+        perform_clumpy_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type)
 
     elseif forecast_type[1] == "extensive"
-        perform_extensive_forecast(dataset_choice, par_final, param_sizes, priors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type, forecast_type)
+        perform_extensive_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type, forecast_type)
     end
 end
 
-function perform_iterative_table_forecast(par_final, param_sizes, priors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, statistic)
+function perform_iterative_table_forecast(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, statistic)
     """This loops through all observations in some dataset and removes the corresponding one observation, then estimates the series again. """
 
     @unpack MV = model_elements
@@ -44,15 +44,15 @@ function perform_iterative_table_forecast(par_final, param_sizes, priors, meas_i
 
 
     # First, get the original reconstruction 
-    smoother_output, _ = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options, true)
+    smoother_output, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
     @unpack x_smoothed = smoother_output
     @unpack proj = model_elements
-    dv, _ = reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
+    dv, _ = reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
 
     # Compute the statistic of choice 
     local stat_dict_r
     if statistic == :mse
-        stat_dict_r = compute_forecast_mse(dv, func_dict, model_elements, orig_MV, MV, data_sources, measures, grid, dimension, par_final, param_sizes, priors, meas_ind, Σ_ids, obs_data, model_options, time_params)
+        stat_dict_r = compute_forecast_mse(dv, func_dict, model_elements, orig_MV, MV, data_sources, measures, grid, dimension, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, obs_data, model_options, time_params)
     end
 
     # Try to present everything in a table format for latex, where we have 4 columns: release date, copula, income pcf, wealth pcf 
@@ -93,7 +93,7 @@ function perform_iterative_table_forecast(par_final, param_sizes, priors, meas_i
 end
 
 
-function compute_forecast_mse(dv, func_dict, model_elements, orig_MV, MV, data_sources, measures, grid, dimension, par_final, param_sizes, priors, meas_ind, Σ_ids, obs_data, model_options, time_params)
+function compute_forecast_mse(dv, func_dict, model_elements, orig_MV, MV, data_sources, measures, grid, dimension, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, obs_data, model_options, time_params)
     N(x) = length(x)
 
     # Create dictionary to store results of the MSE for the "all-data" case
@@ -156,7 +156,7 @@ function compute_forecast_mse(dv, func_dict, model_elements, orig_MV, MV, data_s
             @pack! model_elements = MV
 
             # Reconstruction with less data
-            dv_r, _ = reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
+            dv_r, _ = reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
 
             # Calculate squared errors for each object relative to total MSE => reconstruction minus data
             # cop_recon                   = reshape(dv_r[k][1][:, :, cop_ids[k]], (grid^dimension, N(cop_ids[k])))
@@ -186,7 +186,7 @@ end
 
 
 
-function perform_clumpy_forecast(dataset_choice, par_final, param_sizes, priors, meas_ind, Σ_ids, how_much, obs_data, model_options, model_elements, time_params, user_params, func_data, type)
+function perform_clumpy_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, how_much, obs_data, model_options, model_elements, time_params, user_params, func_data, type)
     """This function only removes the last 3 observations, all measures, from the SCF. """
     # Take estimated series that used all data 
     @unpack MV = model_elements
@@ -199,10 +199,10 @@ function perform_clumpy_forecast(dataset_choice, par_final, param_sizes, priors,
 
 
     # First, get the original reconstruction 
-    smoother_output, _ = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options, true)
+    smoother_output, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
     @unpack x_smoothed = smoother_output
     factors_all_obs = deepcopy(x_smoothed)
-    dv, _ = reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
+    dv, _ = reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
 
     # Now remove the last few observations from the estimation sample
     # obs_removed = Vector{Matrix{Float64}}(undef, 1)
@@ -223,13 +223,13 @@ function perform_clumpy_forecast(dataset_choice, par_final, param_sizes, priors,
     @pack! model_elements = MV
 
     # Estimate the new series 
-    # smoother_output, _               = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options, true)
+    # smoother_output, _               = likeli(model_elements, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_options, true)
     # @unpack x_smoothed               = smoother_output
     # @unpack proj                     = model_elements
     # @unpack means, stds, agg_count   = model_elements
 
     # Reconstruction with less data
-    dv_r, _ = reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
+    dv_r, _ = reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
 
     # Repack the original MV
     MV = orig_MV
@@ -240,7 +240,7 @@ function perform_clumpy_forecast(dataset_choice, par_final, param_sizes, priors,
 
 end
 
-function perform_extensive_forecast(dataset_choice, par_final, param_sizes, priors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type, forecast_type)
+function perform_extensive_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type, forecast_type)
     """This forecast drops all wealth observations from all data that correspond to the last X quarters."""
 
     # Take estimated series that used all data 
@@ -257,10 +257,10 @@ function perform_extensive_forecast(dataset_choice, par_final, param_sizes, prio
 
 
     # First, get the original reconstruction 
-    smoother_output, _ = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options; smooth=true)
+    smoother_output, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
     @unpack x_smoothed = smoother_output
     # factors_all_obs     = deepcopy(x_smoothed)
-    dv, _ = reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
+    dv, _ = reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
 
     # find indices related to wealth 
     local data_indices
@@ -313,13 +313,13 @@ function perform_extensive_forecast(dataset_choice, par_final, param_sizes, prio
     @pack! model_elements = y
 
     # Estimate the new series 
-    # smoother_output, _               = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options, true)
+    # smoother_output, _               = likeli(model_elements, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_options, true)
     # @unpack x_smoothed               = smoother_output
     # @unpack proj                     = model_elements
     # @unpack means, stds, agg_count   = model_elements
 
     # Reconstruction with less data
-    dv_r, _ = reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
+    dv_r, _ = reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
 
 
     # TODO: Forecast the series using the estimated parameters, but check whether we have aggs that run further enough 
@@ -923,7 +923,7 @@ end
 
 
 
-function perform_iterative_forecast(dataset_choice, par_final, param_sizes, priors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, opttag)
+function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, opttag)
     @unpack y, MV = model_elements
     @unpack data_sources, func_dict = func_data
     @unpack case, measures, estimator = model_options
@@ -945,10 +945,10 @@ function perform_iterative_forecast(dataset_choice, par_final, param_sizes, prio
     cop_tup = ntuple(_ -> (:), dimension)
 
     # First, get the original reconstruction 
-    smoother_output, _ = likeli(model_elements, par_final, param_sizes, priors, meas_ind, Σ_ids, model_options; smooth=true)
+    smoother_output, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
     @unpack x_smoothed = smoother_output
     @unpack proj = model_elements
-    dv, _ = reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
+    dv, _ = reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
     predictions_dict = Dict()
 
     dv[dataset_choice]["normal"], avg_series = export_functional_data(dv[dataset_choice]["normal"], "normal", dataset_choice, opttag, obs_data, func_data, time_params, user_t, model_options, false, false, :forecast)
@@ -979,7 +979,7 @@ function perform_iterative_forecast(dataset_choice, par_final, param_sizes, prio
             @pack! model_elements = y
 
             # Reconstruct data with new MV
-            dv_r, _ = reconstruct_data(par_final, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
+            dv_r, _ = reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
 
             # for (c, k) in enumerate(keys(dv)) 
             # Relative to the average

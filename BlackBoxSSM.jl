@@ -1,6 +1,6 @@
 function run_black_box_opt(SSM, param_vector, param_sizes, priors, measures)
     step_ranges = define_step_ranges(param_sizes, priors, param_vector)
-    opttime = length(param_vector) * 2
+    opttime = length(param_vector) * 3
     res = bboptimize(SSM, param_vector; SearchRange=step_ranges, Method=:adaptive_de_rand_1_bin_radiuslimited, MaxTime=opttime, TraceMode=:compact, TraceInterval=60)
     return best_candidate(res)
 end
@@ -30,6 +30,7 @@ function define_step_ranges(param_sizes, priors, param_vector)
     l_Ωy = param_sizes[2][2]
     l_Ω_corr = param_sizes[6][1]
     l_Σ = param_sizes[7][1]
+    l_H = param_sizes[8][1]
 
     for i in 1:l_A
         # step_ranges[i] = (-0.99, 0.99) 
@@ -74,6 +75,16 @@ function define_step_ranges(param_sizes, priors, param_vector)
     # For Σ
     for (q, i) in enumerate((l_A+l_B+l_C+l_D+l_Ωf+l_Ωy+l_Ω_corr+1):(l_A+l_B+l_C+l_D+l_Ωf+l_Ωy+l_Ω_corr+l_Σ))
         step_ranges[i] = (-3 * priors[4+q].σ + priors[4+q].μ, 3 * priors[4+q].σ + priors[4+q].μ)
+    end
+
+    # For H
+    for (q, i) in enumerate((l_A+l_B+l_C+l_D+l_Ωf+l_Ωy+l_Ω_corr+l_Σ+1):(l_A+l_B+l_C+l_D+l_Ωf+l_Ωy+l_Ω_corr+l_Σ+l_H))
+        try
+            step_ranges[i] = (-3 * priors[4+l_Σ+q].σ + priors[4+l_Σ+q].μ, 3 * priors[4+l_Σ+q].σ + priors[4+l_Σ+q].μ)
+        catch e
+            # Uniform distribution
+            step_ranges[i] = (priors[4+l_Σ+q].a, priors[4+l_Σ+q].b)
+        end
     end
 
     return step_ranges

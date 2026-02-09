@@ -1,6 +1,7 @@
 cd("/Users/lc/Dropbox/Distributional_Dynamics/5_Code")
 include("DistributionalDynamics.jl")
 
+
 using Integrals
 @unpack df_vec = obs_data
 df = df_vec[1][1]
@@ -21,6 +22,13 @@ elseif df_vec.df_names[1] == "PSID"
     filter!("wealth" => !isnan, non_missing)
     filter!("consum" => !isnan, non_missing)
     df_to_analyze = select(non_missing, ["consum", "income", "wealth", "weight"])
+elseif df_vec.df_names[1] == "HANK a"
+    non_missing = filter("income" => !isnan, select(df, ["income", "liquid", "illiqd", "weight", "id"]))
+    filter!("weight" => !isnan, non_missing)
+    filter!("income" => !isnan, non_missing)
+    filter!("consum" => !isnan, non_missing)
+    filter!("wealth" => !isnan, non_missing)
+    df_to_analyze = select(non_missing, ["income", "consum", "wealth", "weight"])
 end
 
 function series_estimator(data, weights, order, p_values)
@@ -77,16 +85,18 @@ all_p_values = vcat(collect(0.01:0.01:0.99), tail_values)
 
 # Boot strap procedure
 init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
-rep_w = CSV.read(init_path * "/1_Data/SCF+/replicate_weights/replicate_weights_2019.csv", DataFrame)
+# rep_w = CSV.read(init_path * "/1_Data/SCF+/replicate_weights/replicate_weights_2019.csv", DataFrame)
 
-for measure_of_choice in [:wealth, :income, :consum] #, :income, :consum]
+@unpack measures = model_options
+
+for measure_of_choice in measures #, :income, :consum]
     @unpack gdp_series = obs_data
     gdp_series[!, "date"] = QuarterlyDate.(gdp_series[!, "time"])
     a = filter(x -> x.date == QuarterlyDate(2019, 4), gdp_series)
     correction = a[1, "$(String(measure_of_choice))_per_hh"]
 
     # Create containers for the bootstrap
-    n_draws = 999
+    n_draws = 10
     emp_est = zeros(length(all_p_values), n_draws)
     pol_est = zeros(length(all_p_values), n_draws)
     emp_est_trans = zeros(length(all_p_values), n_draws)
@@ -142,7 +152,7 @@ for measure_of_choice in [:wealth, :income, :consum] #, :income, :consum]
             emp_est[pp, s] = [meas for (meas, cdf) in zip(data, s_weights) if cdf >= p][1]
         end
 
-        orders_to_estimate = [11] #collect(3:50)
+        orders_to_estimate = [5] #collect(3:50)
 
         # Plot the results
         pol_est_trans[:, s] = series_estimator(data_trans, weights2, orders_to_estimate[1], all_p_values)
@@ -224,7 +234,7 @@ for measure_of_choice in [:wealth, :income, :consum] #, :income, :consum]
             max(maximum(emp_est_new_tail_ub[idxs]),
                 maximum(pol_est_trans_new_tail_ub[idxs])))
 
-        Plots.savefig("/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/$(String(measure_of_choice))_11_$(tail_values[rr]).pdf")
+        Plots.savefig("/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/HANK_$(String(measure_of_choice))_11_$(tail_values[rr]).pdf")
 
         # Now for the raw data
         emp_est_new_tail = vcat(med_est[1:n_p], med_est[n_p+rr])
@@ -281,7 +291,7 @@ for measure_of_choice in [:wealth, :income, :consum] #, :income, :consum]
             max(maximum(emp_est_new_tail_ub[idxs]),
                 maximum(pol_est_trans_new_tail_ub[idxs])))
 
-        Plots.savefig(p, "/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/$(String(measure_of_choice))_11_$(tail_values[rr])_raw.pdf")
+        Plots.savefig(p, "/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/HANK_$(String(measure_of_choice))_11_$(tail_values[rr])_raw.pdf")
     end
 end
 

@@ -18,8 +18,8 @@
 #     θ_mode = find_mode(model_post["d_chains"], model_post["lprobs"])
 
 #     # Implementation of the Laplace approximation
-#     SSM(par) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
-#     SSM(par, _) = -likeli(model_elements, par, param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
+#     SSM(par) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
+#     SSM(par, _) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
 
 #     n = length(θ_mode)
 #     ∂²f∂p∂p = zeros(Float64, n, n)
@@ -193,8 +193,10 @@ function bridge_sampler(model_mcmc, model_elements, param_sizes, priors, meas_in
     #     push!(q11, likeli(model_elements, gen_samples[i, :], param_sizes, priors, meas_ind, Σ_ids, model_options))
     # end
 
+    hyperpriors = priors[end-5:end]
+
     Threads.@threads for j in 1:N1
-        q21[j] = likeli(model_elements, gen_samples[j, :], param_sizes, priors, meas_ind, Σ_ids, model_options)[1]
+        q21[j] = likeli(model_elements, gen_samples[j, :], param_sizes, hyperpriors, Σ_ids, model_options)[1]
     end
 
     # Remove weird likelihood values and ensure everything is the same size 

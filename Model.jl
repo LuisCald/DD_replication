@@ -1,7 +1,7 @@
 function set_params(model_elements::StateSpaceModel, time_p::TimeParams, model_options::ModelOptions)
     """Generates the initial draw of parameters and defines their prior distributions."""
 
-    prior_objects, meas_ind = estimate_prior(model_elements, time_p, model_options)
+    prior_objects, meas_ind = estimate_prior(model_elements, model_options)
     param_vector, param_sizes, Σ_ids, priors = define_parameter_space(model_elements, model_options, prior_objects)
 
     return param_vector, param_sizes, priors, meas_ind, Σ_ids
@@ -161,6 +161,41 @@ function find_observed_objects!(estimator::KernelEstimator, Σ_ids, MV, cop_id, 
     end
 end
 
+# -----------------------------------------------------------------------------
+# NEW FUNCTION: Inverse of u_to_Lcorr 
+# -----------------------------------------------------------------------------
+function Lcorr_to_u(L::AbstractMatrix)
+    n = size(L, 1)
+    u_vec = Float64[] # The unconstrained parameter vector u
+
+    k = 1
+    for i in 2:n
+        c = 1.0 # Initialize cumulative residual variance (c)
+        for j in 1:(i-1)
+            # 1. Get the partial correlation z = L[i, j] / c
+            # This is the z = ζ[k] from the u_to_Lcorr function
+            z = L[i, j] / c
+
+            # Check for numerical stability/bounds
+            if abs(z) > 1.0 + 1e-10
+                @warn "Partial correlation |z| > 1 found. Matrix L is likely invalid."
+                z = clamp(z, -1.0, 1.0)
+            end
+
+            # 2. Get the unconstrained parameter u = atanh(z)
+            u = atanh(z)
+            push!(u_vec, u)
+
+            # 3. Update the residual variance 'c'
+            c *= sqrt(1.0 - z^2)
+            k += 1
+        end
+        # The diagonal L[i, i] is the final 'c', which is already used implicitly
+        # in the construction, so we do not need to check L[i, i] = c, but it should hold.
+    end
+    return u_vec
+end
+
 function u_to_Lcorr(u::AbstractVector, n::Int)
     expected = n * (n - 1) ÷ 2
     @assert length(u) == expected "length(u) must be n*(n-1)/2 = $expected"
@@ -194,10 +229,10 @@ function define_parameter_space(model_elements, model_options, prior_objects)
     B = param_vector[2]
     C = param_vector[3]
     D = param_vector[4] # already a vector
-    #Ω = diag(param_vector[5])
     Ω_var = param_vector[5] # a vector
     Ω_corr_vec = param_vector[6] # vector of non-diagonal elements of actual Ω_corr
     Σ = diag(param_vector[7])
+    H = param_vector[8] # hyperparameters
 
     # Set elements in Σ to NaN if the measure is never observed 
     Σ_ids = Float64.(collect(1:length(Σ)))
@@ -214,16 +249,16 @@ function define_parameter_space(model_elements, model_options, prior_objects)
     short_Σ = Σ[cond]
 
     new_param_sizes = Vector(undef, length(param_vector))
-    for (m, mat) in enumerate([A, B, C, D, Ω_var, Ω_corr_vec, short_Σ])
+    for (m, mat) in enumerate([A, B, C, D, Ω_var, Ω_corr_vec, short_Σ, H])
         new_param_sizes[m] = size(mat)
     end
 
     # Remove elements from the vector of priors that we don't want to estimate
     # priors = [priors[1], priors[2], priors[3], priors[3 .+ cond]...]
-    priors = [priors[1], priors[2], priors[3], priors[4], priors[4 .+ cond]...]
+    priors = [priors[1], priors[2], priors[3], priors[4], priors[4 .+ cond]..., priors[end-5:end]...] # keep hyperpriors
 
     # return [A[:]; B[:]; C[:]; D[:]; Ω[:]; short_Σ[:]], new_param_sizes, Σ_ids, priors # [lb, ub]
-    return [A[:]; B[:]; C[:]; D[:]; Ω_var; Ω_corr_vec; short_Σ[:]], new_param_sizes, Σ_ids, priors # [lb, ub]
+    return [A[:]; B[:]; C[:]; D[:]; Ω_var; Ω_corr_vec; short_Σ[:]; H], new_param_sizes, Σ_ids, priors # [lb, ub]
 end
 
 
@@ -402,8 +437,91 @@ function variance_check!(Ω, Σ)
     end
 end
 
+function get_priors(model_elements, model_options, hyper_params)
+    """Generates the prior distributions for the parameters."""
+
+    # Define hyperpriors 
+    @unpack agg_count, factor_count, pcs, u, MV, proj = model_elements
+    @unpack estimator, measures, constant, lags, prior, measurement_error, estimation_object, case, errors_process, pre_multiply = model_options
+    @unpack grid_pcf, grid_cop = estimator
+    @unpack hyperparameters = prior
+
+    number_of_dfs = length(MV)
+    dimension = length(measures)
+
+    # Map hyperparameters to within their Bounds
+    # 1. First parameter (e.g., ρ_var) constrained to [0.2, 0.99]
+    hyper_params[1] = inv_logit(hyper_params[1], 0.2, 0.99)
+
+    # 2. Second parameter (e.g., ρ_pers_state) constrained to [-0.99, 0.99]
+    hyper_params[2] = inv_logit(hyper_params[2], -0.99, 0.99)
+
+    # 3. Third parameter (e.g., ρ_pers_agg) constrained to [-0.99, 0.99]
+    hyper_params[3] = inv_logit(hyper_params[3], -0.99, 0.99)
+
+
+    # Replace hyperparameters
+    hyperparameters[1] = 0.05
+    hyperparameters[2] = hyper_params[1]
+    hyperparameters[6] = hyper_params[2]
+    hyperparameters[7] = hyper_params[3]
+
+    # Construct prior hyperparameters
+    prior_mean, _, _, _, _, V_prior = minnesota_prior(hyperparameters, pcs, u, lags, estimator)  # TODO: assumes aggs only have 1 lag
+
+    # For measurement error
+    n_objs = (dimension + 1)
+
+    # ───  Extract the two persistence hyper-parameters  ─────────────────────────
+    ρ_F = hyperparameters[6]        # κ₅  = persistence target for the  r-factor block
+    ρ_Y = hyperparameters[7]        # κ₆  = persistence target for the  q-aggregate block
+
+    #  Same log-transform you already used for ρ_F, now applied to both blocks
+    ϕ_F = log(exp(1 - ρ_F^2) - 1)    # ⇒ Normal prior on ϕ_F  implies Beta prior on ρ_F
+    ϕ_Y = log(exp(1 - ρ_Y^2) - 1)    # ⇒ identical mapping for the aggregate persistence
+
+    # ───  Prior list  ──────────────────────────────────────────────────────────
+    σ_ϕ = log(exp(hyper_params[4]) + 1) # These are already corrected
+    σ_ϕ_Y = log(exp(hyper_params[5]) + 1)
+
+    corr_Ω_shape = 1 + log(1 + exp(hyper_params[6])) # shape parameter of 2, meaning mild prior towards identity matrix
+
+    priors = [
+        MvNormal(prior_mean, V_prior),   # coefficients of A,B,C,D
+        Normal(ϕ_F, σ_ϕ),               # prior for factor persistence
+        Normal(ϕ_Y, σ_ϕ_Y),               # prior for aggregate persistence
+        LKJCholesky(factor_count + agg_count, corr_Ω_shape),  # prior for factor correlations
+    ]
+
+    # For measurement equation
+    ϕₘ = log(exp(1) - 1) # when softplus applied to it, it should be 1, which is our prior mean on the measures
+    for _ in 1:number_of_dfs
+        for _ in 1:n_objs
+            push!(priors, Normal(ϕₘ, 2)) # was (5,10)
+        end
+    end
+
+    # Add tight priors for the aggregates
+    sigma2_star = 1 / 2000                # series used to construct agg factors
+    phi_Y_star = log(exp(sigma2_star) - 1) # ≈ sigma2_star
+    s_phi_Y = 0.02                      # super-tight
+    for _ in 1:agg_count
+        push!(priors, Normal(phi_Y_star, s_phi_Y))
+    end
+
+    return priors
+end
+
+# Apply the inverse logit transformation to get the constrained values (ρ*)
+function inv_logit(z, a, b)
+    # Scaled Inverse Logit: a + (b - a) * (1 / (1 + exp(-z)))
+    return a + (b - a) * (1.0 / (1.0 + exp(-z)))
+end
+
+
+
 # TODO: given the new methodology, prioreval should come after the time invariant collapse 
-function likeli(model_elements, param_vector, param_sizes, priors, meas_ind, Σ_ids, model_options; smooth=false)
+function likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, model_options; smooth=false)
     """Computes the likelihood of the model given the parameters. 
 
     Returns smoother estimates if 'smooth'.
@@ -412,17 +530,34 @@ function likeli(model_elements, param_vector, param_sizes, priors, meas_ind, Σ_
     @unpack number_of_dfs = model_options
     @unpack y, G, u, agg_count = model_elements
 
-    # A, B, C, D, Ω, Σ = matrisize(param_vector, param_sizes)
-    A, B, C, D, Ω_var, Ω_corr, Σ = matrisize(param_vector, param_sizes)
+    # Set Priors
+    hyper_params = param_vector[end-5:end] #TODO: hardcoded
+    other_params = param_vector[1:end-6]
 
+    # Priors change based on the hyper_params --- hyperpriors do not
+    local priors
+    try
+        priors = get_priors(model_elements, model_options, hyper_params)
+        # When there is a cholesky error, return a very low likelihood and an alarm, so that the sampler can move on to the next draw.
+    catch e
+        # @warn "Error in get_priors: $e. Returning low likelihood and alarm."
+        return -1.e12, true
+    end
+    push!(priors, hyperpriors...)
+
+    # Reshape param_vector into matrices
+    A, B, C, D, Ω_var, Ω_corr, Σ = matrisize(other_params, param_sizes)
 
     # Reparametization
-    # log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Matrix(Ω), Matrix(Σ)], priors, param_sizes)
-    log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Ω_var, Ω_corr, Matrix(Σ)], priors, param_sizes)
+    log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Ω_var, Ω_corr, Matrix(Σ), hyper_params], priors, param_sizes)
     Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)  # softplus transformation
+
+    # Convert Cholesky factor to correlation matrix
     mat_Ω_corr = Matrix(Ω_corr)
 
-    @assert all(isapprox(diag(mat_Ω_corr), ones(size(mat_Ω_corr, 1)))) "Diagonal of Ω_corr must be 1"
+    if !all(isapprox(diag(mat_Ω_corr), ones(size(mat_Ω_corr, 1))))
+        return -1.e12, true
+    end
     Ω = Ω_var * mat_Ω_corr * Ω_var'  # reconstructing Ω
 
     if alarm

@@ -10,59 +10,59 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
     yr = minimum(year.(qd_vec))
     qr = periods[yr][1]  # first quarter of the first year
 
-    # R"""
-    # library(x12)                       # x13binary must be installed
-    # """
+    R"""
+    library(x12)                       # x13binary must be installed
+    """
 
-    # # Loop over these rows
-    # for i in condition_axes
-    #     indexing = tuple(i, :)
+    # Loop over these rows
+    for i in condition_axes
+        indexing = tuple(i, :)
 
-    #     df_row = df_to_des[indexing...]
+        df_row = df_to_des[indexing...]
 
-    #     # Find indices of NaNs across columns
-    #     nan_ids = findall(isnan, df_row)
+        # Find indices of NaNs across columns
+        nan_ids = findall(isnan, df_row)
 
-    #     # Since x12 cannot handle NaNs, we fill them with linear interpolation. We do not use these values anyway, so, its completely fine.
-    #     df_row = fill_between_mean!(df_row)
+        # Since x12 cannot handle NaNs, we fill them with linear interpolation. We do not use these values anyway, so, its completely fine.
+        df_row = fill_between_mean!(df_row)
 
-    #     # TODO: does not work on my machine due to the R installed on my machine being rosetta based i think
-    #     R"""
-    #     an.error.occured <- FALSE
-    #     tryCatch({
-    #         # 1  Build the ts object (this prints nothing, so no need to silence)
-    #         ts_obj <- ts(
-    #             $(df_row),
-    #             frequency = 4,
-    #             start = c($yr, $qr)
-    #         )
+        # TODO: does not work on my machine due to the R installed on my machine being rosetta based i think
+        R"""
+        an.error.occured <- FALSE
+        tryCatch({
+            # 1  Build the ts object (this prints nothing, so no need to silence)
+            ts_obj <- ts(
+                $(df_row),
+                frequency = 4,
+                start = c($yr, $qr)
+            )
 
-    #         # 2  Run X‑13ARIMA/SEATS quietly
-    #         invisible(
-    #         capture.output(
-    #             adjusted <- x12(ts_obj)
-    #         )
-    #         )
+            # 2  Run X‑13ARIMA/SEATS quietly
+            invisible(
+            capture.output(
+                adjusted <- x12(ts_obj)
+            )
+            )
 
-    #         # 3  Extract the X‑11 adjusted component
-    #         d <- adjusted@d11
-    #         cat("success row", $i, "\n")
+            # 3  Extract the X‑11 adjusted component
+            d <- adjusted@d11
+            cat("success row", $i, "\n")
 
-    #     }, error = function(e) {
-    #         an.error.occured <<- TRUE
-    #         cat("error row", $i, ":", e$message, "\n")
-    #         d <- $(df_row)                 # fallback: keep original series
-    #     })
+        }, error = function(e) {
+            an.error.occured <<- TRUE
+            cat("error row", $i, ":", e$message, "\n")
+            d <- $(df_row)                 # fallback: keep original series
+        })
 
-    #     """
+        """
 
-    #     @rget d
-    #     # Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
-    #     # Plots.plot!(df_row, label="Original series", linestyle=:dash)
-    #     # Plots.savefig("x11_$(source)_$i.pdf")
-    #     df_to_des[i, :] = d
-    #     df_to_des[i, nan_ids] .= NaN
-    # end
+        @rget d
+        # Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
+        # Plots.plot!(df_row, label="Original series", linestyle=:dash)
+        # Plots.savefig("x11_$(source)_$i.pdf")
+        df_to_des[i, :] = d
+        df_to_des[i, nan_ids] .= NaN
+    end
 
     return df_to_des
 end
@@ -174,7 +174,7 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
     @info("Estimation selected: $tag")
 
     # Collects data for all available years 
-    dfs, year_vec, time_dict, freq_type = data_constructor(obs_data, model_options) # TODO: correct freq_type s.t. it makes sense 
+    dfs, dfs_unaltered, year_vec, time_dict, freq_type = data_constructor(obs_data, model_options) # TODO: correct freq_type s.t. it makes sense 
 
     # Remove seasonality of specific datasets, only if OS is not mac
     @info("Removing seasonality from quarterly data.")
@@ -186,10 +186,9 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
     cutoff_bounds = align_data_with_timeframe!(dfs, year_vec, time_p, data_cutoffs)
 
     # Define data intervals # TODO: for the future, run this after data_constructor so that we construct intervals for all data and then subset to the timeframe we want vs. estimating separate intervals for different time frames 
-    #TODO: Requires that we know the dates of the intervals of course, which we do 
-    #TODO: for functional data ... tricky 
     confidence_intervals, Σ̂⁻¹² = define_data_intervals(df_vec, model_options, init_path, time_p, obs_data)
     println("Intervals defined.")
+
     # Perform proof of concept reconstruction
     # First, select a df where all measures are observed 
 
@@ -248,6 +247,85 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
 
     # Fill Equation Objects 
     return func_struct, time_p, set_measurements(MV, pcs, means, stds, agg_data, pooled_data, proj, files, time_p, freq_type, time_dict, model_options, n_less_than_one, βs, trend, Σ̂⁻¹², data_to_mute, agg_lags, df_vec, gdp_series)
+end
+
+
+"""Compute number of measurement rows per dataset (block size) for `Σ̂⁻¹²`.
+
+This matches the coefficient-vector length produced by `data_constructor`: copula block
+plus `dimension` percentile-function blocks.
+"""
+function sigma_block_size(dimension::Integer, estimator)
+    @unpack grid_pcf, grid_cop = estimator
+    immutable = grid_cop + (dimension - 1) * (grid_cop - 1)
+    cop_rows = grid_cop^dimension - immutable
+    return cop_rows + dimension * grid_pcf
+end
+
+
+"""Extract the relevant per-dataset blocks from a (large) saved `Σ̂⁻¹²`.
+
+`Σ̂⁻¹²_full` is assumed block-diagonal across datasets, in the order given by
+`sigma_sources` (parsed from the filename).
+
+This returns a new block-diagonal matrix containing only the blocks for the datasets
+in `df_names` (typically 4 here: HANK a–d), in that order.
+"""
+function extract_sigma_blocks(Σ̂⁻¹²_full::AbstractMatrix,
+    sigma_sources,
+    df_names,
+    number_of_dfs,
+    dimension,
+    estimator)
+
+    isempty(sigma_sources) && error("sigma_sources is empty; cannot extract sigma blocks")
+
+    K_from_est = sigma_block_size(dimension, estimator)
+    K_from_file = size(Σ̂⁻¹²_full, 1) ÷ length(sigma_sources)
+    if K_from_file * length(sigma_sources) != size(Σ̂⁻¹²_full, 1)
+        error("Sigma size is not divisible by number of sources")
+    end
+    if K_from_est != K_from_file
+        @warn "Sigma block size mismatch (estimator vs file); using file-implied block size" K_from_est K_from_file
+    end
+    K = K_from_file
+
+    # Map df names to sigma source tokens
+    function target_source(df_name::AbstractString)
+        if occursin("HANK a", df_name)
+            return "PSID"
+        elseif occursin("HANK b", df_name)
+            return "CPS"
+        elseif occursin("HANK c", df_name)
+            return "CEX"
+        elseif occursin("HANK d", df_name)
+            return "SCF"
+        elseif occursin("HANK e", df_name)
+            return "SIPP1"
+        end
+        for s in sigma_sources
+            if occursin(s, df_name)
+                return s
+            end
+        end
+        return ""
+    end
+
+    n_keep = min(Int(number_of_dfs), length(df_names))
+    out = zeros(eltype(Σ̂⁻¹²_full), K * n_keep, K * n_keep)
+
+    for j in 1:n_keep
+        tok = target_source(df_names[j])
+        tok == "" && error("Could not map df name to sigma source token: $(df_names[j])")
+        idx = findfirst(==(tok), sigma_sources)
+        idx === nothing && error("Token $(tok) not found in sigma_sources")
+
+        src_r = (idx-1)*K+1:idx*K
+        dst_r = (j-1)*K+1:j*K
+        @views out[dst_r, dst_r] .= Σ̂⁻¹²_full[src_r, src_r]
+    end
+
+    return out
 end
 
 
@@ -457,7 +535,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
     # Loop over data sources and generate intervals
     confidence_intervals = Dict()
     Σ̂⁻¹²ⱼ = Vector{Matrix{Float64}}(undef, length(sources))
-    max_draws = 500
+    max_draws = 999
 
     # File to save the sigma matrix. Only higher orders require a different computation
     ci_tag = tag == " higher order15" ? tag : ""
@@ -498,10 +576,31 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
             df = df_vec[1][j]
             draws = occursin("CPS", source) ? Int(round(max_draws * 0.10, digits=0)) : max_draws # CPS is a large dataset --- tight intervals anyway 
             draws = occursin("SIPP", source) ? Int(round(draws * 0.50, digits=0)) : draws # SIPP is a quarterly dataset
+            draws = occursin("HANK", source) ? Int(round(draws * 0.50, digits=0)) : draws # HANK is a large simulated dataset
             data, _ = select_data(df, measures, equivalized, bottom_coded, blind_to, source)
 
+            # HANK special case: for sigma estimation we want to compute the simulated base coefficients once,
+            # then generate bootstrap draws by perturbing those coefficients using SDs inferred from the
+            # empirical noise_draws file implied by the HANK letter (a,b,c,d,e).
+            local hank_noise_draws
+            hank_noise_draws = nothing
+            if occursin("HANK", source)
+                target = hank_target_dataset(source)
+                if target != ""
+                    target_ci_source = occursin("SCF", target) ? "SCF" : target
+                    target_noise_file = init_path * "/noise_distributions/noise_draws_" * m_label * grid_tag * "_" * target_ci_source * "_$end_year" * ci_tag * ".jld2"
+                    if isfile(target_noise_file)
+                        hank_noise_draws = jldopen(target_noise_file, "r")["noise"]
+                    else
+                        error("HANK sigma path needs empirical noise draws, but file not found: $target_noise_file")
+                    end
+                end
+            end
+
             # Generate confidence intervals 
-            sub_boot_dict, DCT_boot = estimate_confidence_intervals!(data, objects, series, year_vec[j], time_dict[j], freq_type[j], estimator, measures, draws, gdp_series, source)
+            # For HANK, also estimate Monte Carlo (finite-sample) noise by bootstrapping the simulated microdata
+            # within each period, then combine it with empirical measurement noise.
+            sub_boot_dict, DCT_boot = estimate_confidence_intervals!(data, objects, series, year_vec[j], time_dict[j], freq_type[j], estimator, measures, draws, gdp_series, source; noise_draws=hank_noise_draws)
 
             # Save the sub_boot_dict and DCT_boot using jld2 
             JLD2.save(ci_file_name, "ci", sub_boot_dict)
@@ -541,6 +640,24 @@ function compute_Kullback_Leibler_divergence(P, Q; compare_to_average=false)
     #     println(nansum(Q))
     #     error("P and Q must be valid probability distributions.")
     # end
+end
+
+
+"""Map a simulated HANK dataset name to its target empirical dataset name."""
+function hank_target_dataset(df_name::AbstractString)
+    if occursin("HANK a", df_name)
+        return "PSID"
+    elseif occursin("HANK b", df_name)
+        return "CPS"
+    elseif occursin("HANK c", df_name)
+        return "CEX"
+    elseif occursin("HANK d", df_name)
+        return "SCF"
+    elseif occursin("HANK e", df_name)
+        return "SIPP1"
+    else
+        return ""
+    end
 end
 
 
@@ -990,11 +1107,17 @@ end
 
 
 function find_source(time_dict, year)
+    dfs_with_year = []
     for (j, dict) in time_dict
         if year in collect(keys(dict))
-            return j
+            push!(dfs_with_year, j)
         end
     end
+    # Among the dfs, find the one with the lowest quarter
+    quarters_of_df = [minimum(time_dict[j][year]) for j in dfs_with_year]
+    source = dfs_with_year[findfirst(x -> x == minimum(quarters_of_df), quarters_of_df)]
+
+    return source
 end
 
 
@@ -1331,7 +1454,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
 
         M = MultivariateStats.fit(PCA, pool; pratio=0.95, method=:svd, mean=0)  # TODO: unfix this!
         pcs = MultivariateStats.transform(M, pool)
-        Mdim = tag == " less AF" ? 15 : tag == " more AF" ? 20 : tag == " all AF" ? 30 : tag == " less DF and AF" ? 10 : 25
+        Mdim = tag == " less AF" ? 3 : tag == " more AF" ? 15 : tag == " all AF" ? 30 : tag == " less DF and AF" ? 3 : 11
 
         λ = sqrt.(principalvars(M))
         pcs_s = pcs ./ λ
@@ -1363,7 +1486,9 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=6, method=:svd) # mean=0
         elseif tag == " 7 factors"
             M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=7, method=:svd) # mean=0
-        elseif tag == " HANK"
+        elseif occursin("HANK full", tag)
+            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=8, method=:svd) # mean=0
+        elseif occursin("HANK", tag)
             M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=8, method=:svd) # mean=0
         else
             M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
@@ -1512,7 +1637,7 @@ function select_aggregates(aggregates, measures, tot_periods, tmin, tmax, agg_la
 
     #     return u_proj, agg_pcs, agg_count
     # else
-    super_aggs = data_only_aggs[:, 1:end-agg_lags]
+    super_aggs = data_only_aggs[:, 1:end-agg_lags] # N by T
 
     for i in 1:agg_lags
         super_aggs = vcat(super_aggs, data_only_aggs[:, i+1:end-agg_lags+i])
@@ -1900,7 +2025,7 @@ function n_factors(X, r_max; include_plot::Int=0, τ::Float64=0.5)
     sorted = sort(abs.(Lambda), dims=1, rev=true)
     largest_z = sorted[1:z, :]
 
-    error_part = d[r_max+1:end]
+    error_part = d[r_max:end]
     estimate_variance = sum(error_part .^ 2) / n
 
     Shat = zeros(r_max)
@@ -1919,8 +2044,8 @@ function n_factors(X, r_max; include_plot::Int=0, τ::Float64=0.5)
     # Determine 'maxoutdim'
     eig_X = d[1:min(n, T)] .^ 2
     MOdim = sum(incl_mock_T2[1:r_max] .> eig_X[1:r_max])
-    println("Max dimension outputed:", MOdim)
-    println("FR", FR)
+    println("Max dimension outputed: ", MOdim)
+    println("FR: ", FR)
 
     init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
 
