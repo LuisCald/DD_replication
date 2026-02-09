@@ -2,7 +2,7 @@
 
 # Import files that correspond to the different external sources 
 function export_all_correlations()
-init_path    = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+init_path    = BASE_PATH
 est_s_dict   = Dict() 
 data_sources = sort(["ACS", "CPS", "WID", "DFA"])
 

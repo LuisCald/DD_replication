@@ -380,7 +380,7 @@ end
 #     within_stat_dict[k], dv[k] = export_functional_data(dv[k], k, kind_of_plots, obs_data, func_data, time_params, user_t, model_options, false, true)        
 #     if c == length(keys(dv))
 #         compare_to_data(dv, func_data, obs_data, user_t, time_params, model_options, kind_of_plots, label)
-#         init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+#         init_path = BASE_PATH
 #         dict_path = init_path * "/7_Results/$m_label" * "$tag" * "/$opttag/plots/"
 #         export_combined_stat_dict_to_latex(within_stat_dict, [measures..., "copula"], dict_path, label) # [measures..., "copula"]
 #         compare_to_external_sources(dv, func_data, obs_data, user_t, time_params, model_options, kind_of_plots, label)
@@ -411,7 +411,7 @@ function reconstruct_data_short(A_new,B_new,Ω_new,Δ_new,G_new, likeli_vec, Δ_
         println(tag)
         label = "3D_A non-diag"
         m_label   = measures_folder(measures)
-        init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+        init_path = BASE_PATH
         file_name = init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/parameter_vectors/solution" * "$label" * ".jld2" 
         
         JLD2.save(file_name, "matrices", [A_new,B_new, Ω_new, Δ_new, G_new, likeli_vec, Δ_log])
@@ -436,7 +436,7 @@ function reconstruct_data_short(A_new,B_new,Ω_new,Δ_new,G_new, likeli_vec, Δ_
         Plots.plot()
         dts       = QuarterlyDate(tmin["year"], tmin["quarter"]) : Quarter(1) : QuarterlyDate(tmax["year"], tmax["quarter"])
         xaxis     = 1:tot_periods
-        init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd() 
+        init_path = BASE_PATH 
     
         for i in axes(x_smoothed, 1)
             Plots.plot!(

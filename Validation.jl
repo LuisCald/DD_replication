@@ -28,7 +28,7 @@ function compare_to_external_sources(dv, ty, func_data, obs_data, user_params, t
     data_sources = setdiff(sort(collect(keys(dv))), ["consensus"])
     m_label = measures_folder(measures)
     folder = type == :optimization ? "from_optimization" : "from_mcmc"
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/plots/"
     series_t = ["top10", "next40", "bottom50"]
 
@@ -396,7 +396,7 @@ function generate_wealth_by_income_df(source, ty, measures, opttag, gdp_series, 
     file_tag = ty == "normal" ? "" : "_detrended"
     # Import data 
     meas_folder = measures_folder(measures)
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     micro_df = CSV.read(init_path * "/7_Results/$(meas_folder)" * "$tag" * "/$(opttag)/data/" * "$(source)_micro_data" * file_tag * "_A non-diag_.csv", DataFrame)
     micro_df[!, "time"] = QuarterlyDate.(micro_df[!, "time"])
 
@@ -492,7 +492,7 @@ function compare_to_DFA(dv, ty, time_params, type, case, measures, func_dict, gd
     label = "$dimension" * "D" * "_$case"
 
     # Load data
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     file_path = init_path * "/2_Data_processing/validation/DFA/DFA.xlsx"
     m_label = measures_folder(measures)
     folder = type == :optimization ? "from_optimization" : "from_mcmc"
@@ -906,7 +906,7 @@ function compare_to_data(dv, ty, func_data, obs_data, user_t, time_params, model
 
     # Path situation 
     folder = type == :optimization ? "from_optimization" : "from_mcmc"
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/plots/"
 
     dates = Dict()
@@ -1121,7 +1121,7 @@ end
 function retrieve_external_sources(measures)
 
     # Path 
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     fold_path = init_path * "/2_Data_processing/validation"
 
     external_sources = Dict()

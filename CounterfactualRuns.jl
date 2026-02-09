@@ -311,7 +311,7 @@ function compare_to_nonmissing(dv, c_dv, time_params, user_t, model_options)
     @assert smax["year"] <= tmax["year"]
 
     dts       = QuarterlyDate(tmin["year"], tmin["quarter"]) : Quarter(1) : QuarterlyDate(tmax["year"], tmax["quarter"]) 
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path      = init_path * "/7_Results/$m_label/other_results/counterfactuals/from_missing_information/correlations/"
     xaxis     = collect(1:length(dts))
 
@@ -392,7 +392,7 @@ end
     # generate_c_shares_levels_quantiles(data_dict, counterfactuals_data_dict, avg_series, avg_series_cf, smin["year"], smax["year"], tmin, tmax, integral_pcf_grid, integral_cop_grid, label, measures, tag) 
 
     # dts       = QuarterlyDate(tmin["year"], tmin["quarter"]) : Quarter(1) : QuarterlyDate(tmax["year"], tmax["quarter"]) 
-    # init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    # init_path = BASE_PATH
     # path      = init_path * "/7_Results/$m_label/other_results/counterfactuals/from_aggregates/correlations/"
     # xaxis     = collect(1:length(dts))
     # combs     = join.(combinations(measures, 2), "\\,")
@@ -447,7 +447,7 @@ function generate_m_shares_levels_quantiles(data_dict, counterfactuals_data_dict
 
     # Dates and such
     dts       = QuarterlyDate(smin, tmin["quarter"]) : Quarter(1) : QuarterlyDate(smax, tmax["quarter"]) 
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path      = init_path * "/7_Results/$m_label/other_results/counterfactuals/from_missing_information/"
     xaxis     = collect(1:length(dts))
 
@@ -631,7 +631,7 @@ function generate_c_shares_levels_quantiles(data_dict, counterfactuals_data_dict
 
     # Dates and such
     dts       = QuarterlyDate(smin, tmin["quarter"]) : Quarter(1) : QuarterlyDate(smax, tmax["quarter"]) 
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     path      = init_path * "/7_Results/$m_label" * tag * "/other_results/counterfactuals/from_aggregates/"
     xaxis     = collect(1:length(dts))
 

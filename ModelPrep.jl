@@ -167,7 +167,7 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
     @unpack estimator, number_of_dfs, measures, lags, freq, agg_freq, case, plot_proof, pca_perspective, rm_seasonality, equivalized, data_cutoffs, data_to_mute, tag, agg_lags = model_options
 
     # Preliminairies
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) * "/2_Data_processing" : pwd()
+    init_path = DATA_PROCESSING
     dimension = length(measures)
 
     @info("Extracting observations Tⱼ of the joint distributions, in alphabetical order of datasets' name.")
@@ -1464,7 +1464,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # Import jld2
         if best_aggs
             m_label = measures_folder(measures)
-            init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+            init_path = BASE_PATH
             file_name = init_path * "/7_Results/$(m_label)$(tag)/other_results/R2_dict.jld2"
             best_aggs = jldopen(file_name, "r")["aggs"][1:Mdim]
             pcs_s = pcs_s[best_aggs, :]
@@ -1506,7 +1506,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
 
         if additional_data_blocks != false
             if tag == " PP CEX every 4 years"
-                file_name = "/home/luisc/Distributional_Dynamics/7_Results/consum_and_income_and_wealth PP CEX_annual/other_results/CEX_block.jld2"
+                file_name = BASE_PATH * "/7_Results/consum_and_income_and_wealth PP CEX_annual/other_results/CEX_block.jld2"
                 additional_data_blocks = jldopen(file_name, "r")["block"]
             end
             println(size(additional_data_blocks[1]))
@@ -1926,7 +1926,7 @@ end
 
 
 function get_param_vector(measures, kind_of_plots, label, data_cutoffs, tag)
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
     m_label = measures_folder(measures)
     end_year = data_cutoffs["end"] != "" ? data_cutoffs["end"][1:4] : "all"
 
@@ -2047,7 +2047,7 @@ function n_factors(X, r_max; include_plot::Int=0, τ::Float64=0.5)
     println("Max dimension outputed: ", MOdim)
     println("FR: ", FR)
 
-    init_path = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) : pwd()
+    init_path = BASE_PATH
 
     if include_plot == 1
         eig_X = d[1:min(n, T)] .^ 2

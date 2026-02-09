@@ -86,7 +86,7 @@
 function generate_relative_to_peak_plots()
 
     # Import recession dates 
-    init_path  = dirname(pwd())[end-7:end] == "Dynamics" ? dirname(pwd()) * "/2_Data_processing" : pwd()
+    init_path  = DATA_PROCESSING
     nber_dates = CSV.read(init_path * "/nber_dates.csv", DataFrame)
 
     # just the housing cycle 
@@ -152,10 +152,10 @@ function generate_relative_to_peak_plots()
 
     for m_set in sets_of_measures 
         measures_folder       = m_set[1] * "_and_" * m_set[2] * "_and_" * m_set[3]
-        file_path             = dirname(pwd())[end-7:end] == "Dynamics" ? "/Users/lc/Dropbox/Distributional_Dynamics/7_Results/$(measures_folder)/$opttag/data/PSID_micro_data_A non-diag_.csv" : init_path * "/PSID_micro_data_A non-diag_.csv"
+        file_path             = BASE_PATH * "/7_Results/$(measures_folder)/$opttag/data/PSID_micro_data_A non-diag_.csv"
         micro_data            = CSV.read(file_path, DataFrame)
         micro_data[!, "time"] = QuarterlyDate.(micro_data[!, "time"])
-        plot_path             = dirname(pwd())[end-7:end] == "Dynamics" ? "/Users/lc/Dropbox/Distributional_Dynamics/7_Results/consumption_cyclicality" : init_path * "/7_Results/consumption_cyclicality"
+        plot_path             = BASE_PATH * "/7_Results/consumption_cyclicality"
 
         # For cop_share, zero out the values that are less than 0 
         # micro_data[!, "cop_share"] = [x < 0 ? 0 : x for x in micro_data[!, "cop_share"]]
