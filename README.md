@@ -26,12 +26,13 @@ All data used in this paper are publicly available. Some datasets require free r
 | Survey of Consumer Finances (SCF) | Federal Reserve Board | Public download | 1962-2022 | https://www.federalreserve.gov/econres/scfindex.htm |
 | Consumer Expenditure Survey (CEX) | Bureau of Labor Statistics | Public download | 1984-2023 | https://www.bls.gov/cex/ |
 | Current Population Survey (CPS) | Census Bureau / IPUMS | Free registration | 1964-2023 | https://cps.ipums.org/ |
-| Survey of Income and Program Participation (SIPP) | Census Bureau | Public download | 1984-2008 | https://www.census.gov/programs-surveys/sipp.html |
-| American Community Survey (ACS) | Census Bureau / IPUMS | Free registration | 2005-2023 | https://usa.ipums.org/ |
+| Survey of Income and Program Participation (SIPP) | Census Bureau | Public download | 1984-2022 | https://www.census.gov/programs-surveys/sipp.html |
 | World Inequality Database (WID) | WID.world | Public download | 1962-2023 | https://wid.world/ |
 | Distributional Financial Accounts (DFA) | Federal Reserve Board | Public download | 1989-2023 | https://www.federalreserve.gov/releases/z1/dataviz/dfa/ |
 | FRED Economic Data | Federal Reserve Bank of St. Louis | Public download | Various | https://fred.stlouisfed.org/ |
-| Forbes 400 | Forbes | Public | 2021-2024 | https://www.forbes.com/forbes-400/ |
+| Forbes 400 | Forbes / Fernholz & Haslberger (2023) | Public | 1985-2024 | https://www.forbes.com/forbes-400/ |
+
+**Forbes 400 details:** The SCF+ is augmented with the Forbes 400. For the years 2021 to 2024, we use data directly from Forbes. For the years 1985 to 2020, we use the per capita dataset of Fernholz and Haslberger (2023), whose observations originate from families of the Forbes 400. This provides more complete coverage (nearly all 400 observations each year) than the Forbes website alone, which has incomplete records from the 1990s through the late 2000s.
 
 **Included in this package:** Synthetic (model-generated) microdata are provided in `data/synthetic/`. Pre-computed posterior parameter vectors are provided in `output/estimates/`.
 
@@ -249,7 +250,7 @@ Federal Reserve Bank of St. Louis. *FRED Economic Data*. https://fred.stlouisfed
 
 Panel Study of Income Dynamics. *Public Use Dataset*. Produced and distributed by the Survey Research Center, Institute for Social Research, University of Michigan, Ann Arbor, MI. Various years (1968-2021). https://psidonline.isr.umich.edu/.
 
-Ruggles, Steven, Sarah Flood, Matthew Sobek, et al. *IPUMS USA: Version 14.0* [American Community Survey]. Minneapolis, MN: IPUMS. https://usa.ipums.org/.
+Fernholz, Ricardo T. and Haslberger, Christoph. "Rising Concentration and Group Lending: The Forbes 400 in General Equilibrium." *Journal of Economic Dynamics and Control*, 2023.
 
 Ruggles, Steven, Sarah Flood, Ronald Goeken, et al. *IPUMS CPS: Version 11.0* [Current Population Survey]. Minneapolis, MN: IPUMS. https://cps.ipums.org/.
 
