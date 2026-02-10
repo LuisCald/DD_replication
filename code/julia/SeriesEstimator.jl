@@ -1,7 +1,10 @@
-cd("/Users/lc/Dropbox/Distributional_Dynamics/5_Code")
-include("DistributionalDynamics.jl")
+include(joinpath(@__DIR__, "DistributionalDynamics.jl"))
 
 using Integrals
+
+# Output directory for Figure 2 plots (Overleaf)
+const PLOT_DIR = "/Users/lc/Dropbox/Apps/Overleaf/Distributional Dynamics/Plots/proof_of_concept"
+const RESULTS_DIR = "/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis"
 
 # Plan of attack: create 3D object <-> 2D object mapping
 # Step 1: estimate the 3D copula
@@ -301,11 +304,12 @@ for combo in m_combos
 
     Plots.surface(1:20, 1:20, rho_mat, xlabel=L"\textrm{Order}", ylabel=L"\textrm{Order}", xformatter=:latex, yformatter=:latex, zformatter=:latex, zlabel=L"\textrm{Legendre \,\, Coefficient}",
         camera=(30, 10),
-        size=(400, 400),
+        size=(600, 400),
         color=:winter,
         legend=false,
+        guidefontsize=18, tickfontsize=16, legendfontsize=16,
         display_option=Plots.GR.OPTION_SHADED_MESH)
-    Plots.savefig("copula_weight_$tag.pdf")
+    Plots.savefig(joinpath(PLOT_DIR, "copula_weight_$tag.pdf"))
 end
 
 # Constructing CDF 
@@ -575,11 +579,12 @@ mse_results = hcat(mse, mse_bot, mse_mid, mse_top)
 # Plot the MSE
 Plots.plot(orders_to_estimate, mse_results, xlabel=L"\textrm{Order}", ylabel=L"\textrm{MSE}",
     xformatter=:latex, yformatter=:latex,
-    color=:auto, marker=:circle, markersize=4, label=[L"\textrm{All}" L"\textrm{Bottom}" L"\textrm{Middle}" L"\textrm{Top}"],
+    color=:auto, marker=:circle, markersize=5, label=[L"\textrm{All}" L"\textrm{Bottom}" L"\textrm{Middle}" L"\textrm{Top}"],
     legend=:topright,
     grid=true,
-    size=(600, 400))
-Plots.savefig("/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis/mse_qf_$(String(measure_of_choice)).pdf")
+    guidefontsize=18, tickfontsize=16, legendfontsize=16,
+    size=(800, 400))
+Plots.savefig(joinpath(RESULTS_DIR, "mse_qf_$(String(measure_of_choice)).pdf"))
 
 
 
@@ -607,7 +612,7 @@ for (i, m) in enumerate(sort(["income", "consum", "wealth"]))
     data = inverse_hyperbolic_sine(data ./ a[1, m*"_per_hh"])
     w = get_quantile_weights(data, weights, 21)
 
-    Plots.plot(axes(w), w, color=:blue, xformatter=:latex, yformatter=:latex, fontsize=14, guidefontsize=14, xtickfontsize=14, ytickfontsize=14, legendfontsize=14, ls=:dot, label="", xlabel=L"\textrm{Order}", ylabel="")
-    Plots.scatter!(axes(w), w, color=:blue, xformatter=:latex, yformatter=:latex, ls=:dot, markersize=3, label=i == 1 ? L"\textrm{Legendre \,\, Coefficients}" : "", xlabel=L"\textrm{Order}", ylabel="")
-    Plots.savefig("Legendre_coefs_" * "$m" * "_pcfs.pdf")
+    Plots.plot(axes(w), w, color=:blue, xformatter=:latex, yformatter=:latex, guidefontsize=18, xtickfontsize=16, ytickfontsize=16, legendfontsize=16, ls=:dot, label="", xlabel=L"\textrm{Order}", ylabel="", size=(700, 400))
+    Plots.scatter!(axes(w), w, color=:blue, xformatter=:latex, yformatter=:latex, ls=:dot, markersize=4, label=i == 1 ? L"\textrm{Legendre \,\, Coefficients}" : "", xlabel=L"\textrm{Order}", ylabel="")
+    Plots.savefig(joinpath(PLOT_DIR, "Legendre_coefs_" * "$m" * "_pcfs.pdf"))
 end
