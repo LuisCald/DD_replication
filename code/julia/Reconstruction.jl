@@ -1313,6 +1313,21 @@ function undo_copula_treatment(x, estimator; slice=false)
 end
 
 
+"""
+    gauss_legendre_nodes_weights(n)
+
+Return `(nodes, weights)` for n-point Gauss-Legendre quadrature on [-1, 1].
+Uses the eigenvalue method (symmetric tridiagonal companion matrix).
+"""
+function gauss_legendre_nodes_weights(n::Int)
+    β = [i / sqrt(4i^2 - 1) for i in 1:n-1]
+    J = SymTridiagonal(zeros(n), β)
+    eigen_result = eigen(J)
+    nodes = eigen_result.values
+    weights = 2.0 .* eigen_result.vectors[1, :] .^ 2
+    return nodes, weights
+end
+
 function estimate_confidence_intervals!(data, objects, series, years, time_dict, freq_type, estimator, measures, draws, gdp_series, source; noise_draws=nothing, rng=nothing, sd_scale::Real=1.0, sd_by_period::Bool=true)
     """The problem right now is I wish to generate data, but with a higher granularity for the pcfs than the copula, I basically have to generate the data twice.
     I have generate the pcfs for the higher granularity (to compare the reconstructions to) and the pcfs of the lower granularity, so when i export the data, 
@@ -1366,6 +1381,35 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
     @unpack integral_pcf_grid = estimator
     grid_points_pcf = select_grid_points(integral_pcf_grid)
     intervals = vcat([0.0] .+ 1e-6, grid_points_pcf)
+
+    # Precompute Gauss-Legendre quadrature data for each sub-interval.
+    # This replaces adaptive quadgk calls with fixed-node evaluation in the bootstrap loop.
+    n_gl = 16  # 16-point GL is exact for polynomials up to degree 31; more than sufficient for rtol=1e-8 on these smooth integrands
+    gl_ref_nodes, gl_ref_weights = gauss_legendre_nodes_weights(n_gl)
+
+    # For each sub-interval [a, b], map reference nodes from [-1,1] to [a,b] and precompute basis values
+    gl_nodes   = Vector{Vector{Float64}}(undef, integral_pcf_grid)
+    gl_weights = Vector{Vector{Float64}}(undef, integral_pcf_grid)
+    gl_basis   = Vector{Matrix{Float64}}(undef, integral_pcf_grid)  # each is n_gl × grid_pcf
+
+    for i in 1:integral_pcf_grid
+        a, b = intervals[i], intervals[i+1]
+        half_len = (b - a) / 2
+        mid = (a + b) / 2
+
+        # Map nodes to [a, b] and scale weights by Jacobian
+        gl_nodes[i]   = mid .+ half_len .* gl_ref_nodes
+        gl_weights[i] = half_len .* gl_ref_weights
+
+        # Precompute Q_m(j, node) basis matrix: row = node, col = basis function j+1
+        basis = Matrix{Float64}(undef, n_gl, grid_pcf)
+        for k in 1:n_gl
+            for j in 0:(grid_pcf - 1)
+                basis[k, j+1] = Q_m(j, gl_nodes[i][k])
+            end
+        end
+        gl_basis[i] = basis
+    end
 
     # HANK special case:
     # If the sole goal is to construct DCT_boot for sigma estimation, we can avoid
@@ -1782,9 +1826,17 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
                                     # Average over coefficients -> generate quantiles
                                     coef_boot[pcf_rows[m], count, s] .= mean(imp_boot, dims=2)
 
+                                    coefs_i = @view coef_boot[pcf_rows[m], count, s]
                                     for i in 1:integral_pcf_grid
-                                        integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coef_boot[pcf_rows[m], count, s], grid_pcf - 1, u)) .* avg_aggr, intervals[i], intervals[i+1], rtol=1e-8)
-                                        sub_boot_dict[meas]["quantiles"][i, s, count] = integral[1] / (intervals[i+1] - intervals[i])
+                                        integral_val = 0.0
+                                        @inbounds for k in 1:n_gl
+                                            qf_val = 0.0
+                                            for j in 1:grid_pcf
+                                                qf_val += gl_basis[i][k, j] * coefs_i[j]
+                                            end
+                                            integral_val += gl_weights[i][k] * reverse_inverse_hyperbolic_sine(qf_val)
+                                        end
+                                        sub_boot_dict[meas]["quantiles"][i, s, count] = integral_val * avg_aggr / (intervals[i+1] - intervals[i])
                                     end
                                 else
                                     avg_data = mean(non_missing[:, meas], weights(non_missing[:, :weight]))
@@ -1808,10 +1860,18 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
                                     coef_boot[pcf_rows[m], count, s] .= series_estimator(t_rv, non_missing[:, :weight], grid_pcf - 1)
 
 
-                                    # Generates the integral over the percentile function 
+                                    # Generates the integral over the percentile function
+                                    coefs_i = @view coef_boot[pcf_rows[m], count, s]
                                     for i in 1:integral_pcf_grid
-                                        integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coef_boot[pcf_rows[m], count, s], grid_pcf - 1, u)) .* avg_aggr, intervals[i], intervals[i+1], rtol=1e-8)
-                                        sub_boot_dict[meas]["quantiles"][i, s, count] = integral[1] / (intervals[i+1] - intervals[i])
+                                        integral_val = 0.0
+                                        @inbounds for k in 1:n_gl
+                                            qf_val = 0.0
+                                            for j in 1:grid_pcf
+                                                qf_val += gl_basis[i][k, j] * coefs_i[j]
+                                            end
+                                            integral_val += gl_weights[i][k] * reverse_inverse_hyperbolic_sine(qf_val)
+                                        end
+                                        sub_boot_dict[meas]["quantiles"][i, s, count] = integral_val * avg_aggr / (intervals[i+1] - intervals[i])
                                     end
                                 end
                             else
@@ -1837,11 +1897,19 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
                                 coef_boot[pcf_rows[m], count, s] .= series_estimator(t_rv, non_missing[:, :weight], grid_pcf - 1)
 
 
-                                # Generates the integral over the percentile function 
+                                # Generates the integral over the percentile function
+                                coefs_i = @view coef_boot[pcf_rows[m], count, s]
                                 for i in 1:integral_pcf_grid
                                     try
-                                        integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coef_boot[pcf_rows[m], count, s], grid_pcf - 1, u)) .* avg_aggr, intervals[i], intervals[i+1], rtol=1e-8)
-                                        sub_boot_dict[meas]["quantiles"][i, s, count] = integral[1] / (intervals[i+1] - intervals[i])
+                                        integral_val = 0.0
+                                        @inbounds for k in 1:n_gl
+                                            qf_val = 0.0
+                                            for j in 1:grid_pcf
+                                                qf_val += gl_basis[i][k, j] * coefs_i[j]
+                                            end
+                                            integral_val += gl_weights[i][k] * reverse_inverse_hyperbolic_sine(qf_val)
+                                        end
+                                        sub_boot_dict[meas]["quantiles"][i, s, count] = integral_val * avg_aggr / (intervals[i+1] - intervals[i])
                                     catch e
                                         sub_boot_dict[meas]["quantiles"][i, s, count] = NaN
                                     end
