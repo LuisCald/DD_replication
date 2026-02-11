@@ -1371,259 +1371,268 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
     # If the sole goal is to construct DCT_boot for sigma estimation, we can avoid
     # bootstrapping the simulated microdata. Instead:
     # 1) compute the base coefficient path once from the simulated microdata;
-    # 2) estimate a time-invariant per-coefficient SD from provided empirical noise draws;
-    # 3) generate draws by perturbing the base with i.i.d. N(0, sd_k^2) shocks.
-    if occursin("HANK", source) && noise_draws !== nothing
-        @assert ndims(noise_draws) == 3 "noise_draws must be a K×T×D array"
-        @assert size(noise_draws, 1) == n "noise_draws has incompatible K dimension"
+    # 2) (optional) estimate per-coefficient SDs from empirical noise draws;
+    # 3) generate draws by perturbing the base with i.i.d. N(0, sd^2) shocks.
+    #
+    # NOTE: Empirical (data-based) noise can be disabled by setting `sd_scale = 0.0`.
+    # if occursin("HANK", source) && (noise_draws !== nothing || iszero(sd_scale))
 
-        # NaN-robust SD for a vector.
-        nanstd_vec(v) = begin
-            s = 0.0
-            s2 = 0.0
-            nobs = 0
-            @inbounds for x in v
-                if !isnan(x)
-                    nobs += 1
-                    s += x
-                    s2 += x * x
-                end
-            end
-            nobs <= 1 && return NaN
-            μ = s / nobs
-            var = max(0.0, (s2 - nobs * μ * μ) / (nobs - 1))
-            return sqrt(var)
-        end
+    #     # NaN-robust SD for a vector.
+    #     nanstd_vec(v) = begin
+    #         s = 0.0
+    #         s2 = 0.0
+    #         nobs = 0
+    #         @inbounds for x in v
+    #             if !isnan(x)
+    #                 nobs += 1
+    #                 s += x
+    #                 s2 += x * x
+    #             end
+    #         end
+    #         nobs <= 1 && return NaN
+    #         μ = s / nobs
+    #         var = max(0.0, (s2 - nobs * μ * μ) / (nobs - 1))
+    #         return sqrt(var)
+    #     end
 
-        # Fill coefficient vector for a given (bootstrapped) sample.
-        function fill_coefs_for_sample!(out, sample, yr, actual_period)
-            fill!(out, NaN)
+    #     # Fill coefficient vector for a given (bootstrapped) sample.
+    #     function fill_coefs_for_sample!(out, sample, yr, actual_period)
+    #         fill!(out, NaN)
 
-            sample = coalesce.(sample, NaN)
-            filter!("weight" => !isnan, sample)
+    #         sample = coalesce.(sample, NaN)
+    #         filter!("weight" => !isnan, sample)
 
-            obs_measures = String[]
+    #         obs_measures = String[]
 
-            # PCFs
-            for (m, meas) in enumerate(measures)
-                if meas ∉ names(sample)
-                    continue
-                end
+    #         # PCFs
+    #         for (m, meas) in enumerate(measures)
+    #             if meas ∉ names(sample)
+    #                 continue
+    #             end
 
-                non_missing = filter(meas => !isnan, sample)
-                nrow(non_missing) == 0 && continue
+    #             non_missing = filter(meas => !isnan, sample)
+    #             nrow(non_missing) == 0 && continue
 
-                push!(obs_measures, meas)
+    #             push!(obs_measures, meas)
 
-                avg_aggr = filter(row -> row.date >= QuarterlyDate(yr, actual_period), gdp_series)[!, meas*"_per_hh"][1]
-                avg_data = mean(non_missing[:, meas], weights(non_missing[:, :weight]))
-                multiplier = abs.(avg_aggr / avg_data)
-                multiplier[1] > 20 && continue
+    #             avg_aggr = filter(row -> row.date >= QuarterlyDate(yr, actual_period), gdp_series)[!, meas*"_per_hh"][1]
+    #             avg_data = mean(non_missing[:, meas], weights(non_missing[:, :weight]))
+    #             multiplier = abs.(avg_aggr / avg_data)
+    #             multiplier[1] > 20 && continue
 
-                non_missing[!, meas] = non_missing[!, meas] .* multiplier
-                tot_scale = avg_aggr .- mean(non_missing[:, meas], weights(non_missing[:, :weight]))
-                non_missing[!, meas] .= non_missing[!, meas] .+ tot_scale
-                sort!(non_missing, meas)
+    #             non_missing[!, meas] = non_missing[!, meas] .* multiplier
+    #             tot_scale = avg_aggr .- mean(non_missing[:, meas], weights(non_missing[:, :weight]))
+    #             non_missing[!, meas] .= non_missing[!, meas] .+ tot_scale
+    #             sort!(non_missing, meas)
 
-                t_rv = inverse_hyperbolic_sine(non_missing[:, meas] ./ avg_aggr)
-                out[pcf_rows[m]] .= series_estimator(t_rv, non_missing[:, :weight], grid_pcf - 1)
-            end
+    #             t_rv = inverse_hyperbolic_sine(non_missing[:, meas] ./ avg_aggr)
+    #             out[pcf_rows[m]] .= series_estimator(t_rv, non_missing[:, :weight], grid_pcf - 1)
+    #         end
 
-            # Copula coefficients
-            unique!(obs_measures)
-            obs_dims = length(obs_measures)
-            if obs_dims >= 2
-                try
-                    cop_weights = get_copulas(sample, measures, obs_measures, estimator; with_immutable=true)
-                    cop_weights = reshape(cop_weights, cop_size)
-                    out[cop_rows] .= remove_immutable(cop_weights)
-                catch
-                    out[cop_rows] .= NaN
-                end
-            end
+    #         # Copula coefficients
+    #         unique!(obs_measures)
+    #         obs_dims = length(obs_measures)
+    #         if obs_dims >= 2
+    #             try
+    #                 cop_weights = get_copulas(sample, measures, obs_measures, estimator; with_immutable=true)
+    #                 cop_weights = reshape(cop_weights, cop_size)
+    #                 out[cop_rows] .= remove_immutable(cop_weights)
+    #             catch
+    #                 out[cop_rows] .= NaN
+    #             end
+    #         end
 
-            return out
-        end
+    #         return out
+    #     end
 
-        # Base coefficient path (n×T)
-        coef_base = Matrix{Float64}(undef, n, length(years))
-        fill!(coef_base, NaN)
+    #     # Base coefficient path (n×T)
+    #     coef_base = Matrix{Float64}(undef, n, length(years))
+    #     fill!(coef_base, NaN)
 
-        # Optional MC-noise SDs estimated by bootstrapping the simulated microdata within each period.
-        mc_draws = draws
-        sds_mc = mc_draws > 0 ? Matrix{Float64}(undef, n, length(years)) : nothing
-        mc_draws > 0 && fill!(sds_mc, NaN)
+    #     # Optional MC-noise SDs estimated by bootstrapping the simulated microdata within each period.
+    #     mc_draws = draws
+    #     sds_mc = mc_draws > 0 ? Matrix{Float64}(undef, n, length(years)) : nothing
+    #     mc_draws > 0 && fill!(sds_mc, NaN)
 
-        tmp_coef = Vector{Float64}(undef, n)
-        mc_coef_draws = mc_draws > 0 ? Matrix{Float64}(undef, n, mc_draws) : nothing
+    #     tmp_coef = Vector{Float64}(undef, n)
+    #     mc_coef_draws = mc_draws > 0 ? Matrix{Float64}(undef, n, mc_draws) : nothing
 
-        count_base = 1
-        for yr in u_years
-            for actual_period in time_dict[yr]
-                period_data = filter(row -> row[freq_type] == actual_period, year_data_dict[yr])
-                fill_coefs_for_sample!(@view(coef_base[:, count_base]), period_data, yr, actual_period)
+    #     count_base = 1
+    #     for yr in u_years
+    #         for actual_period in time_dict[yr]
+    #             period_data = filter(row -> row[freq_type] == actual_period, year_data_dict[yr])
+    #             fill_coefs_for_sample!(@view(coef_base[:, count_base]), period_data, yr, actual_period)
 
-                if mc_draws > 0
-                    bN = nrow(period_data)
-                    b_size = bN
+    #             if mc_draws > 0
+    #                 bN = nrow(period_data)
+    #                 b_size = bN
 
-                    for r in 1:mc_draws
-                        boot_idx = rng === nothing ? rand(1:bN, b_size) : rand(rng, 1:bN, b_size)
-                        b_sample = period_data[boot_idx, :]
-                        fill_coefs_for_sample!(tmp_coef, b_sample, yr, actual_period)
-                        @views mc_coef_draws[:, r] .= tmp_coef
-                    end
+    #                 for r in 1:mc_draws
+    #                     boot_idx = rng === nothing ? rand(1:bN, b_size) : rand(rng, 1:bN, b_size)
+    #                     b_sample = period_data[boot_idx, :]
+    #                     fill_coefs_for_sample!(tmp_coef, b_sample, yr, actual_period)
+    #                     @views mc_coef_draws[:, r] .= tmp_coef
+    #                 end
 
-                    @inbounds for k in 1:n
-                        σ = nanstd_vec(@view mc_coef_draws[k, :])
-                        sds_mc[k, count_base] = (isfinite(σ) && σ >= 0) ? σ : NaN
-                    end
-                end
+    #                 @inbounds for k in 1:n
+    #                     σ = nanstd_vec(@view mc_coef_draws[k, :])
+    #                     sds_mc[k, count_base] = (isfinite(σ) && σ >= 0) ? σ : NaN
+    #                 end
+    #             end
 
-                count_base += 1
-            end
-        end
+    #             count_base += 1
+    #         end
+    #     end
 
-        # Compute a per-coefficient SD from empirical noise draws.
-        #
-        # Important: depending on how `noise_draws` was saved, it may contain either
-        #   (a) residual draws (already ≈ mean-zero), or
-        #   (b) coefficient draws whose mean varies over time.
-        #
-        # To avoid accidentally treating time-variation in the mean as “noise”, we
-        # estimate dispersion *within each time period* (across draws).
-        Tn = size(noise_draws, 2)
-        Dn = size(noise_draws, 3)
-        Tcoef = length(years)
+    #     # Empirical noise (from data) is optional. If `sd_scale == 0` (or `noise_draws`
+    #     # are not provided), we do NOT add any data-based noise.
+    #     Tcoef = length(years)
+    #     sds_data_use = zeros(Float64, n, Tcoef)
 
-        sd_by_period || error("sd_by_period=false is no longer supported; use period-by-period SDs")
-        @assert Tcoef <= Tn "noise_draws has fewer time periods than coef_base"
+    #     if noise_draws !== nothing && !iszero(sd_scale)
+    #         @assert ndims(noise_draws) == 3 "noise_draws must be a K×T×D array"
+    #         @assert size(noise_draws, 1) == n "noise_draws has incompatible K dimension"
 
-        # Compute SDs by period; when the empirical object is not observed (e.g. PSID
-        # only has all measures late in the sample), SDs are left as NaN and filled.
-        sds = Matrix{Float64}(undef, n, Tn)
-        fill!(sds, NaN)
+    #         # Compute a per-coefficient SD from empirical noise draws.
+    #         #
+    #         # Important: depending on how `noise_draws` was saved, it may contain either
+    #         #   (a) residual draws (already ≈ mean-zero), or
+    #         #   (b) coefficient draws whose mean varies over time.
+    #         #
+    #         # To avoid accidentally treating time-variation in the mean as “noise”, we
+    #         # estimate dispersion *within each time period* (across draws).
+    #         Tn = size(noise_draws, 2)
+    #         Dn = size(noise_draws, 3)
 
-        @inbounds for k in 1:n
-            for t in 1:Tn
-                s = 0.0
-                nobs = 0
-                for d in 1:Dn
-                    x = noise_draws[k, t, d]
-                    if !isnan(x)
-                        nobs += 1
-                        s += x
-                    end
-                end
-                nobs <= 1 && continue
-                μ = s / nobs
+    #         sd_by_period || error("sd_by_period=false is no longer supported; use period-by-period SDs")
+    #         @assert Tcoef <= Tn "noise_draws has fewer time periods than coef_base"
 
-                sse_t = 0.0
-                for d in 1:Dn
-                    x = noise_draws[k, t, d]
-                    if !isnan(x)
-                        dx = x - μ
-                        sse_t += dx * dx
-                    end
-                end
+    #         # Compute SDs by period; when the empirical object is not observed (e.g. PSID
+    #         # only has all measures late in the sample), SDs are left as NaN and filled.
+    #         sds = Matrix{Float64}(undef, n, Tn)
+    #         fill!(sds, NaN)
 
-                var = max(0.0, sse_t / (nobs - 1))
-                σ = sqrt(var)
-                sds[k, t] = (isfinite(σ) && σ >= 0) ? σ : NaN
-            end
-        end
+    #         @inbounds for k in 1:n
+    #             for t in 1:Tn
+    #                 s = 0.0
+    #                 nobs = 0
+    #                 for d in 1:Dn
+    #                     x = noise_draws[k, t, d]
+    #                     if !isnan(x)
+    #                         nobs += 1
+    #                         s += x
+    #                     end
+    #                 end
+    #                 nobs <= 1 && continue
+    #                 μ = s / nobs
 
-        # Option (2): carry/back-fill missing SDs across time per coefficient.
-        n_filled = 0
-        n_all_missing = 0
-        @inbounds for k in 1:n
-            row = @view sds[k, :]
-            first_idx = nothing
-            for t in 1:Tn
-                if !isnan(row[t])
-                    first_idx = t
-                    break
-                end
-            end
+    #                 sse_t = 0.0
+    #                 for d in 1:Dn
+    #                     x = noise_draws[k, t, d]
+    #                     if !isnan(x)
+    #                         dx = x - μ
+    #                         sse_t += dx * dx
+    #                     end
+    #                 end
 
-            if first_idx === nothing
-                n_all_missing += 1
-                continue
-            end
+    #                 var = max(0.0, sse_t / (nobs - 1))
+    #                 σ = sqrt(var)
+    #                 sds[k, t] = (isfinite(σ) && σ >= 0) ? σ : NaN
+    #             end
+    #         end
 
-            first_val = row[first_idx]
-            for t in 1:(first_idx-1)
-                if isnan(row[t])
-                    row[t] = first_val
-                    n_filled += 1
-                end
-            end
-            for t in (first_idx+1):Tn
-                if isnan(row[t])
-                    row[t] = row[t-1]
-                    n_filled += 1
-                end
-            end
-        end
+    #         # Carry/back-fill missing SDs across time per coefficient.
+    #         n_filled = 0
+    #         n_all_missing = 0
+    #         @inbounds for k in 1:n
+    #             row = @view sds[k, :]
+    #             first_idx = nothing
+    #             for t in 1:Tn
+    #                 if !isnan(row[t])
+    #                     first_idx = t
+    #                     break
+    #                 end
+    #             end
 
-        n_filled > 0 && @info("Filled $n_filled missing SD entries by carry/back-fill (HANK sigma fast-path)")
-        n_all_missing > 0 && @info("$n_all_missing coefficients had no SD information at any time (HANK sigma fast-path)")
+    #             if first_idx === nothing
+    #                 n_all_missing += 1
+    #                 continue
+    #             end
 
-        # Any SDs still missing after fill imply no information anywhere; treat as zero noise.
-        replace!(sds, NaN => 0.0)
+    #             first_val = row[first_idx]
+    #             for t in 1:(first_idx-1)
+    #                 if isnan(row[t])
+    #                     row[t] = first_val
+    #                     n_filled += 1
+    #                 end
+    #             end
+    #             for t in (first_idx+1):Tn
+    #                 if isnan(row[t])
+    #                     row[t] = row[t-1]
+    #                     n_filled += 1
+    #                 end
+    #             end
+    #         end
 
-        # If requested, carry/back-fill MC SDs the same way and combine variances.
-        @views sds_data_use = sds[:, 1:Tcoef]
-        total_sds = sd_scale .* sds_data_use
+    #         n_filled > 0 && @info("Filled $n_filled missing SD entries by carry/back-fill (HANK sigma fast-path)")
+    #         n_all_missing > 0 && @info("$n_all_missing coefficients had no SD information at any time (HANK sigma fast-path)")
 
-        if mc_draws > 0
-            # Fill missing MC SDs across time per coefficient (option 2)
-            n_filled_mc = 0
-            n_all_missing_mc = 0
-            @inbounds for k in 1:n
-                row = @view sds_mc[k, :]
-                first_idx = nothing
-                for t in 1:Tcoef
-                    if !isnan(row[t])
-                        first_idx = t
-                        break
-                    end
-                end
-                if first_idx === nothing
-                    n_all_missing_mc += 1
-                    continue
-                end
-                first_val = row[first_idx]
-                for t in 1:(first_idx-1)
-                    if isnan(row[t])
-                        row[t] = first_val
-                        n_filled_mc += 1
-                    end
-                end
-                for t in (first_idx+1):Tcoef
-                    if isnan(row[t])
-                        row[t] = row[t-1]
-                        n_filled_mc += 1
-                    end
-                end
-            end
-            n_filled_mc > 0 && @info("Filled $n_filled_mc missing MC SD entries by carry/back-fill (HANK sigma fast-path)")
-            n_all_missing_mc > 0 && @info("$n_all_missing_mc coefficients had no MC SD information at any time (HANK sigma fast-path)")
+    #         # Any SDs still missing after fill imply no information anywhere; treat as zero noise.
+    #         replace!(sds, NaN => 0.0)
 
-            replace!(sds_mc, NaN => 0.0)
-            @views sds_mc_use = sds_mc[:, 1:Tcoef]
-            total_sds = sqrt.((sd_scale .* sds_data_use) .^ 2 .+ (sds_mc_use) .^ 2)
-        end
+    #         @views sds_data_use .= sds[:, 1:Tcoef]
+    #     end
 
-        # Generate coefficient draws around the simulated base path.
-        for s in 1:draws
-            Z = rng === nothing ? randn(n, Tcoef) : randn(rng, n, Tcoef)
-            @views coef_boot[:, :, s] .= coef_base .+ total_sds .* Z
-        end
+    #     total_sds = sd_scale .* sds_data_use
 
-        clean_sub_boot_dict!(sub_boot_dict)
-        return sub_boot_dict, coef_boot
-    end
+    #     if mc_draws > 0
+    #         # Fill missing MC SDs across time per coefficient (option 2)
+    #         n_filled_mc = 0
+    #         n_all_missing_mc = 0
+    #         @inbounds for k in 1:n
+    #             row = @view sds_mc[k, :]
+    #             first_idx = nothing
+    #             for t in 1:Tcoef
+    #                 if !isnan(row[t])
+    #                     first_idx = t
+    #                     break
+    #                 end
+    #             end
+    #             if first_idx === nothing
+    #                 n_all_missing_mc += 1
+    #                 continue
+    #             end
+    #             first_val = row[first_idx]
+    #             for t in 1:(first_idx-1)
+    #                 if isnan(row[t])
+    #                     row[t] = first_val
+    #                     n_filled_mc += 1
+    #                 end
+    #             end
+    #             for t in (first_idx+1):Tcoef
+    #                 if isnan(row[t])
+    #                     row[t] = row[t-1]
+    #                     n_filled_mc += 1
+    #                 end
+    #             end
+    #         end
+    #         n_filled_mc > 0 && @info("Filled $n_filled_mc missing MC SD entries by carry/back-fill (HANK sigma fast-path)")
+    #         n_all_missing_mc > 0 && @info("$n_all_missing_mc coefficients had no MC SD information at any time (HANK sigma fast-path)")
+
+    #         replace!(sds_mc, NaN => 0.0)
+    #         @views sds_mc_use = sds_mc[:, 1:Tcoef]
+    #         total_sds = sqrt.((sd_scale .* sds_data_use) .^ 2 .+ (sds_mc_use) .^ 2)
+    #     end
+
+    #     # Generate coefficient draws around the simulated base path.
+    #     for s in 1:draws
+    #         Z = rng === nothing ? randn(n, Tcoef) : randn(rng, n, Tcoef)
+    #         @views coef_boot[:, :, s] .= coef_base .+ total_sds .* Z
+    #     end
+
+    #     clean_sub_boot_dict!(sub_boot_dict)
+    #     return sub_boot_dict, coef_boot
+    # end
 
     # Other 
     qvec = zeros(grid_pcf)
@@ -1639,8 +1648,19 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
     id_x = eachindex(int_points)
     integrals_pre = precompute_integrals(grid_cop - 1, int_points)
 
-    # Threads.@threads 
-    # Threads.@threads for y in e÷achindex(u_years)
+    # Precompute avg_aggr values to avoid repeated DataFrame filtering inside the bootstrap loop
+    avg_aggr_cache = Dict{Any, Float64}()
+    for yr in u_years
+        for actual_period in time_dict[yr]
+            for meas in measures
+                col = meas * "_per_hh"
+                if col in names(gdp_series)
+                    avg_aggr_cache[(yr, actual_period, meas)] = filter(row -> row.date >= QuarterlyDate(yr, actual_period), gdp_series)[!, col][1]
+                end
+            end
+        end
+    end
+
     for y in eachindex(u_years)
         yr = u_years[y]
         println("$y of $(length(u_years))")
@@ -1655,8 +1675,8 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
             b_size = nrow(period_data) # source == "HANK" ? 5000 :
             boot_indices = rand(1:nrow(period_data), b_size, draws)
 
-            # Bootstrap 
-            for s in 1:draws  # when you bootstrap, it should be the length of the sample
+            # Bootstrap
+            Threads.@threads for s in 1:draws  # when you bootstrap, it should be the length of the sample
                 local b_sample
                 if "strata" in names(period_data) && !occursin("SCF", source)
                     # Generate empty df 
@@ -1723,13 +1743,10 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
                             # coef_boot[pcf_rows[m], count, s]               .= NaN
 
                         else
-                            @unpack integral_pcf_grid = estimator
-                            grid_points_pcf = select_grid_points(integral_pcf_grid) # avoids boundary issues
-                            intervals = vcat([0.0] .+ 1e-6, grid_points_pcf)
                             push!(obs_measures, meas)
 
                             # Find multiplier s.t. average in FRED is equal to average in the sample
-                            avg_aggr = filter(row -> row.date >= QuarterlyDate(yr, actual_period), gdp_series)[!, meas*"_per_hh"][1]
+                            avg_aggr = avg_aggr_cache[(yr, actual_period, meas)]
 
                             if occursin("SCF", source)
                                 # Over imputations
@@ -1951,16 +1968,11 @@ end
 
 
 function eval_quantile_function(coefficients, order, u)
-
-    basis = zeros(1, order + 1)
-
-    for j in 0:order
-        basis[j+1] = Q_m(j, u)
+    val = 0.0
+    @inbounds for j in 0:order
+        val += coefficients[j+1] * Q_m(j, u)
     end
-
-    quants = basis * coefficients
-
-    return quants
+    return val
 end
 
 
