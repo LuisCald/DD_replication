@@ -576,26 +576,13 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
             df = df_vec[1][j]
             draws = occursin("CPS", source) ? Int(round(max_draws * 0.10, digits=0)) : max_draws # CPS is a large dataset --- tight intervals anyway 
             draws = occursin("SIPP", source) ? Int(round(draws * 0.50, digits=0)) : draws # SIPP is a quarterly dataset
-            draws = occursin("HANK", source) ? Int(round(draws * 0.50, digits=0)) : draws # HANK is a large simulated dataset
+            # draws = occursin("HANK", source) ? Int(round(draws * 0.50, digits=0)) : draws # HANK is a large simulated dataset
             data, _ = select_data(df, measures, equivalized, bottom_coded, blind_to, source)
 
-            # HANK special case: for sigma estimation we want to compute the simulated base coefficients once,
-            # then generate bootstrap draws by perturbing those coefficients using SDs inferred from the
-            # empirical noise_draws file implied by the HANK letter (a,b,c,d,e).
+            # HANK special case: empirical (data-based) noise is disabled (we don't add noise from data).
+            # Keep `hank_noise_draws = nothing` so we don't require/loading noise files.
             local hank_noise_draws
             hank_noise_draws = nothing
-            if occursin("HANK", source)
-                target = hank_target_dataset(source)
-                if target != ""
-                    target_ci_source = occursin("SCF", target) ? "SCF" : target
-                    target_noise_file = init_path * "/noise_distributions/noise_draws_" * m_label * grid_tag * "_" * target_ci_source * "_$end_year" * ci_tag * ".jld2"
-                    if isfile(target_noise_file)
-                        hank_noise_draws = jldopen(target_noise_file, "r")["noise"]
-                    else
-                        error("HANK sigma path needs empirical noise draws, but file not found: $target_noise_file")
-                    end
-                end
-            end
 
             # Generate confidence intervals 
             # For HANK, also estimate Monte Carlo (finite-sample) noise by bootstrapping the simulated microdata
@@ -1489,7 +1476,8 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         elseif occursin("HANK full", tag)
             M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=8, method=:svd) # mean=0
         elseif occursin("HANK", tag)
-            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=8, method=:svd) # mean=0
+            # M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=8, method=:svd) # mean=0
+            M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
         else
             M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
         end
