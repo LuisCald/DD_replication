@@ -327,16 +327,16 @@ function data_constructor(obs_data::ObservedData, model_options)
         # If requested, inject empirical-style coefficient noise into simulated HANK datasets.
         # Priority: if SDs-from-draws are provided for the target dataset, use those.
         # Otherwise fall back to the dataset-specific block from Σ̂⁻¹² (block diagonal across sources).
-        if occursin("HANK", df_name)
-            target = hank_target_dataset(df_name)
-            noise_df_files = infer_noise_paths(files, model_options)
+        # if occursin("HANK", df_name)
+        #     target = hank_target_dataset(df_name)
+        #     noise_df_files = infer_noise_paths(files, model_options)
 
-            # Import noise file 
-            noise_df = jldopen(noise_df_files[target], "r")["noise"]
+        #     # Import noise file 
+        #     noise_df = jldopen(noise_df_files[target], "r")["noise"]
 
-            # perturb coefficients
-            dfs[j] = perturb_coefficients_sd!(dfs[j], noise_df)
-        end
+        #     # perturb coefficients
+        #     dfs[j] = perturb_coefficients_sd!(dfs[j], noise_df)
+        # end
     end
 
     return dfs, un_perturbed_dfs, time_vec, time_dict, freq_type

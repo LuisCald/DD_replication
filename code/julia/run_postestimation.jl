@@ -63,6 +63,10 @@ dv, _ = reconstruct_data(
 @info "Exporting time series and generating validation plots..."
 within_stat_dict = Dict()
 for (c, k) in enumerate(keys(dv))
+    if occursin("HANK", tag) && k == "consensus"
+        continue
+    end
+
     within_stat_dict[k] = Dict()
     for ty in ["normal"]
         within_stat_dict[k][ty], dv[k][ty] = export_functional_data(
@@ -107,12 +111,12 @@ Tval = eltype(A)
 Φ = zeros(Tval, nₛ, nₛ)
 AI = Matrix{Tval}(I, r, r)
 @views begin
-    Φ[1:r, 1:r]           .= A
-    Φ[1:r, 4r+1:4r+q]     .= B_mat
-    Φ[r+1:2r, 1:r]        .= AI
-    Φ[2r+1:3r, r+1:2r]    .= AI
-    Φ[3r+1:4r, 2r+1:3r]   .= AI
-    Φ[4r+1:end, 1:r]      .= C
+    Φ[1:r, 1:r] .= A
+    Φ[1:r, 4r+1:4r+q] .= B_mat
+    Φ[r+1:2r, 1:r] .= AI
+    Φ[2r+1:3r, r+1:2r] .= AI
+    Φ[3r+1:4r, 2r+1:3r] .= AI
+    Φ[4r+1:end, 1:r] .= C
     Φ[4r+1:end, 4r+1:end] .= D
 end
 

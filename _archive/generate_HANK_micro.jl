@@ -129,11 +129,21 @@ exovars = [getfield(sr_full.indexes, s) for s in shock_syms]  # Vector{Int}
 #    This matches the naming convention in your m_par (σ_A, σ_Z, σ_Rshock, …).
 stds = [getfield(m_par, Symbol("σ_", s)) for s in shock_syms]  # Vector{Float64}
 
+# Per-shock scale factors (multiplied by calibrated σ):
+#   Z    ZI   μ    μw   A    R    G    Tprog  S
+#   TFP  Inv  PMU  WMU  Pref MP   Gov  TaxP   Unc
+# init_val = stds .* [0.3, 0.4, 1.0, 0.5, 1.0, 0.3, 1.0, 0.1, 0.2] #
+init_val = stds .* [0.1, 0.5, 0.5, 0.5, 1.5, 1.0, 1.0, 0.2, 0.1]
+
+# shock_syms = [:Z, :A, :Rshock, :Sshock]
+# exovars = [getfield(sr_full.indexes, s) for s in shock_syms]  # Vector{Int}
+# stds = [getfield(m_par, Symbol("σ_", s)) for s in shock_syms]
+# init_val = stds .* [0.3, 1.0, 0.3, 0.15]
+
 # 3) Simulation settings
-T = 2000   # total length
-burnin = 1000    # dropped from outputs
-# initval = stds   # innovation scale (you can override, e.g. 0.01 .* ones(length(exovars)))
-init_val = stds .* [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.2]  # scale shocks differently if desired
+T = 5000   # total length
+burnin = 1200    # dropped from outputs
+nn_chunks = Int((T - burnin) / 100)    # single long economy (~3800 quarters)
 
 # Surveys are optional.
 # - Set `specs = nothing` to generate *truth only* (no survey samples).
@@ -143,6 +153,7 @@ specs = nothing
 
 # Order in which (potential) surveys are generated/exported.
 # `generate_microdata` filters this down to the surveys actually present in `specs`.
+# survey_order = [:CEX, :CPS, :PSID, :SCF] # these names are arbitrary
 survey_order = [:CEX, :CPS, :PSID, :SCF] # these names are arbitrary
 
 # Truth is optional and changes the return shape.
@@ -153,10 +164,10 @@ truth_vec = nothing
 
 # Example custom specs (uncomment to enable surveys):
 specs = Dict(
-    :CEX => (stride = 1, N = 3_000, vars = [:consum, :income]),
-    :CPS => (stride = 4, N = 60_000, vars = [:income]),
-    :SCF => (stride = 12, N = 5_000, vars = [:income, :wealth]),
-    :PSID => (stride = 8, N = 7_000, vars = [:consum, :income, :wealth]),
+    :CEX => (stride=1, N=3_000, vars=[:consum, :income]),
+    :CPS => (stride=4, N=60_000, vars=[:income], start_quarter=4),
+    :SCF => (stride=12, N=5_000, vars=[:income, :wealth], start_quarter=3),
+    :PSID => (stride=8, N=9_000, vars=[:consum, :income, :wealth], start_quarter=2),
 )
 
 out = generate_microdata(
@@ -166,61 +177,43 @@ out = generate_microdata(
     lr_full.LOMstate,
     sr_full.XSS,
     sr_full.indexes;
-    T = T,
-    burnin = burnin,
-    init_val = init_val,
-    shock_scale = 0.05,
-    comp_ids = sr_full.compressionIndexes,
-    n_par = sr_full.n_par,
-    λ = m_par.λ,
-    m_par = m_par,
+    T=T,
+    burnin=burnin,
+    init_val=init_val,
+    shock_scale=0.05,
+    comp_ids=sr_full.compressionIndexes,
+    n_par=sr_full.n_par,
+    λ=m_par.λ,
+    m_par=m_par,
     # Use first-order (steady-state) linearized policies for shock-scale invariance.
-    policy_mode = :linearized,
-    no_entrepreneurs = true,
-    truth_mode = truth_mode,
-    truth_vars = [:income, :wealth, :consum, :liquid, :illiqd],
-    n_chunks = 10,
+    policy_mode=:linearized,
+    no_entrepreneurs=true,
+    truth_mode=truth_mode,
+    truth_vars=[:income, :wealth, :consum, :liquid, :illiqd],
+    n_chunks=nn_chunks,  # generate extra chunks; bad ones are filtered below
     # Bin means: quintiles/deciles/ventiles/etc.
-    truth_bin_counts = [5],
+    truth_bin_counts=[5],
     # Optional explicit quantiles (can be large; e.g. percentiles):
     # truth_quantile_probs = 0.01:0.01:0.99,
-    # shock_clip = 0.5,
-    specs = specs,
-    survey_order = survey_order,
+    shock_clip=1.0,
+    specs=specs,
+    survey_order=survey_order,
 )
 
-# Export generated data to CSV files (already chunked)
-data_path = joinpath(paths["bld_example"], "simulated_data");
-mkpath(data_path)
+# ------------------------------------------------------------------------------------------
+# Post-filter and export
+# ------------------------------------------------------------------------------------------
+data_path = joinpath("/Users/lc/Dropbox/Distributional_Dynamics/5_Code/bld/filtered")
 
-# Defined objects from 'out' depend on `truth_mode`:
-# - :none -> (shocks_vec, surveys)
-# - :moments/:micro -> (shocks_vec, surveys, truth_vec)
+good_idx, bad_idx, bad_reasons = filter_chunks(out; max_ratio = 5.0)
 
-shocks_vec = out[1]
-surveys = out[2]
-truth_vec = truth_mode == :none ? nothing : out[3]
-
-for i in eachindex(shocks_vec)
-    CSV.write(joinpath(data_path, "HANK_shocks_economy_$(i).csv"), shocks_vec[i])
-
-    # if truth_mode === :moments && truth_vec !== nothing
-    #     CSV.write(joinpath(data_path, "truth_data_$(i).csv"), truth_vec[i])
-    # elseif truth_mode === :micro
-    #     @info "truth_mode=:micro returns nested micro objects; use truth_mode=:moments for CSV truth export." typeof(
-    #         truth_vec,
-    #     )
-    # end
-
-    # Survey exports (only if surveys were generated)
-    if surveys !== nothing
-        survey_names =
-            specs === :default ? survey_order :
-            [s for s in survey_order if haskey(specs, s)]
-        @assert length(surveys) == length(survey_names)
-
-        for (sidx, sname) in enumerate(survey_names)
-            CSV.write(joinpath(data_path, "HANK_$(sname)_$(i).csv"), surveys[sidx][i])
-        end
-    end
+@info "Chunk filter: $(length(good_idx)) good, $(length(bad_idx)) bad out of $(length(good_idx) + length(bad_idx))"
+for (i, reason) in bad_reasons
+    @info "  Chunk $i rejected: $reason"
 end
+
+# Hand-picked chunks (indices into good_idx), re-indexed 1, 2, 3, ...
+export_idx = good_idx[[18, 13, 11, 6, 25, 22, 15, 5, 3, 1]]
+export_selected_chunks(out, export_idx; dir = data_path, prefix = "HANK")
+
+println('\a') # beep when done
