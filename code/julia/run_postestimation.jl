@@ -48,9 +48,18 @@ user_t = (deepcopy(tmin), deepcopy(tmax))
 
 # ── Step 2: Load estimated parameters ────────────────────────
 @info "Loading estimated parameters..."
-# par_final = get_param_vector(measures, kind_of_plots, label, data_cutoffs, tag)
+par_final = get_param_vector(measures, kind_of_plots, label, data_cutoffs, tag)
 logV, alarm = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options)
 @info "Log-likelihood at loaded parameters: $logV"
+
+
+# ── Step 4: Export time series, validate, generate figures ───
+@info "Exporting time series and generating validation plots..."
+# include("Reconstruction.jl")
+# include("CreateTimeSeries.jl")
+# include("Validation.jl")
+# include("ModelPrep.jl")
+# include("plot_HANK.jl")
 
 # ── Step 3: Reconstruct synthetic distributions ──────────────
 @info "Reconstructing synthetic distributions..."
@@ -58,10 +67,6 @@ dv, _ = reconstruct_data(
     par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
     model_elements, obs_data, model_options, time_params, data_sources
 )
-
-# ── Step 4: Export time series, validate, generate figures ───
-@info "Exporting time series and generating validation plots..."
-include("plot_HANK.jl")
 within_stat_dict = Dict()
 for (c, k) in enumerate(keys(dv))
     if occursin("HANK", tag) && k == "consensus"
@@ -72,7 +77,7 @@ for (c, k) in enumerate(keys(dv))
     for ty in ["normal"]
         within_stat_dict[k][ty], dv[k][ty] = export_functional_data(
             dv[k][ty], ty, k, kind_of_plots, obs_data, func_data,
-            time_params, user_t, model_options, false, true
+            time_params, user_t, model_options, false, true;
         )
 
         if c == length(keys(dv)) && ty == "normal"
@@ -93,76 +98,90 @@ end
 type = "from_mcmc"
 export_table_to_tex_with_strings(measures, :from_mcmc)
 generate_correlations_table_for_external_comparisons("SCF", measures, tag, type, "cycle")
+
+# Cross-conditional averaged correlation table (economies 2–10)
+if occursin("HANK", tag)
+    economy_number = parse(Int, split(strip(tag), " ")[end])
+    # Generate the averaged table only on the last economy run
+    # if economy_number == 10
+ generate_averaged_hank_avg_corr_table(
+      11:11,
+      ["consum", "income", "wealth"],
+      "from_mcmc";
+      data_sources = ["c", "a", "d"]
+  )
+    end
+end
 @info "Correlation tables complete."
 
-# ── Step 6: FEVD ─────────────────────────────────────────────
-@info "Computing forecast error variance decomposition..."
-A, B_mat, C, D, Ω_var, Ω_corr, Σ = matrisize(par_final[1:end-6], param_sizes)
-r_dist = param_sizes[1][1]
-q_agg = param_sizes[2][2]
+# # ── Step 6: FEVD ─────────────────────────────────────────────
+# @info "Computing forecast error variance decomposition..."
+# r_dist = param_sizes[1][1]
+# q_agg = param_sizes[2][2]
 
-Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)
-mat_Ω_corr = Matrix(Ω_corr)
-Ω = Ω_var * mat_Ω_corr * Ω_var'
+# A, B_mat, C, D, Ω_var, Ω_corr, Σ = matrisize(par_final[1:end-6], param_sizes)
+# Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)
+# mat_Ω_corr = Matrix(Ω_corr)
+# Ω = Ω_var * mat_Ω_corr * Ω_var'
 
-r, q = size(B_mat)
-nₛ = 4r + q
-Tval = eltype(A)
+# r, q = size(B_mat)
+# nₛ = 4r + q
+# Tval = eltype(A)
 
-Φ = zeros(Tval, nₛ, nₛ)
-AI = Matrix{Tval}(I, r, r)
-@views begin
-    Φ[1:r, 1:r] .= A
-    Φ[1:r, 4r+1:4r+q] .= B_mat
-    Φ[r+1:2r, 1:r] .= AI
-    Φ[2r+1:3r, r+1:2r] .= AI
-    Φ[3r+1:4r, 2r+1:3r] .= AI
-    Φ[4r+1:end, 1:r] .= C
-    Φ[4r+1:end, 4r+1:end] .= D
-end
+# Φ = zeros(Tval, nₛ, nₛ)
+# AI = Matrix{Tval}(I, r, r)
+# @views begin
+#     Φ[1:r, 1:r] .= A
+#     Φ[1:r, 4r+1:4r+q] .= B_mat
+#     Φ[r+1:2r, 1:r] .= AI
+#     Φ[2r+1:3r, r+1:2r] .= AI
+#     Φ[3r+1:4r, 2r+1:3r] .= AI
+#     Φ[4r+1:end, 1:r] .= C
+#     Φ[4r+1:end, 4r+1:end] .= D
+# end
 
-ids_sub = vcat(1:r, 4r+1:4r+q)
-Φ_sub = Φ[ids_sub, ids_sub]
+# ids_sub = vcat(1:r, 4r+1:4r+q)
+# Φ_sub = Φ[ids_sub, ids_sub]
 
-tbl = fevd_dist_vs_agg(model_elements, model_options, obs_data, Φ_sub, Ω;
-    r, q, horizon=20, factor_names=nothing, shock_order=:agg_first
-)
-@info "FEVD complete."
+# tbl = fevd_dist_vs_agg(model_elements, model_options, obs_data, Φ_sub, Ω;
+#     r, q, horizon=20, factor_names=nothing, shock_order=:agg_first
+# )
+# @info "FEVD complete."
 
-# ── Step 7: Historical decomposition ─────────────────────────
-@info "Computing historical decomposition..."
-smoother_res, _, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
-@unpack x_smoothed, dε_smoothed = smoother_res
+# # ── Step 7: Historical decomposition ─────────────────────────
+# @info "Computing historical decomposition..."
+# smoother_res, _, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
+# @unpack x_smoothed, dε_smoothed = smoother_res
 
-hd = historical_decomp_factors_blockchol(Φ, r, q, dε_smoothed, x_smoothed, Ω;
-    splitting=:group, shock_order=:agg_first
-)
-@info "Historical decomposition complete. Max reconstruction error: $(hd.maxerr)"
+# hd = historical_decomp_factors_blockchol(Φ, r, q, dε_smoothed, x_smoothed, Ω;
+#     splitting=:group, shock_order=:agg_first
+# )
+# @info "Historical decomposition complete. Max reconstruction error: $(hd.maxerr)"
 
-# ── Step 8: Cyclicality of consumption ────────────────────────
-@info "Generating cyclicality of consumption analysis..."
-try
-    generate_relative_to_peak_plots()
-    @info "Cyclicality analysis complete."
-catch e
-    @warn "Cyclicality analysis skipped: $e"
-end
+# # ── Step 8: Cyclicality of consumption ────────────────────────
+# @info "Generating cyclicality of consumption analysis..."
+# try
+#     generate_relative_to_peak_plots()
+#     @info "Cyclicality analysis complete."
+# catch e
+#     @warn "Cyclicality analysis skipped: $e"
+# end
 
-# ── Step 9: Out-of-sample forecasts ──────────────────────────
-@info "Running out-of-sample forecasts..."
-how_much = 1
-perform_forecast("SCF", par_final, param_sizes, priors, meas_ind, Σ_ids, how_much,
-    obs_data, model_options, model_elements, time_params, user_t, func_data,
-    kind_of_plots, ["iterative"]
-)
+# # ── Step 9: Out-of-sample forecasts ──────────────────────────
+# @info "Running out-of-sample forecasts..."
+# how_much = 1
+# perform_forecast("SCF", par_final, param_sizes, priors, meas_ind, Σ_ids, how_much,
+#     obs_data, model_options, model_elements, time_params, user_t, func_data,
+#     kind_of_plots, ["iterative"]
+# )
 
-@unpack time_dict, year_vec = time_params
-periods_to_remove = muted_quarters_between(QuarterlyDate(1984, 1), QuarterlyDate(2021, 4))
-filtering_criteria = Dict("periods_to_remove" => periods_to_remove)
-perform_forecast("CEX", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
-    filtering_criteria, obs_data, model_options, model_elements, time_params,
-    user_t, func_data, kind_of_plots, ["extensive", "data_only"]
-)
-@info "Forecasts complete."
+# @unpack time_dict, year_vec = time_params
+# periods_to_remove = muted_quarters_between(QuarterlyDate(1984, 1), QuarterlyDate(2021, 4))
+# filtering_criteria = Dict("periods_to_remove" => periods_to_remove)
+# perform_forecast("CEX", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
+#     filtering_criteria, obs_data, model_options, model_elements, time_params,
+#     user_t, func_data, kind_of_plots, ["extensive", "data_only"]
+# )
+# @info "Forecasts complete."
 
-@info "═══ Stages 3-5 finished ═══"
+# @info "═══ Stages 3-5 finished ═══"

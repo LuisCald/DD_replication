@@ -17,7 +17,10 @@ function muted_quarters_between(start::QuarterlyDate, stop::QuarterlyDate)
      for q in qstart(y):qstop(y)]
 end
 
-GLOBAL_ECON = "1"
+# Only necessary for HANK exercise
+GLOBAL_ECON = "8"
+# GLOBAL_ECON = get(ENV, "HANK_ECON", "1")
+println("Running with GLOBAL_ECON = $GLOBAL_ECON")
 
 
 # File of Structures 
@@ -25,6 +28,7 @@ function retrieve_data_files()
     local files::Dict
     base_path = DATA_PROCESSING * "/"
 
+    # For HANK exercise, we have different files for each economy, so we need to specify the economy in the file names.
     files = Dict(
         "HANK a $(GLOBAL_ECON)" => joinpath(base_path, "HANK_PSID_$(GLOBAL_ECON).csv"),
         "HANK b $(GLOBAL_ECON)" => joinpath(base_path, "HANK_CPS_$(GLOBAL_ECON).csv"),
@@ -32,14 +36,17 @@ function retrieve_data_files()
         "HANK d $(GLOBAL_ECON)" => joinpath(base_path, "HANK_SCF_$(GLOBAL_ECON).csv"),
     )
 
+    # For the generation of main results
+    # files = Dict(
+    # "SCF" => joinpath(base_path, "SCF.csv"),
     # "PSID" => joinpath(base_path, "PSID.csv"),
-    # # "CEX" => joinpath(base_path, "CEX_all.csv"), # batching all to 4th quarter
-    # # "CEX_all_q" => joinpath(base_path, "CEX_all_q.csv"),
-    # # "CEX" => joinpath(base_path, "CEX.csv"),
-    # # "CPS" => joinpath(base_path, "CPS.csv"),
-    # # "CPS2" => joinpath(base_path, "CPS2.csv"),
-    # # "SIPP1" => joinpath(base_path, "SIPP1.csv"),
-    # # "SIPP2" => joinpath(base_path, "SIPP2.csv"),
+    # "CEX" => joinpath(base_path, "CEX.csv"),
+    # "CPS" => joinpath(base_path, "CPS.csv"),
+    # "CPS2" => joinpath(base_path, "CPS2.csv"),
+    # "SIPP1" => joinpath(base_path, "SIPP1.csv"),
+    # "SIPP2" => joinpath(base_path, "SIPP2.csv"),
+    # "SIPP3" => joinpath(base_path, "SIPP3.csv"),
+    # )
 
     return files
 end
@@ -51,7 +58,7 @@ function retrieve_aggregate_data(sheet)
     
     # Read as .csv if .xlsx fails
     aggregate_data = CSV.read(joinpath(base_path, "HANK_shocks_economy_$(GLOBAL_ECON).csv"), DataFrame)
-    # aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "aggregates_HHs_NPs.XLSX"), sheet, header=true,))
+    # aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "aggregates_HHs_NPs.xlsx"), sheet, header=true,))
     
     return aggregate_data
 
@@ -62,7 +69,7 @@ function retrieve_rgdp()
     local aggregate_data
     base_path = DATA_PROCESSING * "/"
 
-    # aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "inflation_corrected_correction_series.XLSX"), "data", header=true,))
+    # aggregate_data = DataFrame(XLSX.readtable(joinpath(base_path, "inflation_corrected_correction_series.xlsx"), "data", header=true,))
     aggregate_data = CSV.read(joinpath(base_path, "HANK_truth_$(GLOBAL_ECON).csv"), DataFrame)
 
     return aggregate_data
@@ -127,8 +134,8 @@ struct FakeKernelEstimator <: FakeEstimator end # for confidence_intervals
 
 # order for copula is 'grid_cop' + 1
 @with_kw mutable struct ModelOptions{AE<:AbstractEstimator,AP<:AbstractPrior,B<:Bool,S<:String,I<:Integer,VS<:Vector{String},D<:Dict,DS<:Dict{String,String}} #,
-    estimator::AE = SeriesEstimator(grid_pcf=11 + 1, grid_cop=11 + 1, integral_pcf_grid=5, integral_cop_grid=5) # 11 + 1 = order 11
-    # estimator::AE = SeriesEstimator(grid_pcf=11 + 1, grid_cop=11 + 1, integral_pcf_grid=10, integral_cop_grid=10) # or "KDE" or "series" ,     
+    # estimator::AE = SeriesEstimator(grid_pcf=11 + 1, grid_cop=11 + 1, integral_pcf_grid=5, integral_cop_grid=5) # 11 + 1 = order 11
+    estimator::AE = SeriesEstimator(grid_pcf=13 + 1, grid_cop=13 + 1, integral_pcf_grid=5, integral_cop_grid=5) # or "KDE" or "series" ,     
     prior::AP = Minnesota(hyperparameters=[0.05, 0.1, 0.5, 0.1, 2.0, 0.9, 0.9]) # We use: 1,2,4,6
     measures::VS = sort(["consum", "wealth", "income"])
     number_of_dfs::I = 4
@@ -138,7 +145,7 @@ struct FakeKernelEstimator <: FakeEstimator end # for confidence_intervals
     estimation_object::S = "copulas and percentile functions" #"copulas and percentile functions"
     information::S = "partial"  # OR "partial"
     lags::I = 1
-    agg_lags::I = 4
+    agg_lags::I = 0
     freq::I = 4  # the frequency you would like e.g., quarterly
     agg_freq::I = 4
     constant::B = false  # this is a time trend and a quadratic trend. 
@@ -148,9 +155,9 @@ struct FakeKernelEstimator <: FakeEstimator end # for confidence_intervals
     pre_multiply::B = true
     pca_perspective::S = "frequentist" # or "bayesian"
     best_aggs::B = false
+    aggregate_rep::Symbol = :as_states    # :as_states or :as_inputs
 
-
-    # Data Treatment 
+    # Data Treatment
     equivalized::B = false
     bottom_coded::Vector{Any} = []
     rm_seasonality::B = true # TODO: basically if we use the entire CEX
@@ -221,62 +228,22 @@ end
 # check compare_to_other_est, tag, data_to_mute, data above
 
 
-@with_kw struct MCMCOptions{B<:Bool,S<:String,I<:Int64,F<:Float64}
-    nsave::I = 100000  # MCMC
-    nburn::I = 200000   # MCMC 
-    chains::I = 4       # MCMC
-    adaptive_rwmh::B = true
-    compute_hessian::B = true   # not necessary with Gibbs 
-    mhscale::F = 0.35
-    sampler::S = "MH"
-    mcmc_jsd_draws::I = 100    # for state trajectory in kalman  
-    n_jsd_draws::I = 10    # for state trajectory in kalman-gibbs
-    thinning_step::I = 1  # 1 = no thinning -- controversial ... 
-end
+# @with_kw struct MCMCOptions{B<:Bool,S<:String,I<:Int64,F<:Float64}
+#     nsave::I = 100000  # MCMC
+#     nburn::I = 200000   # MCMC
+#     chains::I = 4       # MCMC
+#     adaptive_rwmh::B = true
+#     compute_hessian::B = true   # not necessary with Gibbs
+#     mhscale::F = 0.35
+#     sampler::S = "MH"
+#     mcmc_jsd_draws::I = 100    # for state trajectory in kalman
+#     n_jsd_draws::I = 10    # for state trajectory in kalman-gibbs
+#     thinning_step::I = 1  # 1 = no thinning -- controversial ...
+# end
 
 @with_kw mutable struct Minnesota{VF<:Vector{Float64}} <: AbstractPrior
     hyperparameters::VF = [0.2, 0.3, 0.01, 5, 2.0, 0.90, 0.90] # trying [0.2, 0.3, .01, 5, 2.0, 0.95]
 end
-
-
-# Structure of Parameters 
-# @with_kw mutable struct MethodOptions{B<:Bool, S<:String, I<:Integer, F<:Float64, D<:Dict, DS<:Dict{String, String}}
-#     case::S                     = "A non-diag" # ["diag", "A non-diag", "A, Σ non-diag"]  
-#     equivalized::B              = false
-#     bottom_coded::Vector{Any}   = []
-#     grid::I                     = 10   # only a single number since axes have to be equal since uniform distributions  
-#     grid_type::S                = "uniform"  # or "chebyshev"
-#     functional_data::B          = false
-#     measures::Vector{S}         = sort(["income", "consum", "wealth"]) # sort(["income", "consum", "liquid"])
-#     blind_to::D                 = Dict() #Dict("PSID" => ["wealth"])
-#     estimation_object::S        = "copulas and percentile functions" #"copulas and percentile functions"
-#     information::S              = "partial"  # OR "partial"
-#     percentile_estimation::S    = "naive" #TODO: delete 
-#     minnesota_params::Vector{F} = [0.2, 0.3, .01, 5, 2.0, 0.90] # trying [0.2, 0.3, .01, 5, 2.0, 0.95]
-#     lags::I                     = 1
-#     freq::I                     = 4  # the frequency you would like e.g., quarterly
-#     agg_freq::I                 = 4
-#     constant::B                 = false  # this is a time trend and a quadratic trend. 
-#     number_of_dfs::I            = 5
-#     sampler::S                  = "MH"
-#     n_jsd_draws::I              = 10    # for state trajectory in kalman-gibbs
-#     # var_method::S               = "Bayesian"  # or "LS" for least squares 
-#     pca_perspective::S          = "Frequentist"
-#     pca_method::S               = "linear"
-#     std_method::S               = "z-score"  # or "norm"
-#     measurement_error::S        = "one per object, per dataset" #"one per income quantile, per dataset" #"one per measurement" # "one per object" # "one per object, per dataset
-#     collapse::B                 = true  
-#     plot_proof::B               = false
-#     reconstruction_to_show      = "SCF" #TODO: remove
-#     rm_seasonality::B           = true # TODO: basically if we use the entire CEX
-#     errors_process::S           = "one per object, per dataset" #"average" # 
-#     scf_ci::S                   = "npimp"
-#     pre_multiply::B             = true
-#     data_cutoffs::DS            = Dict("begin" => "", "end" => "") # data cutoff. Estimation will always run until 2021Q4 or whenever the end of the aggregates is 
-#     data_to_mute::DS             = Dict("begin" => "", "end" => "") # Dict("begin" => QuarterlyDate(2017, 1), "end" => QuarterlyDate(2021, 4))
-#     logit_transform::B          = false # TODO: doesnt work anyway 
-# end
-
 mutable struct TimeParams{D<:Dict,VV<:Vector{Vector{Int64}},I<:Int64,VS<:Vector{String}}
     year_vec::VV
     tmin::D
@@ -446,32 +413,32 @@ end
 
 
 
-mutable struct RWMHPosteriorResults{A<:Array{Float64,3},VV<:Vector{Vector{Float64}}}
-    parameter_chain::A
-    par_mcmc::VV
-    bounds::VV
+# mutable struct RWMHPosteriorResults{A<:Array{Float64,3},VV<:Vector{Vector{Float64}}}
+#     parameter_chain::A
+#     par_mcmc::VV
+#     bounds::VV
+#
+#     function RWMHPosteriorResults(parameter_chain)
+#         par_mcmc = []
+#
+#         for ch in axes(parameter_chain, 3)
+#             push!(par_mcmc, mean(Chains(parameter_chain[:, :, ch]))[:, 2])
+#         end
+#         c = Chains(parameter_chain)
+#         # par_mcmc    = mean(c)[:, 2]
+#         quants = quantile(c, q=[0.025, 0.975])
+#         quant_lb = quants[:, 2]
+#         quant_ub = quants[:, 3]
+#         new{Array{Float64,3},Vector{Vector{Float64}}}(parameter_chain, par_mcmc, [quant_lb, quant_ub])
+#     end
+# end
 
-    function RWMHPosteriorResults(parameter_chain)
-        par_mcmc = []
-
-        for ch in axes(parameter_chain, 3)
-            push!(par_mcmc, mean(Chains(parameter_chain[:, :, ch]))[:, 2])
-        end
-        c = Chains(parameter_chain)
-        # par_mcmc    = mean(c)[:, 2]
-        quants = quantile(c, q=[0.025, 0.975])
-        quant_lb = quants[:, 2]
-        quant_ub = quants[:, 3]
-        new{Array{Float64,3},Vector{Vector{Float64}}}(parameter_chain, par_mcmc, [quant_lb, quant_ub])
-    end
-end
-
-mutable struct DiagnosticResults{NM<:NamedTuple,V<:Vector{Float64},AV<:AbstractVector{ChainDataFrame{NamedTuple{(:parameters, :zscore, :pvalue),Tuple{Vector{Symbol},Vector{Float64},Vector{Float64}}}}}}
-    acceptance_rate::V  # the acceptance rate for each chain 
-    ess::V              # the effective sample size for each parameter 
-    gelman::NM          # R̂
-    geweke::AV           # To see if the burn-in is too short, checks stationarity by comparing two samples. 
-end
+# mutable struct DiagnosticResults{NM<:NamedTuple,V<:Vector{Float64},AV<:AbstractVector{ChainDataFrame{NamedTuple{(:parameters, :zscore, :pvalue),Tuple{Vector{Symbol},Vector{Float64},Vector{Float64}}}}}}
+#     acceptance_rate::V  # the acceptance rate for each chain
+#     ess::V              # the effective sample size for each parameter
+#     gelman::NM          # R̂
+#     geweke::AV           # To see if the burn-in is too short, checks stationarity by comparing two samples.
+# end
 
 
 # Figures 
@@ -487,7 +454,7 @@ const plot_params = PlotParams()
 # const method_options         = MethodOptions()
 const model_options = ModelOptions()
 const diagnostics_options = DiagnosticOptions()
-const mcmc_options = MCMCOptions()
+# const mcmc_options = MCMCOptions()
 const obs_data = ObservedData()
 
 
