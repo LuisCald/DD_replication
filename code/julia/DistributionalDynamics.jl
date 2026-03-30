@@ -106,7 +106,7 @@ include("DIMES.jl")
 include("SeparationStrategy.jl")
 include("SelectPrior.jl")
 include("Model.jl")
-include("MCMC.jl")
+# include("MCMC.jl")  # moved to _archive/
 # include("Diagnostics.jl")  # acceptance rate, Gelman and Rubin (1992), Geweke (1992) convergence statistics, traceplots
 include("Reconstruction.jl")
 include("HistoricalDecomposition.jl")
