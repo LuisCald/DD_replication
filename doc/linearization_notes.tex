@@ -1,0 +1,193 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{booktabs}
+\usepackage{enumitem}
+
+\newcommand{\mesh}{\mathrm{mesh}}
+\newcommand{\SS}{\mathrm{SS}}
+
+\title{Linearization in Microdata Generation}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+The microdata simulation produces household-level distributions at each period~$t$
+by combining three objects:
+\begin{enumerate}[label=(\roman*)]
+    \item \textbf{Distribution} $\mu_t(b,k,h)$: joint probability mass over the grid,
+    \item \textbf{Policies} $x^a_t(b,k,h),\; x^n_t(b,k,h)$: savings/consumption decisions,
+    \item \textbf{Income} $y_t(b,k,h)$: disposable income at each grid point.
+\end{enumerate}
+Each of these involves a separate linearization decision.
+The choices are independent and summarized in Table~\ref{tab:summary}.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}llll@{}}
+\toprule
+Object & Treatment & Reason & Section \\
+\midrule
+Distribution $\mu_t$ & Smoothed perturbation & Softplus positivity & \ref{sec:distribution} \\
+Policies $x^a_t, x^n_t$ & Linearized (JVP) & Forward-looking, requires EGM & \ref{sec:policies} \\
+Nonasset income & Nonlinear & Static mapping, exact & \ref{sec:nonasset} \\
+Rental income & Dynamic $(R^K_t)$ & Aggregate scaling, well-behaved & \ref{sec:asset} \\
+Liquid return & Fixed at SS & Discontinuity at $b=0$ & \ref{sec:asset} \\
+\bottomrule
+\end{tabular}
+\caption{Linearization choices in the microdata simulation.}
+\label{tab:summary}
+\end{table}
+
+\section{Aggregate State Construction}
+
+All aggregate variables entering the household problem are stored in a vector
+$\mathbf{a}_t = (w_t H_t,\, N_t,\, R^K_t,\, R^L_t,\, R^D_t,\, \ldots)$.
+The linear state-space representation produces log-deviations from steady state:
+\begin{equation}\label{eq:lom}
+    s_{t+1} = \Phi\, s_t + B\, \varepsilon_t, \qquad
+    c_t = \Theta\, s_t,
+\end{equation}
+where $s_t$ are states (including exogenous shocks), $c_t$ are controls,
+$\Phi$ is the law of motion, and $\Theta$ maps states to controls.
+The aggregate variables are recovered as \emph{levels}:
+\begin{equation}\label{eq:exp}
+    a_{t,j} = \exp\!\bigl(\log a^{\SS}_j + \delta_{t,j}\bigr)
+            = a^{\SS}_j \cdot e^{\delta_{t,j}},
+\end{equation}
+where $\delta_{t,j}$ is the log-deviation from \eqref{eq:lom}.
+This exponential transformation is the source of nonlinearity in
+an otherwise linear simulation.
+
+\section{Distribution}\label{sec:distribution}
+
+The joint distribution is reconstructed from perturbed marginals and a copula.
+Marginal PDFs are perturbed around their steady-state values using
+a softplus-based positivity mapping:
+\begin{equation}
+    \tilde{p}_i = \frac{\operatorname{softplus}(p^{\SS}_i + \delta_i;\, \kappa) + p_{\min}}
+                       {\sum_j \bigl[\operatorname{softplus}(p^{\SS}_j + \delta_j;\, \kappa) + p_{\min}\bigr]},
+\end{equation}
+where $\operatorname{softplus}(x;\kappa) = \kappa^{-1}\log(1+e^{\kappa x})$ is a smooth
+approximation to $\max(x,0)$, $\kappa$ controls sharpness, and $p_{\min}$
+provides a floor. This replaces the hard clamp $\max(\cdot, 0)$ which created
+discrete on/off switching of borrowing-constraint mass and moment jumps.
+
+\section{Policies}\label{sec:policies}
+
+Consumption and savings policies $x^a_t(b,k,h)$ and $x^n_t(b,k,h)$ are
+\emph{forward-looking}: they depend on expected future marginal values through
+the Euler equation and are solved via the Endogenous Grid Method (EGM).
+The EGM maps
+\[
+    (x^a_t, x^n_t)
+    = \mathcal{E}\!\bigl(\mathbb{E}_t[W'_{b,t+1}],\;
+                         \mathbb{E}_t[W'_{k,t+1}],\;
+                         \mathbf{a}_t,\;
+                         \mathbf{y}_t\bigr),
+\]
+where $W'_{b}, W'_{k}$ are marginal continuation values and $\mathcal{E}$
+denotes the full EGM operator (nonlinear, involving interpolation, constraints,
+and max operators).
+
+Because $\mathcal{E}$ is expensive and nonlinear, we linearize via a
+\emph{Jacobian--vector product} (JVP) using forward-mode automatic differentiation
+(ForwardDiff.jl). Writing all EGM inputs collectively as
+$\mathbf{z}_t = (W'_{b,t},\, W'_{k,t},\, \mathbf{a}_t)$, the first-order
+approximation is
+\begin{equation}
+    x_t \approx x^{\SS} + \nabla_{\mathbf{z}} \mathcal{E}\big|_{\SS}
+                           \cdot (\mathbf{z}_t - \mathbf{z}^{\SS}).
+\end{equation}
+The JVP computes $\nabla_{\mathbf{z}} \mathcal{E} \cdot \Delta\mathbf{z}$
+in a single forward pass by seeding
+$\mathbf{z}^{\text{dual}} = \mathbf{z}^{\SS} + \epsilon\,\Delta\mathbf{z}_t$
+and extracting the $\epsilon$-coefficient from the output.
+
+\section{Nonasset Income}\label{sec:nonasset}
+
+Nonasset income---net labor income, union profits, transfers, and entrepreneurial
+profits---is a \emph{static} function of current-period aggregates and the
+household's grid position:
+\begin{equation}
+    y^{\text{nonasset}}_t(b,k,h) = f\!\bigl(\mathbf{a}_t,\; h\bigr).
+\end{equation}
+It does not depend on expectations or continuation values. Therefore we evaluate
+$f$ at the \emph{nonlinear} (level) aggregates $\mathbf{a}_t$ from \eqref{eq:exp}.
+This is exact---no linearization is needed or desired.
+
+An earlier implementation linearized income via ForwardDiff alongside the policies,
+but this was abandoned: the income function contains discontinuities
+(e.g., the borrower/saver indicator $\mathbf{1}_{b > 0}$ in the effective interest
+rate $R^i$) that produce domain issues (NaN) in the automatic differentiation.
+Since income is a known closed-form mapping, evaluating it directly is both
+simpler and more accurate.
+
+\section{Asset Income}\label{sec:asset}
+
+Asset income combines rental income from illiquid assets and net interest on
+liquid assets:
+\begin{equation}\label{eq:asset_nl}
+    y^{\text{asset}}_t(b,k,h) = \underbrace{(R^K_t - 1)\, k}_{\text{rental}}
+                               \;+\; \underbrace{(R^i_t - 1)\, b}_{\text{liquid interest}},
+\end{equation}
+where $R^i_t = R^L_t \cdot \mathbf{1}_{b>0} + R^D_t \cdot \mathbf{1}_{b\leq 0}$.
+
+The two components behave very differently:
+
+\paragraph{Rental income: dynamic (no issue).}
+Rental income $(R^K_t - 1) \cdot k$ responds to aggregate shocks, but the
+response is \emph{purely aggregate}: every household's rental income scales by
+the same factor $(R^K_t - 1) / (R^{K,\SS} - 1)$.  Relative to the
+cross-sectional mean, the quintile ratios are therefore constant---rental income
+generates no distributional dynamics beyond a level shift.  Because this
+component is well-behaved (no discontinuities, no regime switching), we keep it
+dynamic:
+\begin{equation}
+    y^{\text{rental}}_t(b,k,h) = (R^K_t - 1)\, k.
+\end{equation}
+
+\paragraph{Liquid return: fixed at steady state.}
+The effective rate $R^i_t$ contains a structural discontinuity at $b = 0$:
+savers receive $R^L_t$ while borrowers pay $R^D_t$.  In the baseline
+calibration, $R^{L,\SS} = R^{RB} = 1.0$, so the net liquid return for savers
+is \emph{exactly zero} at steady state.  Any perturbation to $R^L_t$---however
+small---switches savers from zero to nonzero liquid return, creating a discrete
+regime change that propagates into quintile means as binary switching patterns.
+We therefore fix liquid return at its steady-state value:
+\begin{equation}
+    y^{\text{liquid}}_t(b,k,h) \equiv (R^{i,\SS} - 1)\, b.
+\end{equation}
+
+\paragraph{Combined asset income.}
+\begin{equation}\label{eq:asset_fix}
+    y^{\text{asset}}_t(b,k,h)
+        = \underbrace{(R^K_t - 1)\, k}_{\text{dynamic}}
+        \;+\; \underbrace{(R^{i,\SS} - 1)\, b}_{\text{fixed at SS}}.
+\end{equation}
+
+Note that the \texttt{incomes!()} function is not modified. Asset income is
+recomputed from rates after the call to \texttt{incomes!()}, and the
+rental and liquid components are stored separately for diagnostic purposes.
+
+\section{Summary}
+
+The term ``linearized'' in the microdata simulation refers to three distinct
+choices:
+\begin{enumerate}
+    \item \textbf{Aggregate dynamics} (always): the state-space \eqref{eq:lom}
+          is a first-order perturbation of the full nonlinear model.
+    \item \textbf{Policies} (when \texttt{policy\_mode = :linearized}):
+          the EGM operator is linearized via JVP around steady state.
+    \item \textbf{Asset income}: rental income $(R^K_t - 1)\cdot k$ is kept
+          dynamic; liquid return $(R^i - 1)\cdot b$ is fixed at steady state
+          due to a structural discontinuity at $b=0$.
+\end{enumerate}
+Nonasset income and the distribution reconstruction are \emph{not} linearized;
+the former is evaluated exactly, and the latter uses a smooth nonlinear
+positivity mapping (softplus).
+
+\end{document}
