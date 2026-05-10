@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software or replication package, please cite the paper."
+title: "Distributional Dynamics — Replication Package"
+authors:
+  - family-names: "Bayer"
+    given-names: "Christian"
+    affiliation: "University of Bonn, CEPR, IZA, CESifo"
+  - family-names: "Calderon"
+    given-names: "Luis"
+    affiliation: "University of Bonn"
+    email: "luis.calderon@uni-bonn.de"
+  - family-names: "Kuhn"
+    given-names: "Moritz"
+    affiliation: "University of Mannheim, CEPR, IZA, CESifo"
+license: MIT
+repository-code: "https://github.com/LuisCald/DD_code"
+preferred-citation:
+  type: article
+  title: "Distributional Dynamics"
+  authors:
+    - family-names: "Bayer"
+      given-names: "Christian"
+    - family-names: "Calderon"
+      given-names: "Luis"
+    - family-names: "Kuhn"
+      given-names: "Moritz"
+  year: 2026
+  month: 3
+  notes: "CEPR Discussion Paper 19829"
