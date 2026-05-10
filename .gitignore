@@ -107,3 +107,5 @@ consensus_within_stat_*.tex
 *_correlations_table_*.tex
 external_correlations_*.tex
 avg_corr_hank.tex
+hank_avg_corr.tex
+hank_avg_corr_*.tex
