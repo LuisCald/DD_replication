@@ -25,6 +25,11 @@ Icon
 *.ji
 .julia/
 
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+
 # Common build/output folders
 bld/
 build/
