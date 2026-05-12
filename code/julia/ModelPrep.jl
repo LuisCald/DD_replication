@@ -512,7 +512,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
     end_year = data_cutoffs["end"] != "" ? data_cutoffs["end"][1:4] : "all"
 
     sources = df_vec.df_names  # e.g., SCF, PSID, etc.
-    data_label = data_tag(sources) # e.g., CEX_CPS_CPS2_PSID_SCF
+    data_label = data_tag(sources)  # e.g., CEX_and_CPS_and_..._and_SCF
 
     grid_tag = identify_grid(estimator, grid_choice) # e.g., _deciles_series
     m_label = measures_folder(measures) # e.g., consum_income_wealth
