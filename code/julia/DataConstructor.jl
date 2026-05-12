@@ -605,55 +605,7 @@ function estimate_copula!(::Type{<:HistogramEstimator}, cop, cop_ind, period_dat
 end
 
 
-function estimate_copula!(::Type{<:FakeHistEstimator}, cop, cop_ind, period_data, obs_measures, grid, grid_type, meas_v, scale)
-    # Assign quantiles 
-    # println(grid, grid_type)
-    # println(size(cop))
-    # println(cop_ind)
-    period_data = assign_quantile_groups_for_copula!(period_data, obs_measures, grid, grid_type)
-
-    # Subset to non-missing 
-    if "quarter" in names(period_data)
-        # select!(period_data, [meas_v..., measures..., "quarter", "year", "weight"]) # for smoothing
-        select!(period_data, [meas_v..., "quarter", "year", "weight"])
-
-    else
-        # select!(period_data, [meas_v..., measures..., "year", "weight"]) # for smoothing 
-        select!(period_data, [meas_v..., "year", "weight"])
-    end
-
-    filter!(row -> !any(isnan(x) for x in row), period_data)
-
-    cop[cop_ind...] .= Array(prop(freqtable(period_data, tuple(meas_v...)..., weights=period_data.weight))) # slow because i have to index 
-
-    @assert sum(cop[cop_ind...] .< 1) == length(cop[cop_ind...]) && sum(cop[cop_ind...] .>= 0) == length(cop[cop_ind...]) && sum(cop[cop_ind...]) ≈ 1
-    cop[cop_ind...] .= dct(cop[cop_ind...]) ./ scale
-end
-
-
-
 function estimate_copula!(::Type{<:KernelEstimator}, cop, cop_ind, period_data, obs_measures, grid, grid_type, meas_v, scale)
-    # Assign quantiles 
-    period_data = assign_quantile_groups_for_copula!(period_data, obs_measures, grid, grid_type)
-
-    # Subset to non-missing 
-    if "quarter" in names(period_data)
-        # select!(period_data, [meas_v..., measures..., "quarter", "year", "weight"]) # for smoothing
-        select!(period_data, [meas_v..., "quarter", "year", "weight"])
-
-    else
-        # select!(period_data, [meas_v..., measures..., "year", "weight"]) # for smoothing 
-        select!(period_data, [meas_v..., "year", "weight"])
-    end
-
-    filter!(row -> !any(isnan(x) for x in row), period_data)
-
-    cop[cop_ind...] .= beta_copula_estimator(period_data, obs_measures, grid, grid_type)
-    cop[cop_ind...] .= dct(cop[cop_ind...]) ./ scale
-end
-
-
-function estimate_copula!(::Type{<:FakeKernelEstimator}, cop, cop_ind, period_data, obs_measures, grid, grid_type, meas_v, scale)
     # Assign quantiles 
     period_data = assign_quantile_groups_for_copula!(period_data, obs_measures, grid, grid_type)
 

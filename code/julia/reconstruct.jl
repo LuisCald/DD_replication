@@ -26,12 +26,16 @@ module DistributionalReconstruction
 using CSV
 using DataFrames
 using LinearAlgebra
+using Statistics
 
 export Reconstruction,
+    FactorMap,
     quantile_at,
     copula_density_at,
     copula_density_grid,
     copula_pmf_grid,
+    quantile_from_row,
+    copula_density_from_row,
     Q_m,
     I_m,
     available_dates,
@@ -298,6 +302,166 @@ function copula_pmf_grid(r::Reconstruction, date::AbstractString;
     s = sum(pmf)
     s > 0 && (pmf ./= s)
     return pmf
+end
+
+
+# -----------------------------------------------------------------------------
+# Row-level evaluators (raw 1730-vector → moments)
+# -----------------------------------------------------------------------------
+function _extract_xi(row::AbstractVector{<:Real}, measure::Symbol)
+    measure in MEASURES || error("measure must be one of $MEASURES, got $measure")
+    m_idx = findfirst(==(measure), MEASURES) - 1   # 0-based
+    start = N_MUTABLE_COP + m_idx * GRID_PCF + 1
+    return row[start : start + GRID_PCF - 1]
+end
+
+
+"""
+    quantile_from_row(row, measure, u)
+
+Marginal quantile Ξ⁻¹_{measure}(u) computed from a raw 1730-coefficient row
+(handy when `row` is synthesized rather than read from a CSV).
+"""
+function quantile_from_row(row::AbstractVector{<:Real}, measure::Symbol, u)
+    ξ = _extract_xi(row, measure)
+    u_vec = u isa Real ? [Float64(u)] : Vector{Float64}(u)
+    basis = hcat([Q_m(o, u_vec) for o in 0:GRID_PCF-1]...)
+    out = basis * ξ
+    return u isa Real ? out[1] : out
+end
+
+
+"""
+    copula_density_from_row(row, u_c, u_y, u_w)
+
+Copula density dC(u_c, u_y, u_w) from a raw 1730-coefficient row.
+"""
+function copula_density_from_row(row::AbstractVector{<:Real}, u_c, u_y, u_w)
+    κ = unflatten_to_kappa(row)
+    uc = u_c isa Real ? [Float64(u_c)] : Vector{Float64}(u_c)
+    uy = u_y isa Real ? [Float64(u_y)] : Vector{Float64}(u_y)
+    uw = u_w isa Real ? [Float64(u_w)] : Vector{Float64}(u_w)
+    @assert length(uc) == length(uy) == length(uw)
+    B_c = reduce(vcat, [reshape(Q_m(o, uc), 1, :) for o in 0:GRID_COP-1])
+    B_y = reduce(vcat, [reshape(Q_m(o, uy), 1, :) for o in 0:GRID_COP-1])
+    B_w = reduce(vcat, [reshape(Q_m(o, uw), 1, :) for o in 0:GRID_COP-1])
+    n = length(uc)
+    out = zeros(n)
+    @inbounds for a in 1:GRID_COP, b in 1:GRID_COP, c in 1:GRID_COP
+        κabc = κ[a, b, c]
+        κabc == 0 && continue
+        for k in 1:n
+            out[k] += κabc * B_c[a, k] * B_y[b, k] * B_w[c, k]
+        end
+    end
+    return u_c isa Real ? out[1] : out
+end
+
+
+# -----------------------------------------------------------------------------
+# FactorMap — OLS projection from smoothed factors F_t to coefficient row.
+#
+#     coef_t  =  α  +  β · F_t  +  ε_t        (one regression per coef)
+#
+# Useful for counterfactuals: shift a factor, predict the implied coefficient
+# row, then pass that row to `quantile_from_row` / `copula_density_from_row`.
+# -----------------------------------------------------------------------------
+"""
+    FactorMap(factors_csv, coefs_csv; n_factors=8)
+
+Learn the OLS map from the published smoothed factors `F_t` to a coefficient
+time series. After fitting, `predict(fm, F)` maps any factor vector back to a
+1730-element coefficient row.
+
+Rows where any coefficient is `NaN` are dropped from the fit (e.g., PSID has
+no consumption coefficients before 1999); the fit is run on the remaining,
+fully-observed subsample. Use `n_factors = 43` to use all latent factors in
+`smoothed_factors.csv`; the default `8` matches the count of distributional
+factors used in the paper's diagnostics.
+"""
+struct FactorMap
+    beta::Matrix{Float64}                # (1 + n_factors, n_coefs)
+    y_means::Vector{Float64}             # (n_coefs,)
+    y_stds::Vector{Float64}              # (n_coefs,)
+    r_squared::Vector{Float64}           # (n_coefs,)
+    n_factors::Int
+    n_obs_total::Int
+    n_obs_used::Int
+    dates_used::Vector{String}
+end
+
+
+function FactorMap(factors_csv::AbstractString, coefs_csv::AbstractString;
+        n_factors::Int = 8)
+    F_df = CSV.read(factors_csv, DataFrame)
+    Y_df = CSV.read(coefs_csv, DataFrame)
+    for nm in ("time",)
+        nm in names(F_df) || error("$factors_csv missing column 'time'")
+        nm in names(Y_df) || error("$coefs_csv missing column 'time'")
+    end
+    factor_cols = ["x$i" for i in 1:n_factors]
+    missing_cols = [c for c in factor_cols if !(c in names(F_df))]
+    isempty(missing_cols) || error("smoothed_factors.csv missing $(missing_cols)")
+    # Align on common dates
+    F_df.time = string.(F_df.time)
+    Y_df.time = string.(Y_df.time)
+    common = sort(collect(intersect(Set(F_df.time), Set(Y_df.time))))
+    isempty(common) && error("no overlapping dates between factors and coefs")
+    F_df_c = filter(r -> r.time in Set(common), F_df)
+    Y_df_c = filter(r -> r.time in Set(common), Y_df)
+    sort!(F_df_c, :time); sort!(Y_df_c, :time)
+    F = Matrix{Float64}(F_df_c[!, factor_cols])
+    Y = Matrix{Float64}(Y_df_c[!, Not(:time)])
+    # Drop NaN rows
+    valid = .!vec(any(isnan, Y; dims = 2))
+    sum(valid) >= n_factors + 2 ||
+        error("only $(sum(valid)) clean rows; need at least n_factors+2 = $(n_factors + 2)")
+    F_use, Y_use = F[valid, :], Y[valid, :]
+    y_means = vec(mean(Y_use; dims = 1))
+    y_stds  = vec(std(Y_use; dims = 1, corrected = false))
+    safe_stds = ifelse.(y_stds .> 0, y_stds, 1.0)
+    Y_std = (Y_use .- y_means') ./ safe_stds'
+    X = hcat(ones(size(F_use, 1)), F_use)
+    β = X \ Y_std
+    Y_std_hat = X * β
+    ss_res = vec(sum((Y_std .- Y_std_hat) .^ 2; dims = 1))
+    ss_tot = vec(sum(Y_std .^ 2; dims = 1))
+    r2 = [t > 0 ? 1 - r / t : NaN for (r, t) in zip(ss_res, ss_tot)]
+    dates_used = [d for (d, ok) in zip(common, valid) if ok]
+    return FactorMap(β, y_means, y_stds, r2, n_factors, length(common), sum(valid), dates_used)
+end
+
+
+"""
+    predict(fm::FactorMap, factors)
+
+Map factor values (length `fm.n_factors`) back to a coefficient row.
+Returns a Vector{Float64} of length 1730 in the original CSV's units.
+"""
+function predict(fm::FactorMap, factors::AbstractVector{<:Real})
+    length(factors) == fm.n_factors ||
+        error("factors must have length $(fm.n_factors), got $(length(factors))")
+    x = vcat(1.0, Vector{Float64}(factors))     # (1 + K,)
+    y_std_hat = vec(x' * fm.beta)               # (n_coefs,)
+    return y_std_hat .* fm.y_stds .+ fm.y_means
+end
+
+
+# End-to-end convenience: factors → moments
+quantile_at(fm::FactorMap, factors::AbstractVector{<:Real}, measure::Symbol, u) =
+    quantile_from_row(predict(fm, factors), measure, u)
+
+copula_density_at(fm::FactorMap, factors::AbstractVector{<:Real}, u_c, u_y, u_w) =
+    copula_density_from_row(predict(fm, factors), u_c, u_y, u_w)
+
+
+function summary(fm::FactorMap)
+    med  = median(filter(!isnan, fm.r_squared))
+    qs   = quantile(filter(!isnan, fm.r_squared), [0.25, 0.75])
+    return "FactorMap: K=$(fm.n_factors), T_used=$(fm.n_obs_used) " *
+           "(dropped $(fm.n_obs_total - fm.n_obs_used) NaN rows of $(fm.n_obs_total)), " *
+           "R² median=$(round(med, digits = 3)), " *
+           "R² P25/P75=($(round(qs[1], digits = 3)), $(round(qs[2], digits = 3)))"
 end
 
 
