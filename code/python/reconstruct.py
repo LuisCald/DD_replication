@@ -106,6 +106,15 @@ def _build_mutable_index_map() -> list[tuple[int, int, int]]:
 _MUTABLE_INDICES = _build_mutable_index_map()
 
 
+def _extract_xi(row: np.ndarray, measure: str) -> np.ndarray:
+    """Slice the 12 marginal-quantile polynomial coefficients for one measure."""
+    if measure not in MEASURES:
+        raise ValueError(f"measure must be one of {MEASURES}, got {measure!r}")
+    m_idx = MEASURES.index(measure)
+    start = N_MUTABLE_COP + m_idx * GRID_PCF
+    return row[start : start + GRID_PCF]
+
+
 def _unflatten_to_kappa(row: np.ndarray) -> np.ndarray:
     """
     Take the first 1694 entries of a row (mutable copula coefs) and place them
@@ -160,12 +169,7 @@ class Reconstruction:
 
     def _xi(self, date: str, measure: str) -> np.ndarray:
         """Return the 12 quantile polynomial coefficients for the given measure."""
-        if measure not in MEASURES:
-            raise ValueError(f"measure must be one of {MEASURES}, got {measure!r}")
-        m_idx = MEASURES.index(measure)
-        row = self._row_for_date(date)
-        start = N_MUTABLE_COP + m_idx * GRID_PCF
-        return row[start : start + GRID_PCF]
+        return _extract_xi(self._row_for_date(date), measure)
 
     def _kappa(self, date: str) -> np.ndarray:
         """Return the (12, 12, 12) copula coefficient tensor at the given date."""
@@ -222,6 +226,147 @@ class Reconstruction:
         """
         u = np.linspace(1e-6, 1 - 1e-6, n)
         return u, self.quantile_at(date, measure, u)
+
+
+# -----------------------------------------------------------------------------
+# Row-level evaluators — same math as Reconstruction methods, but work on a
+# raw 1730-vector. Handy when a coefficient row is synthesized (e.g., from
+# FactorMap.predict) rather than read from a CSV.
+# -----------------------------------------------------------------------------
+def quantile_from_row(row: np.ndarray, measure: str, u) -> np.ndarray:
+    """Marginal quantile Ξ⁻¹_{m}(u) from a raw 1730-coefficient row."""
+    xi = _extract_xi(np.asarray(row, dtype=float), measure)
+    u = np.atleast_1d(np.asarray(u, dtype=float))
+    basis = np.stack([Q(o, u) for o in range(GRID_PCF)], axis=-1)
+    out = basis @ xi
+    return out if out.ndim > 0 else float(out)
+
+
+def copula_density_from_row(row: np.ndarray, u_c, u_y, u_w) -> float | np.ndarray:
+    """Copula density dC(u_c, u_y, u_w) from a raw 1730-coefficient row."""
+    kappa = _unflatten_to_kappa(np.asarray(row, dtype=float))
+    u_c, u_y, u_w = (np.atleast_1d(np.asarray(x, dtype=float)) for x in (u_c, u_y, u_w))
+    if not (u_c.shape == u_y.shape == u_w.shape):
+        raise ValueError("u_c, u_y, u_w must have the same shape")
+    B_c = np.stack([Q(o, u_c) for o in range(GRID_COP)], axis=0)
+    B_y = np.stack([Q(o, u_y) for o in range(GRID_COP)], axis=0)
+    B_w = np.stack([Q(o, u_w) for o in range(GRID_COP)], axis=0)
+    out = np.einsum("abc,ak,bk,ck->k", kappa, B_c, B_y, B_w)
+    return float(out[0]) if out.size == 1 else out
+
+
+# -----------------------------------------------------------------------------
+# FactorMap — learn the linear projection
+#
+#     coef_t  =  α  +  β · F_t  +  ε_t       (one OLS per coefficient)
+#
+# Inputs: a smoothed_factors.csv (the published latent factors F_t) and one of
+# the *_coefficients_*.csv files (the corresponding coefficient time series).
+#
+# Once fit, .predict(F) maps any factor vector to a coefficient row, which can
+# be plugged into the row-level evaluators above. Useful for counterfactuals:
+#   "what would the joint distribution look like if F_3 were two SDs higher?"
+#
+# Standardization on the Y side is automatic; the returned row is in the same
+# units as the input coefficients file.
+# -----------------------------------------------------------------------------
+class FactorMap:
+    """Linear OLS map smoothed factors → coefficient row (one regression per coef)."""
+
+    def __init__(
+        self,
+        factors_csv: str | Path,
+        coefs_csv: str | Path,
+        n_factors: int = 8,
+    ) -> None:
+        F_df = pd.read_csv(factors_csv)
+        Y_df = pd.read_csv(coefs_csv)
+        if "time" not in F_df.columns or "time" not in Y_df.columns:
+            raise ValueError("Both CSVs must have a 'time' column.")
+        factor_cols = [f"x{i}" for i in range(1, n_factors + 1)]
+        missing = [c for c in factor_cols if c not in F_df.columns]
+        if missing:
+            raise ValueError(
+                f"smoothed_factors.csv missing columns {missing}; "
+                f"n_factors={n_factors} requires x1..x{n_factors}."
+            )
+        common = sorted(set(F_df["time"].astype(str)) & set(Y_df["time"].astype(str)))
+        if not common:
+            raise ValueError("factors and coefs files have no overlapping dates.")
+        F = (
+            F_df.assign(time=F_df["time"].astype(str))
+            .set_index("time")
+            .loc[common, factor_cols]
+            .to_numpy(dtype=float)
+        )
+        Y = (
+            Y_df.assign(time=Y_df["time"].astype(str))
+            .set_index("time")
+            .loc[common]
+            .to_numpy(dtype=float)
+        )
+        # Some coefficient files have NaN at periods when the underlying dataset
+        # wasn't observed (e.g., PSID before 1999 for consumption). Drop rows
+        # where ANY coefficient is NaN before fitting — leaves a smaller but
+        # clean training sample.
+        valid = ~np.any(np.isnan(Y), axis=1)
+        if valid.sum() < n_factors + 2:
+            raise ValueError(
+                f"Only {int(valid.sum())} fully-observed rows after dropping NaN; "
+                f"need at least n_factors+2 = {n_factors + 2}."
+            )
+        F_use = F[valid]
+        Y_use = Y[valid]
+        self.n_obs_used = int(valid.sum())
+        self.n_obs_dropped = int((~valid).sum())
+        # Standardize Y per coefficient on the clean subsample.
+        self.y_means = Y_use.mean(axis=0)
+        self.y_stds = Y_use.std(axis=0, ddof=0)
+        safe_stds = np.where(self.y_stds > 0, self.y_stds, 1.0)
+        Y_std = (Y_use - self.y_means) / safe_stds
+        # OLS: β includes intercept as the first row.
+        X = np.column_stack([np.ones(len(F_use)), F_use])  # (T, 1 + K)
+        self.beta, *_ = np.linalg.lstsq(X, Y_std, rcond=None)  # (1+K, N)
+        Y_std_hat = X @ self.beta
+        ss_res = np.sum((Y_std - Y_std_hat) ** 2, axis=0)
+        ss_tot = np.sum(Y_std ** 2, axis=0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            self.r_squared = np.where(ss_tot > 0, 1 - ss_res / ss_tot, np.nan)
+        self.n_factors = n_factors
+        self.n_obs = len(common)
+        self.dates_used = [d for d, ok in zip(common, valid) if ok]
+
+    def predict(self, factors) -> np.ndarray:
+        """Map factor values to a coefficient row (in the original CSV's units).
+
+        `factors` may be shape (n_factors,) or (n_points, n_factors).
+        """
+        F = np.atleast_2d(np.asarray(factors, dtype=float))
+        if F.shape[-1] != self.n_factors:
+            raise ValueError(
+                f"factors must have last dim = {self.n_factors}, got {F.shape}"
+            )
+        X = np.column_stack([np.ones(F.shape[0]), F])
+        Y_std_hat = X @ self.beta
+        Y_hat = Y_std_hat * self.y_stds + self.y_means
+        return Y_hat[0] if Y_hat.shape[0] == 1 else Y_hat
+
+    # End-to-end convenience methods (factors → moments) -----------------------
+
+    def quantile_at(self, factors, measure: str, u) -> np.ndarray:
+        return quantile_from_row(self.predict(np.atleast_1d(factors)), measure, u)
+
+    def copula_density_at(self, factors, u_c, u_y, u_w):
+        return copula_density_from_row(self.predict(np.atleast_1d(factors)), u_c, u_y, u_w)
+
+    def summary(self) -> str:
+        return (
+            f"FactorMap: K={self.n_factors}, T_used={self.n_obs_used} "
+            f"(dropped {self.n_obs_dropped} NaN rows of {self.n_obs}), "
+            f"R² median={float(np.nanmedian(self.r_squared)):.3f}, "
+            f"R² P25/P75=({float(np.nanquantile(self.r_squared, 0.25)):.3f}, "
+            f"{float(np.nanquantile(self.r_squared, 0.75)):.3f})"
+        )
 
 
 # -----------------------------------------------------------------------------

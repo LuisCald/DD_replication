@@ -22,7 +22,9 @@
 
 See [`data/synthetic/README.md`](data/synthetic/README.md) for column naming, file formats, and a quick-start snippet.
 
-**Want to compute custom moments?** [`code/python/reconstruct.py`](code/python/reconstruct.py) is a standalone Python helper (numpy + pandas) that turns the `*_coefficients_*.csv` files into marginal quantile functions $\Xi^{-1}_{m,t}(u)$ and the trivariate copula density $dC_t(u_c, u_y, u_w)$ at arbitrary points.
+**Want to compute custom moments?** [`code/python/reconstruct.py`](code/python/reconstruct.py) is a standalone Python helper (numpy + pandas) that turns the `*_coefficients_*.csv` files into marginal quantile functions $\Xi^{-1}_{m,t}(u)$ and the trivariate copula density $dC_t(u_c, u_y, u_w)$ at arbitrary points. A Julia port lives at [`code/julia/reconstruct.jl`](code/julia/reconstruct.jl). Both also ship a `FactorMap` helper for factors → coefficients counterfactuals.
+
+**Want to run the model with your own settings?** See [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for a walkthrough of `ModelOptions` and the output folder layout, and the docstring on [`ModelOptions`](code/julia/Structures.jl) itself.
 
 ---
 
