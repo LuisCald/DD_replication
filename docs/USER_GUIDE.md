@@ -66,26 +66,28 @@ r.copula_pmf_grid("2008-Q3")                         # 10³ probability masses (
 
 `FactorMap` builds the map between smoothed factors and a coefficient row directly from the public CSVs — no model export needed. It's a port of `dis_data_rep == "smoothed_factors_dd"` in [`Distributional_Counterfactuals/5_Code/SupportPrepData.jl`](https://github.com/LuisCald/Distributional_Counterfactuals). What it does:
 
-1. Drop rows where any coefficient is NaN (e.g. PSID has no consumption coefficients before 1999).
+1. Drop rows where any coefficient is NaN.
 2. Block-standardize the coefficient matrix — one std for the copula block, one per marginal — matching the model's own object-level standardization.
-3. From `smoothed_factors.csv`, build the 4-quarter average $F^{4q}_t = (F_t + F_{t-1} + F_{t-2} + F_{t-3}) / 4$ using columns `x1..x32`. This mirrors how `Gⱼ` averages factors for annual datasets like PSID/SCF in the state-space model.
+3. From `smoothed_factors.csv`, build the 4-quarter average $F^{4q}_t = (F_t + F_{t-1} + F_{t-2} + F_{t-3}) / 4$ using columns `x1..x32`. This mirrors how $G_j$ averages factors for annual datasets like PSID/SCF in the state-space model.
 4. OLS-fit $\widehat{\Lambda}$ on the standardized coefficients regressed on $F^{4q}_t$ (intercept + factors).
 
 Prediction is then
 
 $$\text{coef}_t = (\alpha + \widehat{\Lambda} \cdot F^{4q}_t) \odot \text{stds}_{\text{block}} + \text{means}$$
 
+**Use the `_coefficients_average.csv` variant.** It carries only a constant trend per coefficient (the time-mean of the HP trend), which gets fully absorbed by the OLS intercept α — so the smoothed factors reconstruct the coefficient row exactly. On the current PSID data this gives **median R² = 1.000** across all 1 730 coefficients with no dropped rows:
+
 ```python
 from reconstruct import FactorMap
 
 fm = FactorMap(
-    "data/synthetic/PSID_coefficients_normal.csv",
+    "data/synthetic/PSID_coefficients_average.csv",
     "data/synthetic/smoothed_factors.csv",
     n_factors=8,
 )
 print(fm.summary())
-# FactorMap: K=8, T_used=100 (dropped 147 NaN rows of 247),
-#   R² median=0.376, R² P25/P75=(0.259, 0.523)
+# FactorMap: K=8, T_used=247 (dropped 0 NaN rows of 247),
+#   R² median=1.000, R² P25/P75=(1.000, 1.000)
 
 # Historical factor at a date — returns the 4q-average (the OLS input shape)
 F = fm.factors_at("2008-Q3")              # shape (8,)
@@ -96,11 +98,13 @@ fm.copula_density_at(F_cf, 0.5, 0.5, 0.5)
 
 `factors_at(date, kind="t")` returns the current-period factor `x1..x_K` if you want to perturb just $F_t$ and synthesize lags yourself.
 
+Fitting on `_coefficients_normal.csv` (HP trend re-added per date) is **discouraged** — the time-varying trend isn't a linear function of the factors, so R² drops to ~0.4 and many rows are lost to NaN where the underlying survey doesn't observe the measure.
+
 The Julia API is the same:
 
 ```julia
 fm = FactorMap(
-    "data/synthetic/PSID_coefficients_normal.csv",
+    "data/synthetic/PSID_coefficients_average.csv",
     "data/synthetic/smoothed_factors.csv";
     n_factors = 8,
 )
