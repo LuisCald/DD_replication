@@ -256,101 +256,214 @@ def copula_density_from_row(row: np.ndarray, u_c, u_y, u_w) -> float | np.ndarra
 
 
 # -----------------------------------------------------------------------------
-# FactorMap — exact reconstruction of a coefficient row from the smoothed
-# factors, using the PCA loading matrix Γ that the model's Kalman smoother
-# uses internally. Identity:
+# FactorMap — `dis_data_rep == "smoothed_factors_dd"` from
+# Distributional_Counterfactuals/SupportPrepData.jl, ported. Self-contained:
+# uses the published `smoothed_factors.csv` and a published coefficients file
+# to learn the factor → coefficient map by block-standardizing then OLS-fitting
+# Λ̂ against the 4-quarter-averaged smoothed factors (which matches the
+# annual-dataset structure of Gⱼ in the state-space model).
 #
-#     coef_t = stds ⊙ (Γ · F_dist_t) + means + trend_t
+# Identity used to predict a coefficient row from a factor vector F (8-dim):
 #
-# Requires the per-dataset artifacts written by `Reconstruction.jl` into a
-# `projection/` folder (Γ, means, stds, normal trend, average trend).
+#     coef_std_t  =  α  +  Λ̂ · F_4q_t
+#     coef_t      =  coef_std_t ⊙ stds_blockwise  +  means
 # -----------------------------------------------------------------------------
 class FactorMap:
-    """Smoothed factors → coefficient row using the model's PCA loading matrix.
+    """Smoothed factors → coefficient row, self-contained on the public CSVs.
 
-    Construct with the folder of projection artifacts and a dataset name:
+    Construction takes one coefficient file (e.g. `PSID_coefficients_normal.csv`)
+    and a smoothed factors file (`smoothed_factors.csv`):
 
-        fm = FactorMap("data/synthetic/projection/", dataset="PSID")
-        fm.quantile_at(F, "consum", [0.1, 0.5, 0.9], date="2008-Q3")
+    ```python
+    fm = FactorMap(
+        "data/synthetic/PSID_coefficients_normal.csv",
+        "data/synthetic/smoothed_factors.csv",
+        n_factors=8,
+    )
+    print(fm.summary())          # T_used=…, R² median=…
 
-    `trend_kind` chooses how the trend is added back:
-      - "normal"  (default): HP-filter trend, date-anchored. Pass `date` to
-        `predict`/`quantile_at`/`copula_density_at` to pick the right row.
-      - "average": time-mean trend (one constant per coefficient). `date` is
-        ignored. Use for extrapolation outside 1962–2024.
+    F_2008 = fm.factors_at("2008-Q3")          # 4q-averaged factors at this date
+    F_cf   = F_2008.copy(); F_cf[0] += 1.0     # counterfactual: factor 1 +1 unit
+    fm.quantile_at(F_cf, "consum", [0.1, 0.5, 0.9])
+    fm.copula_density_at(F_cf, 0.5, 0.5, 0.5)
+    ```
+
+    Mirrors the `smoothed_factors_dd` mode in
+    `Distributional_Counterfactuals/5_Code/SupportPrepData.jl`:
+
+      1. Drop rows with any NaN in the coefficient matrix.
+      2. Block-standardize the coefs — one std for the copula block, one
+         per marginal — matching the model's own treatment.
+      3. Build F_4q = (F_t + F_{t-1} + F_{t-2} + F_{t-3}) / 4 from the
+         x1..x32 columns of `smoothed_factors.csv`.
+      4. OLS: standardized coef ~ intercept + Λ̂·F_4q.
+
+    The resulting Λ̂ is the projection that takes a (4q-averaged) factor
+    vector to the standardized coefficient row.
     """
+
+    _N_PER_MARGINAL = GRID_PCF                          # 12
+    _N_MARG_BLOCK = D * GRID_PCF                        # 36
 
     def __init__(
         self,
-        proj_dir: str | Path,
-        dataset: str,
-        trend_kind: str = "normal",
+        coefs_csv: str | Path,
+        factors_csv: str | Path,
+        n_factors: int = 8,
     ) -> None:
-        proj_dir = Path(proj_dir)
-        if trend_kind not in ("normal", "average"):
-            raise ValueError(f"trend_kind must be 'normal' or 'average', got {trend_kind!r}")
+        # 1) Load and align ----------------------------------------------------
+        Y_df = pd.read_csv(coefs_csv)
+        F_df = pd.read_csv(factors_csv)
+        for col in ("time",):
+            if col not in Y_df.columns or col not in F_df.columns:
+                raise ValueError(f"both CSVs must have a 'time' column")
+        Y_df["time"] = Y_df["time"].astype(str)
+        F_df["time"] = F_df["time"].astype(str)
+        common = sorted(set(Y_df["time"]) & set(F_df["time"]))
+        if not common:
+            raise ValueError("factors and coefs files have no overlapping dates")
+        Y_df_c = Y_df.set_index("time").loc[common]
+        F_df_c = F_df.set_index("time").loc[common]
+        n_coefs_total = Y_df_c.shape[1]
 
-        self.G = pd.read_csv(proj_dir / f"{dataset}_projection.csv").to_numpy(dtype=float)
-        self.means = pd.read_csv(proj_dir / f"{dataset}_means.csv")["mean"].to_numpy(dtype=float)
-        self.stds = pd.read_csv(proj_dir / f"{dataset}_stds.csv")["std"].to_numpy(dtype=float)
+        # 2) Drop NaN rows -----------------------------------------------------
+        Y_all = Y_df_c.to_numpy(dtype=float)
+        valid = ~np.any(np.isnan(Y_all), axis=1)
+        if int(valid.sum()) < n_factors + 2:
+            raise ValueError(
+                f"only {int(valid.sum())} fully-observed rows after dropping NaN; "
+                f"need at least n_factors + 2 = {n_factors + 2}"
+            )
+        dates_used = [d for d, ok in zip(common, valid) if ok]
+        Y = Y_all[valid]                                              # (T_used, n_coefs)
+        T_used, n_coefs = Y.shape
 
-        if trend_kind == "normal":
-            tdf = pd.read_csv(proj_dir / f"{dataset}_trend_normal.csv")
-            self.trend = tdf.drop(columns=["time"]).to_numpy(dtype=float)   # (T, n_coefs)
-            self.trend_dates = tdf["time"].astype(str).tolist()
+        # 3) Block-wise demean + standardize (copula + 3 marginals) ------------
+        means = Y.mean(axis=0)                                        # (n_coefs,)
+        Yc = Y - means
+        if n_coefs > self._N_MARG_BLOCK:
+            # Full coefficient layout: copula block first, then 3 marginals.
+            ncop = n_coefs - self._N_MARG_BLOCK
+            slices = [
+                slice(0, ncop),
+                slice(ncop, ncop + self._N_PER_MARGINAL),
+                slice(ncop + self._N_PER_MARGINAL, ncop + 2 * self._N_PER_MARGINAL),
+                slice(ncop + 2 * self._N_PER_MARGINAL, n_coefs),
+            ]
+            block_stds = []
+            for s in slices:
+                std_s = float(np.std(Yc[:, s]))
+                block_stds.append(std_s if std_s > 1e-10 else 1.0)
+            stds_expanded = np.empty(n_coefs)
+            for s, std_s in zip(slices, block_stds):
+                stds_expanded[s] = std_s
         else:
-            self.trend = pd.read_csv(
-                proj_dir / f"{dataset}_trend_average.csv"
-            )["trend_average"].to_numpy(dtype=float)                         # (n_coefs,)
-            self.trend_dates = None
+            # Marginal-only mode: per-coefficient stds.
+            per_col = np.std(Y, axis=0)
+            per_col[per_col < 1e-10] = 1.0
+            stds_expanded = per_col
+            block_stds = [float(np.mean(per_col))] * (D + 1)
+        Y_std = Yc / stds_expanded                                    # (T_used, n_coefs)
 
-        self.dataset = dataset
-        self.trend_kind = trend_kind
-        self.n_factors = self.G.shape[1]
-        self.n_coefs = self.G.shape[0]
+        # 4) Build 4-quarter average smoothed factors --------------------------
+        nF = n_factors
+        cols_needed = [f"x{i}" for i in range(1, 4 * nF + 1)]
+        missing = [c for c in cols_needed if c not in F_df_c.columns]
+        if missing:
+            raise ValueError(
+                f"smoothed_factors.csv missing columns {missing}; "
+                f"n_factors={nF} requires x1..x{4 * nF}"
+            )
+        F_full = F_df_c[cols_needed].to_numpy(dtype=float)            # (T, 4*nF)
+        F_full = F_full[valid]                                        # (T_used, 4*nF)
+        F_4q = (
+            F_full[:, 0:nF] + F_full[:, nF:2*nF]
+            + F_full[:, 2*nF:3*nF] + F_full[:, 3*nF:4*nF]
+        ) / 4.0                                                       # (T_used, nF)
+        # Current-period factors too (useful for factors_at).
+        F_t = F_full[:, 0:nF]                                         # (T_used, nF)
 
-    def predict(self, factors, date: str | None = None) -> np.ndarray:
-        """Map factor values to a coefficient row.
+        # 5) OLS: Y_std ≈ α + Λ̂ · F_4q ---------------------------------------
+        Xa = np.column_stack([np.ones(T_used), F_4q])                 # (T_used, 1 + nF)
+        beta, *_ = np.linalg.lstsq(Xa, Y_std, rcond=None)             # (1 + nF, n_coefs)
+        Y_std_hat = Xa @ beta
+        res = Y_std - Y_std_hat
+        ss_res = np.sum(res ** 2, axis=0)
+        ss_tot = np.sum((Y_std - Y_std.mean(axis=0)) ** 2, axis=0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r2 = np.where(ss_tot > 0, 1 - ss_res / ss_tot, np.nan)
+
+        self.alpha = beta[0]                                          # (n_coefs,) intercept
+        self.Lambda = beta[1:].T                                      # (n_coefs, nF) loadings
+        self.means = means
+        self.stds = stds_expanded
+        self.block_stds = block_stds                                  # length D + 1
+        self.r_squared = r2
+        self.n_factors = nF
+        self.n_coefs = n_coefs
+        self.factors_4q = F_4q                                        # (T_used, nF)
+        self.factors_t = F_t                                          # (T_used, nF) — current period
+        self.dates_used = dates_used
+        self.n_obs_total = int(valid.size)
+        self.n_obs_used = int(valid.sum())
+        self.n_obs_dropped = int((~valid).sum())
+        self.coefs_csv = str(coefs_csv)
+        self.factors_csv = str(factors_csv)
+
+    # --- accessors -----------------------------------------------------------
+
+    def factors_at(self, date: str, kind: str = "4q") -> np.ndarray:
+        """Return the in-sample factor vector at `date`.
+
+        `kind="4q"` (default) returns the 4-quarter average used by the OLS
+        fit — i.e., what `predict` expects. `kind="t"` returns the
+        current-period factors x1..x8 (useful when you want to perturb just
+        F_t and synthesize the lag terms yourself).
+        """
+        if date not in self.dates_used:
+            raise KeyError(
+                f"date {date!r} not in fit sample; "
+                f"first/last used: {self.dates_used[0]!r}..{self.dates_used[-1]!r}"
+            )
+        idx = self.dates_used.index(date)
+        if kind == "4q":
+            return self.factors_4q[idx].copy()
+        if kind == "t":
+            return self.factors_t[idx].copy()
+        raise ValueError(f"kind must be '4q' or 't', got {kind!r}")
+
+    # --- prediction ----------------------------------------------------------
+
+    def predict(self, factors) -> np.ndarray:
+        """Map factor values (length `n_factors`) to a coefficient row.
 
         `factors` is shape `(n_factors,)` or `(n_points, n_factors)`.
-        For `trend_kind="normal"`, pass `date` (e.g. `"2008-Q3"`) to choose
-        the trend row. Omitting `date` uses the first available date.
+        Interpreted as the 4-quarter-averaged factor used by the OLS fit.
         """
         F = np.atleast_2d(np.asarray(factors, dtype=float))
         if F.shape[-1] != self.n_factors:
             raise ValueError(
                 f"factors must have last dim = {self.n_factors}, got {F.shape}"
             )
-        base = (self.G @ F.T).T * self.stds + self.means     # (n_pts, n_coefs)
-        if self.trend_kind == "average":
-            Y = base + self.trend
-        else:
-            if date is None:
-                idx = 0
-            elif date in self.trend_dates:
-                idx = self.trend_dates.index(date)
-            else:
-                raise KeyError(
-                    f"date {date!r} not in trend_normal; first/last: "
-                    f"{self.trend_dates[0]!r}..{self.trend_dates[-1]!r}"
-                )
-            Y = base + self.trend[idx]
-        return Y[0] if Y.shape[0] == 1 else Y
+        Y_std_hat = self.alpha + F @ self.Lambda.T                    # (n_pts, n_coefs)
+        Y_hat = Y_std_hat * self.stds + self.means
+        return Y_hat[0] if Y_hat.shape[0] == 1 else Y_hat
 
-    def quantile_at(self, factors, measure: str, u, date: str | None = None) -> np.ndarray:
-        return quantile_from_row(
-            self.predict(np.atleast_1d(factors), date=date), measure, u
-        )
+    def quantile_at(self, factors, measure: str, u) -> np.ndarray:
+        return quantile_from_row(self.predict(np.atleast_1d(factors)), measure, u)
 
-    def copula_density_at(self, factors, u_c, u_y, u_w, date: str | None = None):
-        return copula_density_from_row(
-            self.predict(np.atleast_1d(factors), date=date), u_c, u_y, u_w
-        )
+    def copula_density_at(self, factors, u_c, u_y, u_w):
+        return copula_density_from_row(self.predict(np.atleast_1d(factors)), u_c, u_y, u_w)
 
     def summary(self) -> str:
+        med = float(np.nanmedian(self.r_squared))
+        q25 = float(np.nanquantile(self.r_squared, 0.25))
+        q75 = float(np.nanquantile(self.r_squared, 0.75))
         return (
-            f"FactorMap: dataset={self.dataset}, K={self.n_factors}, "
-            f"n_coefs={self.n_coefs}, trend={self.trend_kind}"
+            f"FactorMap: K={self.n_factors}, "
+            f"T_used={self.n_obs_used} (dropped {self.n_obs_dropped} NaN rows "
+            f"of {self.n_obs_total}), "
+            f"R² median={med:.3f}, R² P25/P75=({q25:.3f}, {q75:.3f})"
         )
 
 

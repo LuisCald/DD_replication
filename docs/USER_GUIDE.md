@@ -64,39 +64,52 @@ r.copula_pmf_grid("2008-Q3")                         # 10³ probability masses (
 
 ### Factor → coefficient mapping (`FactorMap`)
 
-The state-space model has a built-in linear map from latent factors to coefficient space: the PCA loading matrix $\Gamma$ that the Kalman smoother uses internally. We export it — together with the per-coefficient means, stds, and trends — at the end of every model run into a `projection/` subfolder. Drop those CSVs into `data/synthetic/projection/` and you can reconstruct any coefficient row exactly:
+`FactorMap` builds the map between smoothed factors and a coefficient row directly from the public CSVs — no model export needed. It's a port of `dis_data_rep == "smoothed_factors_dd"` in [`Distributional_Counterfactuals/5_Code/SupportPrepData.jl`](https://github.com/LuisCald/Distributional_Counterfactuals). What it does:
 
-$$\text{coef}_t = \text{stds} \odot (\Gamma \cdot F^{\text{dist}}_t) + \text{means} + \text{trend}_t$$
+1. Drop rows where any coefficient is NaN (e.g. PSID has no consumption coefficients before 1999).
+2. Block-standardize the coefficient matrix — one std for the copula block, one per marginal — matching the model's own object-level standardization.
+3. From `smoothed_factors.csv`, build the 4-quarter average $F^{4q}_t = (F_t + F_{t-1} + F_{t-2} + F_{t-3}) / 4$ using columns `x1..x32`. This mirrors how `Gⱼ` averages factors for annual datasets like PSID/SCF in the state-space model.
+4. OLS-fit $\widehat{\Lambda}$ on the standardized coefficients regressed on $F^{4q}_t$ (intercept + factors).
+
+Prediction is then
+
+$$\text{coef}_t = (\alpha + \widehat{\Lambda} \cdot F^{4q}_t) \odot \text{stds}_{\text{block}} + \text{means}$$
 
 ```python
 from reconstruct import FactorMap
-import numpy as np
 
 fm = FactorMap(
-    "data/synthetic/projection/",
-    dataset="PSID",          # or "SCF", "CEX"
-    trend_kind="normal",     # "normal" = HP-trend, date-anchored
-                             # "average" = time-mean trend (extrapolation-friendly)
+    "data/synthetic/PSID_coefficients_normal.csv",
+    "data/synthetic/smoothed_factors.csv",
+    n_factors=8,
 )
-print(fm.summary())          # FactorMap: dataset=PSID, K=8, n_coefs=1730, trend=normal
+print(fm.summary())
+# FactorMap: K=8, T_used=100 (dropped 147 NaN rows of 247),
+#   R² median=0.376, R² P25/P75=(0.259, 0.523)
 
-# Counterfactual: factor 1 at +1 SD, all others at their mean
-F = np.zeros(fm.n_factors); F[0] = 1.0
-fm.quantile_at(F, "consum", [0.1, 0.5, 0.9], date="2008-Q3")
-fm.copula_density_at(F, 0.5, 0.5, 0.5, date="2008-Q3")
+# Historical factor at a date — returns the 4q-average (the OLS input shape)
+F = fm.factors_at("2008-Q3")              # shape (8,)
+F_cf = F.copy(); F_cf[0] += 1.0           # counterfactual: factor 1 +1 unit
+fm.quantile_at(F_cf, "consum", [0.1, 0.5, 0.9])
+fm.copula_density_at(F_cf, 0.5, 0.5, 0.5)
 ```
 
-The `date` argument picks the trend row for `trend_kind="normal"`; with `trend_kind="average"` the trend is a single constant per coefficient and `date` is ignored.
+`factors_at(date, kind="t")` returns the current-period factor `x1..x_K` if you want to perturb just $F_t$ and synthesize lags yourself.
 
-$F^{\text{dist}}_t$ is the distributional portion of the smoothed factors (the first $\text{factor\_count} \times 4 = 32$ entries of `smoothed_factors.csv` in the 8-factor model; the remaining columns are aggregate-factor states used elsewhere in the pipeline). The Julia API mirrors Python:
+The Julia API is the same:
 
 ```julia
-fm = FactorMap("data/synthetic/projection/", "PSID"; trend_kind="normal")
+fm = FactorMap(
+    "data/synthetic/PSID_coefficients_normal.csv",
+    "data/synthetic/smoothed_factors.csv";
+    n_factors = 8,
+)
 println(DistributionalReconstruction.summary(fm))
 
-F = zeros(fm.n_factors); F[1] = 1.0
-quantile_at(fm, F, :consum, [0.1, 0.5, 0.9]; date="2008-Q3")
-copula_density_at(fm, F, 0.5, 0.5, 0.5; date="2008-Q3")
+F = factors_at(fm, "2008-Q3")
+F[1] += 1.0
+quantile_at(fm, F, :consum, [0.1, 0.5, 0.9])
+copula_density_at(fm, F, 0.5, 0.5, 0.5)
 ```
 
 ---
@@ -133,14 +146,11 @@ When you bump `tag` to something new, the pipeline writes to a brand-new tree (t
 7_Results/
 └── consum_and_income_and_wealth<tag>/
     ├── from_mcmc/
-    │   ├── data/                    ← *_coefficients_*.csv, smoothed_factors.csv, *_functional_data*.csv
-    │   │   └── projection/          ← PCA loadings Γ, means, stds, trends (one set per dataset)
-    │   ├── plots/                   ← quantile / copula plots + correlation tables
+    │   ├── data/        ← *_coefficients_*.csv, smoothed_factors.csv, *_functional_data*.csv
+    │   ├── plots/       ← quantile / copula plots + correlation tables
     │   └── bayesian_convergence/
-    └── other_results/                ← counterfactuals, raw data, likelihood diagnostics
+    └── other_results/    ← counterfactuals, raw data, likelihood diagnostics
 ```
-
-The `projection/` subfolder is what feeds `FactorMap.from_projection(...)` — copy it (or the files inside) over to `data/synthetic/projection/` when you want users to use the exact reconstruction.
 
 ### Sanity checks before kicking off
 
