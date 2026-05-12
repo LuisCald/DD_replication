@@ -376,7 +376,12 @@ end
     FactorMap(coefs_csv, factors_csv; n_factors=8)
 
 Self-contained smoothed factors → coefficient row map, built off the public
-CSVs. Mirrors `dis_data_rep == "smoothed_factors_dd"` in
+CSVs. Use the `_coefficients_average.csv` variant — it carries only a constant
+trend per coefficient, so the smoothed factors recover the row exactly
+(R² ≈ 1). Fitting on `_coefficients_normal.csv` (with the time-varying HP
+trend) is discouraged — R² drops to ~0.4.
+
+Mirrors `dis_data_rep == "smoothed_factors_dd"` in
 `Distributional_Counterfactuals/5_Code/SupportPrepData.jl`:
 
   1. Drop rows with any NaN in the coefficient matrix.
@@ -389,7 +394,7 @@ Use:
 
 ```julia
 fm = FactorMap(
-    "data/synthetic/PSID_coefficients_normal.csv",
+    "data/synthetic/PSID_coefficients_average.csv",
     "data/synthetic/smoothed_factors.csv";
     n_factors = 8,
 )

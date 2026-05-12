@@ -271,22 +271,28 @@ def copula_density_from_row(row: np.ndarray, u_c, u_y, u_w) -> float | np.ndarra
 class FactorMap:
     """Smoothed factors → coefficient row, self-contained on the public CSVs.
 
-    Construction takes one coefficient file (e.g. `PSID_coefficients_normal.csv`)
-    and a smoothed factors file (`smoothed_factors.csv`):
+    Use the `_coefficients_average.csv` variant — it carries only a constant
+    trend per coefficient (the time-mean of the HP trend). All remaining time
+    variation is driven by the smoothed factors, so the OLS recovers the
+    coefficient row exactly (R² ≈ 1 on this data).
 
     ```python
     fm = FactorMap(
-        "data/synthetic/PSID_coefficients_normal.csv",
+        "data/synthetic/PSID_coefficients_average.csv",
         "data/synthetic/smoothed_factors.csv",
         n_factors=8,
     )
-    print(fm.summary())          # T_used=…, R² median=…
+    print(fm.summary())          # T_used=247, R² median≈1.000
 
     F_2008 = fm.factors_at("2008-Q3")          # 4q-averaged factors at this date
     F_cf   = F_2008.copy(); F_cf[0] += 1.0     # counterfactual: factor 1 +1 unit
     fm.quantile_at(F_cf, "consum", [0.1, 0.5, 0.9])
     fm.copula_density_at(F_cf, 0.5, 0.5, 0.5)
     ```
+
+    Fitting on `_coefficients_normal.csv` (with the time-varying HP trend) is
+    discouraged — the trend variation isn't a linear function of the factors,
+    so R² drops to ~0.4.
 
     Mirrors the `smoothed_factors_dd` mode in
     `Distributional_Counterfactuals/5_Code/SupportPrepData.jl`:
