@@ -241,3 +241,21 @@ end
 
 
 
+
+
+# ─────────────────────────────────────────────────────────────────────
+# data_tag(sources)
+#   "CEX_and_CPS_and_..._and_SCF"  — used to name the cached sigma file
+#   that ModelPrep.jl loads when reusing an earlier run's noise estimate.
+#   Restored from _archive/ in commit 4c06537.
+# ─────────────────────────────────────────────────────────────────────
+function data_tag(sources)
+    new_sources = deepcopy(sources)
+    # Alias SCF2016 to SCF so the cached filename matches across vintages.
+    for (m, source) in enumerate(new_sources)
+        if source == "SCF2016"
+            new_sources[m] = "SCF"
+        end
+    end
+    return join(sort(new_sources), "_and_")
+end
