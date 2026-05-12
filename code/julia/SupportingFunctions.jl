@@ -259,3 +259,56 @@ function data_tag(sources)
     end
     return join(sort(new_sources), "_and_")
 end
+
+
+# ─────────────────────────────────────────────────────────────────────
+# measures_folder(measures)
+#   "consum_and_income_and_wealth" — folder name under 7_Results/.
+#   Same join-with-"_and_" convention as data_tag.
+# Restored from _archive/MCMC.jl in commit 4c06537.
+# ─────────────────────────────────────────────────────────────────────
+function measures_folder(measures)
+    return join(sort(measures), "_and_")
+end
+
+
+# ─────────────────────────────────────────────────────────────────────
+# draw_from_prior(param_sizes, priors, nchain)
+#   Initial parameter draws for each MCMC chain. Used by DIMESampler.jl.
+# Restored from _archive/MCMC.jl in commit 4c06537.
+# ─────────────────────────────────────────────────────────────────────
+function draw_from_prior(param_sizes, priors, nchain)
+    nf = param_sizes[1][1]   # number of factors
+    ny = param_sizes[2][2]   # number of controls
+    nΣ = param_sizes[7][1]
+
+    A_B_C_D = rand(priors[1], nchain)
+    Ωf      = hcat([rand(priors[2], nf) for _ in 1:nchain]...)
+    Ωy      = hcat([rand(priors[3], ny) for _ in 1:nchain]...)
+
+    # Draw the full Cholesky from the LKJ prior, then map back to the
+    # unconstrained u-parameterization via `Lcorr_to_u` (defined in Model.jl).
+    L_draws = [rand(priors[4]).L for _ in 1:nchain]
+    ΩC      = hcat([Lcorr_to_u(L) for L in L_draws]...)
+
+    Σ = hcat([rand.(priors[5:4+nΣ])    for _ in 1:nchain]...)
+    H = hcat([rand.(priors[end-5:end]) for _ in 1:nchain]...)
+    return vcat(A_B_C_D, Ωf, Ωy, ΩC, Σ, H)
+end
+
+
+# ─────────────────────────────────────────────────────────────────────
+# store_optim_estimate(params, label, m_label, data_cutoffs, tag)
+#   Persist the post-optimization parameter vector to a CSV under
+#   7_Results/<m_label><tag>/from_mcmc/parameter_vectors/.
+# Restored from _archive/MCMC.jl in commit 4c06537.
+# ─────────────────────────────────────────────────────────────────────
+function store_optim_estimate(params, label, m_label, data_cutoffs, tag)
+    end_year = data_cutoffs["end"] != "" ? data_cutoffs["end"][1:4] : "all"
+    init_path = BASE_PATH
+    out_path  = init_path * "/7_Results/$m_label" * "$tag" *
+                "/from_mcmc/parameter_vectors/solution" * "$label" *
+                "_$end_year" * ".csv"
+    mkpath(dirname(out_path))
+    DelimitedFiles.writedlm(out_path, params, ',')
+end
