@@ -31,9 +31,13 @@ function compare_to_external_sources(dv, ty, func_data, obs_data, user_params, t
     init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/plots/"
     mkpath(path)
+    mkpath(path * "correlations/")
+    for m in measures
+        mkpath(path * "$m/external_comparisons/")
+    end
     series_t = ["top10", "next40", "bottom50"]
 
-    # Creating and filling dictionaries to loop over 
+    # Creating and filling dictionaries to loop over
     top = Dict("consensus" => Dict())
     bot = Dict("consensus" => Dict())
     mid = Dict("consensus" => Dict())
@@ -1028,6 +1032,9 @@ function compare_to_data(dv, ty, func_data, obs_data, user_t, time_params, model
     init_path = BASE_PATH
     path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/plots/"
     mkpath(path)
+    for m in measures
+        mkpath(path * "$m/data_comparisons/")
+    end
 
     dates = Dict()
 
