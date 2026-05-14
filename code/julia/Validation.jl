@@ -42,7 +42,7 @@ function compare_to_external_sources(dv, ty, func_data, obs_data, user_params, t
     bot = Dict("consensus" => Dict())
     mid = Dict("consensus" => Dict())
 
-    # Defining the series 
+    # Defining the series
     series = Dict()
     if grid_choice_pcf == 10 || grid_choice_pcf == 20 || grid_choice_pcf == 100
         series["bot"] = "bottom50"
@@ -52,6 +52,19 @@ function compare_to_external_sources(dv, ty, func_data, obs_data, user_params, t
         series["bot"] = "bottom40"
         series["mid"] = "next40"
         series["top"] = "top20"
+    end
+
+    # The external-validation CSVs in 2_Data_processing/validation/ are stored
+    # at decile granularity (column names "top10" / "next40" / "bottom50").
+    # When `integral_pcf_grid != 10`, the model labels its groups differently
+    # (e.g., "top20" for grid=5) and the column-by-name lookup against those
+    # CSVs throws ArgumentError. Skip gracefully — external comparison only
+    # makes sense at decile granularity.
+    if grid_choice_pcf != 10
+        @warn "compare_to_external_sources: external sources use decile labels; " *
+              "current grid_choice_pcf=$grid_choice_pcf does not match. " *
+              "Skipping external-source comparison (set integral_pcf_grid=10 to enable)."
+        return
     end
 
     # For xaxis 
