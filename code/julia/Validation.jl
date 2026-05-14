@@ -405,8 +405,20 @@ function generate_wealth_by_income_df(source, ty, measures, opttag, gdp_series, 
     micro_df = CSV.read(init_path * "/7_Results/$(meas_folder)" * "$tag" * "/$(opttag)/data/" * "$(source)_micro_data" * file_tag * "_A non-diag_.csv", DataFrame)
     micro_df[!, "time"] = QuarterlyDate.(micro_df[!, "time"])
 
-    # Create wealth by income. But first, define groups 
-    micro_df[!, "income_groups"] = [micro_df[i, "incomegrid"] <= 4 ? "low" : micro_df[i, "incomegrid"] <= 8 .&& micro_df[i, "incomegrid"] >= 5 ? "middle" : "high" for i in 1:nrow(micro_df)]
+    # Create wealth by income. But first, define groups.
+    # Group thresholds are bottom 40% / next 40% / top 20% of the income grid.
+    # Inferring the grid size from the data (was hardcoded for grid=10, which
+    # broke when `integral_cop_grid` is smaller, e.g. 5 — then no row mapped
+    # to "high" and the downstream unstack/rename failed).
+    grid_size = Int(maximum(skipmissing(micro_df[!, "incomegrid"])))
+    bot_max = max(1, round(Int, 0.4 * grid_size))
+    mid_max = max(bot_max + 1, round(Int, 0.8 * grid_size))
+    micro_df[!, "income_groups"] = [
+        micro_df[i, "incomegrid"] <= bot_max ? "low" :
+        micro_df[i, "incomegrid"] <= mid_max ? "middle" :
+        "high"
+        for i in 1:nrow(micro_df)
+    ]
 
     # Create wealth by income, by taking the weighted sum of wealth over the groups, per quarter 
     replace!(micro_df[!, :cop_share], NaN => 0.0)
