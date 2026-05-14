@@ -743,6 +743,7 @@ function plot_forecasts(data_dt, data_dt_r, ty, func_data, obs_data, avg_series,
                             )
                         end
 
+                        mkpath(path * "/$meas/" * "/forecasts/$(forecast_type)/all_data/")
                         Plots.savefig(path * "/$meas/" * "/forecasts/$(forecast_type)/all_data/" * plot_name * "_" * meas * "_" * obj * "_" * series[ds] * "_" * label * ".pdf")
                     end
                 end
@@ -1215,6 +1216,7 @@ function plot_iterative_forecasts(dataset_choice, data_dt, data_dt_r, func_data,
                         label=L"\textrm{Observation}"
                     )
 
+                    mkpath(path * "/$meas/" * "/forecasts/iterative/")
                     Plots.savefig(path * "/$meas/" * "/forecasts/iterative/" * plot_name * "_" * meas * "_" * obj * "_" * ds * "_" * label * ".pdf")
                 end
             end
