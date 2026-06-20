@@ -17,6 +17,13 @@ rename qdate daten
 
 save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/headline_inflation.dta", replace
 
+/* ============================================================================
+   DISABLED FOR NOW — model stationary-aggregates path (sp500/expectations/shiller,
+   the big FRED-QD import, deseasoning-for-stationary, stationary_aggregates.csv,
+   and factor analysis). NONE of this is needed to produce the per-HH correction
+   series (inflation_corrected_correction_series.xlsx) that GrowthCorrection.jl reads.
+   Re-enable this block for the full model data build.
+   ============================================================================
 * Import sp500_div_yield
 import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/sp500_dividend_yield.csv", clear 
 
@@ -178,70 +185,72 @@ drop if missing(d_log_a997rc1q027sbea)
 drop v1
 
 export delimited d_log* d_gs1 d_gs5 d_tb3ms d_aaaffm d_unrate time using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/stationary_aggregates.csv", replace
+*/
+* ===== end DISABLED model stationary-aggregates block =====
 
-
-* Number of factors 
-pca std_hnoremv std_na000332q std_cclbshno std_hnoll std_tlbshno ///
-std_mabshno std_hnopfaq027s std_tfaabshno std_gdp std_pcesv std_payems ///
-std_cpiaucsl_nbd20191001 std_olalbshno std_a997rc1q027sbea std_na000338q ///
-std_hnocea std_mvloas std_na000335q std_hoorevlmhmv std_na000316q ///
-std_tnwbshno std_hnola std_blneclbshno std_tabshno std_sp500 std_lirabshno ///
-std_indpro std_hmlbshno std_tsdabshno std_na000336q std_pcend ///
-std_personalfinancecurrent std_pincome std_maabshno std_na000346q ///
-std_hnomfsa std_cdcabshno std_awhman std_personalfinanceexpected ///
-std_house_price_index std_bogz1lm155111005q std_bogz1lm154022005q ///
-std_bogz1lm152010005q std_bogz1lm153063005q std_bogz1lm152090205q ///
-std_expectedindex std_currentindex std_businesscondition5years ///
-std_businesscondition12months std_buyingconditions std_uempmean ///
-std_unrate std_gs1 std_tb3ms std_gs5 std_aaaffm std_sp_div_yield 
- 
-xtnumfac d_log_hnoremv d_log_na000332q d_log_hnoll d_log_cclbshno d_log_tlbshno  ///
-d_log_mabshno d_log_hnopfaq027s d_log_tfaabshno d_log_gdp ///
-d_log_pcesv d_log_payems d_log_cpiaucsl_nbd20191001 d_log_olalbshno ///
-d_log_a997rc1q027sbea d_log_na000338q d_log_hnocea d_log_mvloas ///
-d_log_na000335q d_log_hoorevlmhmv d_log_na000316q d_log_tnwbshno ///
-d_log_hnola  d_log_tabshno d_log_sp500 d_log_lirabshno ///
-d_log_indpro d_log_hmlbshno d_log_tsdabshno d_log_na000336q d_log_pcend ///
-d_log_personalfinancecurrent d_log_pincome d_log_maabshno d_log_na000346q ///
-d_log_hnomfsa  d_log_awhman d_log_personalfinanceexpected ///
-d_log_house_price_index  d_log_bogz1lm155111005q ///
-d_log_bogz1lm154022005q d_log_bogz1lm152010005q ///
-d_log_bogz1lm153063005q d_log_bogz1lm152090205q d_log_expectedindex ///
-d_log_currentindex d_log_businesscondition5years ///
-d_log_businesscondition12months d_log_buyingconditions d_log_cdcabshno ///
-d_tb3ms d_sp_div_yield d_gs5 d_gs1, standardize(3) kmax(8) detail
- 
-* Now plot all the series 
-tsline d_log_hnoremv d_log_na000332q d_log_hnoll d_log_cclbshno d_log_tlbshno  ///
-d_log_mabshno d_log_hnopfaq027s d_log_tfaabshno d_log_gdp ///
-d_log_pcesv d_log_payems d_log_cpiaucsl_nbd20191001 d_log_olalbshno ///
-d_log_a997rc1q027sbea d_log_na000338q d_log_hnocea d_log_mvloas ///
-d_log_na000335q d_log_hoorevlmhmv d_log_na000316q d_log_tnwbshno ///
-d_log_hnola  d_log_tabshno d_log_sp500 d_log_lirabshno ///
-d_log_indpro d_log_hmlbshno d_log_tsdabshno d_log_na000336q d_log_pcend ///
-d_log_personalfinancecurrent d_log_pincome d_log_maabshno d_log_na000346q ///
-d_log_hnomfsa  d_log_awhman d_log_personalfinanceexpected ///
-d_log_house_price_index  d_log_bogz1lm155111005q ///
-d_log_bogz1lm154022005q d_log_bogz1lm152010005q ///
-d_log_bogz1lm153063005q d_log_bogz1lm152090205q d_log_expectedindex ///
-d_log_currentindex d_log_businesscondition5years ///
-d_log_businesscondition12months d_log_buyingconditions d_log_cdcabshno ///
-d_tb3ms d_sp_div_yield d_gs5 d_gs1
-
-tsline std_hnoremv std_na000332q std_cclbshno std_hnoll std_tlbshno ///
-std_mabshno std_hnopfaq027s std_tfaabshno std_gdp std_pcesv std_payems ///
-std_cpiaucsl_nbd20191001 std_olalbshno std_a997rc1q027sbea std_na000338q ///
-std_hnocea std_mvloas std_na000335q std_hoorevlmhmv std_na000316q ///
-std_tnwbshno std_hnola std_blneclbshno std_tabshno std_sp500 std_lirabshno ///
-std_indpro std_hmlbshno std_tsdabshno std_na000336q std_pcend ///
-std_personalfinancecurrent std_pincome std_maabshno std_na000346q ///
-std_hnomfsa std_cdcabshno std_awhman std_personalfinanceexpected ///
-std_house_price_index std_bogz1lm155111005q std_bogz1lm154022005q ///
-std_bogz1lm152010005q std_bogz1lm153063005q std_bogz1lm152090205q ///
-std_expectedindex std_currentindex std_businesscondition5years ///
-std_businesscondition12months std_buyingconditions std_uempmean ///
-std_unrate std_gs1 std_tb3ms std_gs5 std_aaaffm std_sp_div_yield 
-  
+//
+// * Number of factors 
+// pca std_hnoremv std_na000332q std_cclbshno std_hnoll std_tlbshno ///
+// std_mabshno std_hnopfaq027s std_tfaabshno std_gdp std_pcesv std_payems ///
+// std_cpiaucsl_nbd20191001 std_olalbshno std_a997rc1q027sbea std_na000338q ///
+// std_hnocea std_mvloas std_na000335q std_hoorevlmhmv std_na000316q ///
+// std_tnwbshno std_hnola std_blneclbshno std_tabshno std_sp500 std_lirabshno ///
+// std_indpro std_hmlbshno std_tsdabshno std_na000336q std_pcend ///
+// std_personalfinancecurrent std_pincome std_maabshno std_na000346q ///
+// std_hnomfsa std_cdcabshno std_awhman std_personalfinanceexpected ///
+// std_house_price_index std_bogz1lm155111005q std_bogz1lm154022005q ///
+// std_bogz1lm152010005q std_bogz1lm153063005q std_bogz1lm152090205q ///
+// std_expectedindex std_currentindex std_businesscondition5years ///
+// std_businesscondition12months std_buyingconditions std_uempmean ///
+// std_unrate std_gs1 std_tb3ms std_gs5 std_aaaffm std_sp_div_yield 
+// 
+// xtnumfac d_log_hnoremv d_log_na000332q d_log_hnoll d_log_cclbshno d_log_tlbshno  ///
+// d_log_mabshno d_log_hnopfaq027s d_log_tfaabshno d_log_gdp ///
+// d_log_pcesv d_log_payems d_log_cpiaucsl_nbd20191001 d_log_olalbshno ///
+// d_log_a997rc1q027sbea d_log_na000338q d_log_hnocea d_log_mvloas ///
+// d_log_na000335q d_log_hoorevlmhmv d_log_na000316q d_log_tnwbshno ///
+// d_log_hnola  d_log_tabshno d_log_sp500 d_log_lirabshno ///
+// d_log_indpro d_log_hmlbshno d_log_tsdabshno d_log_na000336q d_log_pcend ///
+// d_log_personalfinancecurrent d_log_pincome d_log_maabshno d_log_na000346q ///
+// d_log_hnomfsa  d_log_awhman d_log_personalfinanceexpected ///
+// d_log_house_price_index  d_log_bogz1lm155111005q ///
+// d_log_bogz1lm154022005q d_log_bogz1lm152010005q ///
+// d_log_bogz1lm153063005q d_log_bogz1lm152090205q d_log_expectedindex ///
+// d_log_currentindex d_log_businesscondition5years ///
+// d_log_businesscondition12months d_log_buyingconditions d_log_cdcabshno ///
+// d_tb3ms d_sp_div_yield d_gs5 d_gs1, standardize(3) kmax(8) detail
+// 
+// * Now plot all the series 
+// tsline d_log_hnoremv d_log_na000332q d_log_hnoll d_log_cclbshno d_log_tlbshno  ///
+// d_log_mabshno d_log_hnopfaq027s d_log_tfaabshno d_log_gdp ///
+// d_log_pcesv d_log_payems d_log_cpiaucsl_nbd20191001 d_log_olalbshno ///
+// d_log_a997rc1q027sbea d_log_na000338q d_log_hnocea d_log_mvloas ///
+// d_log_na000335q d_log_hoorevlmhmv d_log_na000316q d_log_tnwbshno ///
+// d_log_hnola  d_log_tabshno d_log_sp500 d_log_lirabshno ///
+// d_log_indpro d_log_hmlbshno d_log_tsdabshno d_log_na000336q d_log_pcend ///
+// d_log_personalfinancecurrent d_log_pincome d_log_maabshno d_log_na000346q ///
+// d_log_hnomfsa  d_log_awhman d_log_personalfinanceexpected ///
+// d_log_house_price_index  d_log_bogz1lm155111005q ///
+// d_log_bogz1lm154022005q d_log_bogz1lm152010005q ///
+// d_log_bogz1lm153063005q d_log_bogz1lm152090205q d_log_expectedindex ///
+// d_log_currentindex d_log_businesscondition5years ///
+// d_log_businesscondition12months d_log_buyingconditions d_log_cdcabshno ///
+// d_tb3ms d_sp_div_yield d_gs5 d_gs1
+//
+// tsline std_hnoremv std_na000332q std_cclbshno std_hnoll std_tlbshno ///
+// std_mabshno std_hnopfaq027s std_tfaabshno std_gdp std_pcesv std_payems ///
+// std_cpiaucsl_nbd20191001 std_olalbshno std_a997rc1q027sbea std_na000338q ///
+// std_hnocea std_mvloas std_na000335q std_hoorevlmhmv std_na000316q ///
+// std_tnwbshno std_hnola std_blneclbshno std_tabshno std_sp500 std_lirabshno ///
+// std_indpro std_hmlbshno std_tsdabshno std_na000336q std_pcend ///
+// std_personalfinancecurrent std_pincome std_maabshno std_na000346q ///
+// std_hnomfsa std_cdcabshno std_awhman std_personalfinanceexpected ///
+// std_house_price_index std_bogz1lm155111005q std_bogz1lm154022005q ///
+// std_bogz1lm152010005q std_bogz1lm153063005q std_bogz1lm152090205q ///
+// std_expectedindex std_currentindex std_businesscondition5years ///
+// std_businesscondition12months std_buyingconditions std_uempmean ///
+// std_unrate std_gs1 std_tb3ms std_gs5 std_aaaffm std_sp_div_yield 
+//  
 
 
 // * Series with named changed 
@@ -304,6 +313,7 @@ save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/rental_data.dt
 * Import FRED 
 import fred PINCOME TNWBSHNO PCEND PCESV TABSHNO HHMSDODNS ///
 CDCABSHNO TSDABSHNO BOGZ1LM153061105Q TOTALSL BOGZ1FL153166100Q ///
+HNOCEA HNOMFSA HNOREMV BOGZ1LM152090205Q HNOPFAQ027S ///
 DNDGRG3M086SBEA DSERRG3M086SBEA, clear aggregate(quarterly)
 
 * Export file and remove seasonality 
@@ -326,7 +336,7 @@ drop _merge
 merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/tot_hhs_data.dta"
 drop _merge
 
-drop date
+// drop date
 
 drop if daten <= tq(1947, 1) // why? because SCF first obs is 1950 and 1947 is when a decent amount of FRED series begin
 
@@ -365,6 +375,10 @@ use "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/averages_deseas
 
 * Put things in similar units, but double check!
 global vars_billions tsdabshno totalsl tnwbshno rental_eq pincome pcesv pcend hhmsdodns cdcabshno tabshno
+* Z.1 component series in MILLIONS — DISABLED FOR NOW: absent from the current
+* averages_deseasoned.csv. Re-enable together with the component anchors below after
+* re-deseasoning the new nominal export (which now includes these series).
+* global vars_millions_z1 hnocea hnomfsa hnoremv bogz1lm152090205q hnopfaq027s
 global vars_millions bogz1fl153166100q bogz1lm153061105q
 global vars_thou tot_hhs
       
@@ -403,14 +417,24 @@ gen wealth_per_hh = tnwbshno / tot_hhs
 gen assets_per_hh = tabshno / tot_hhs
 gen mgdebt_per_hh = hhmsdodns / tot_hhs
 gen ttdebt_per_hh = (bogz1fl153166100q + hhmsdodns) / tot_hhs
-gen liquid_per_hh = (cdcabshno + tsdabshno + bogz1lm153061105q) / tot_hhs 
+gen liquid_per_hh = (cdcabshno + tsdabshno + bogz1lm153061105q) / tot_hhs
+// Component anchors needing the new FRED series — DISABLED until averages_deseasoned.csv is
+// regenerated to include HNOCEA/HNOMFSA/HNOREMV/BOGZ1LM152090205Q/HNOPFAQ027S:
+// gen stocks_per_hh = (hnocea + hnomfsa) / tot_hhs   // DFA corporate equities + mutual funds
+// gen real_estate_per_hh = hnoremv / tot_hhs         // DFA real estate
+// gen business_per_hh = bogz1lm152090205q / tot_hhs  // DFA unincorporated business
+// gen pension_per_hh = hnopfaq027s / tot_hhs         // DFA pension entitlements (DB+DC)
+gen hdebt_per_hh = hhmsdodns / tot_hhs            // DFA "home mortgages"; matches micro hdebt (= mgdebt_per_hh)
+gen pdebt_per_hh = totalsl / tot_hhs              // DFA "consumer credit"; matches micro pdebt
+// Consumer durables: DFA has no standalone "vehicles" line (durables = autos+furniture+
+//   appliances+...); SCF micro is vehicles-only, so it is NOT a clean DFA component -> dropped.
 
 drop if missing(pcend) // should just be 1 obs
 
 rename daten time
 
-export excel income_per_hh wealth_per_hh assets_per_hh mgdebt_per_hh liquid_per_hh consum_per_hh ttdebt_per_hh ///
- time tot_hhs using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/inflation_corrected_correction_series.xlsx", sheet("data") firstrow(variables) replace 
+export excel income_per_hh wealth_per_hh assets_per_hh mgdebt_per_hh liquid_per_hh consum_per_hh ttdebt_per_hh hdebt_per_hh pdebt_per_hh ///
+ time tot_hhs using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/inflation_corrected_correction_series.xlsx", sheet("data") firstrow(variables) replace
  
 
 **# Importing FRED-QD dataset 
