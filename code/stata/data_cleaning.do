@@ -99,7 +99,15 @@ rename ffanfin non_fin_assets
 
  
 replace finassets = equity + mfun
-gen liquid = liqcer + savbnd 
+// ─── DFA balance-sheet components (surfaced for the (Y,W,component) economies) ───
+// All collected at the survey date, like wealth (stock variables, NOT growth-adjusted).
+// All are semicontinuous (point mass at 0) -> handled via atom_measures downstream.
+gen stocks      = equity + mfun // DFA "corporate equities + mutual fund shares"
+gen real_estate = house + oest  // DFA "real estate" (owner-occupied + other)
+gen business    = ffabus        // DFA "unincorporated business"
+gen pension     = pen           // DFA pensions (total; no DB/DC split available)
+gen vehicles    = vehi          // DFA "consumer durables" (vehicles only in SCF)
+gen liquid = liqcer + savbnd
 replace assets = assets - pen // necessary since pensions are not always observed in the PSID
 replace wealth = wealth - pen 
 // replace finassets = finassets - liqcer - pen - bnd - life // we remove bnd because PSID does not have
@@ -116,7 +124,7 @@ rename id_imp5 id
 rename finassets finast
 // putexcel set "2_Data_processing/SCF.xlsx", replace
 * Correct for inflation 
-foreach var in income wealth assets liquid illiqd tdebt pdebt hdebt finast {
+foreach var in income wealth assets liquid illiqd tdebt pdebt hdebt finast stocks real_estate business pension vehicles {
 	replace `var' = `var' * 1.065365025
 }
 
@@ -130,11 +138,14 @@ foreach var in income wealth assets liquid illiqd tdebt pdebt hdebt finast {
 
 // gen quarter = 4
 * Export year, income, wealth and weight
-keep id year weight impnum income wealth assets finast liquid illiqd tdebt pdebt hdebt hhequiv
+keep id year weight impnum income wealth assets finast liquid illiqd tdebt pdebt hdebt hhequiv stocks real_estate business pension vehicles
 
 append using "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022_cleaned.dta"
+// 2022 carries the component columns (added in clean_SCF_2022.do). It still lacks
+// finast/liquid/assets/illiqd/tdebt/pdebt/hdebt/hhequiv (pre-existing). Output
+// renamed nogrowth -> noForbes_nogrowth (Forbes augmentation happens later).
 
-export excel id year weight impnum income wealth assets finast liquid illiqd tdebt pdebt hdebt hhequiv using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_nogrowth.xlsx", firstrow(variables) sheet("data", replace)
+export excel id year weight impnum income wealth assets finast liquid illiqd tdebt pdebt hdebt hhequiv stocks real_estate business pension vehicles using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes_nogrowth.xlsx", firstrow(variables) sheet("data", replace)
 
 la var income "Income"
 la var wealth "Wealth"
@@ -242,14 +253,14 @@ cd /Users/lc/Dropbox/Distributional_Dynamics
 gen id = _n 
 
 * Interview dates 
-do /Users/lc/Dropbox/Distributional_Dynamics/5_Code/insert_interview_dates.do
+do /Users/lc/Dropbox/Distributional_Dynamics/5_Code/code/stata/insert_interview_dates.do
 
 
 * Export Data
 // putexcel set "2_Data_processing/PSID.xlsx", replace
 drop year 
-keep id intdate* income* wealth* consum* consum_nore* assets* finast* illiqd* liquid* undebt* mgdebt* wgt* hhequiv* 
-reshape long income wealth consum consum_nore assets finast illiqd liquid undebt mgdebt wgt hhequiv intdate, i(id) j(year)
+keep id intdate* income* wealth* consum* consum_nore* assets* finast* illiqd* liquid* undebt* mgdebt* wgt* hhequiv* business* primary_real_estate* other_real_estate*
+reshape long income wealth consum consum_nore assets finast illiqd liquid undebt mgdebt wgt hhequiv intdate business primary_real_estate other_real_estate, i(id) j(year)
 rename year income_year
 
 gen year = year(dofq(intdate))
@@ -268,17 +279,27 @@ replace consum_nore = consum_nore / 4
 replace consum = . if consum == 0
 replace consum_nore = . if consum_nore == 0
 
-levelsof year, local(levels) 
+levelsof year, local(levels)
 foreach num of local levels {
-	foreach var in income wealth consum consum_nore assets finast illiqd liquid undebt mgdebt { 
-	cap summ `var' [aw=wgt] if year == `num', d 
-	cap replace `var' = . if `var' < r(p1) & year == `num' & !missing(`var')
+	foreach var in consum consum_nore assets finast illiqd liquid undebt mgdebt {
+	cap summ `var' [aw=wgt] if year == `num', d
+// 	cap replace `var' = . if `var' < r(p1) & year == `num' & !missing(`var')
+	cap replace `var' = . if `var' < 0 & year == `num' & !missing(`var') // can't have negative values of these
 	}
 }
 
 gen tdebt = undebt + mgdebt
- 
-rename wgt weight 
+
+* DFA balance-sheet components surfaced to match SCF naming (stock vars; not growth-adjusted).
+* stocks = PSID financial assets (equities + mutual funds + investment trusts) ~ SCF equity+mfun.
+* real_estate = gross primary + other real estate ~ SCF house+oest. business = farm/business equity ~ SCF ffabus.
+* NOTE: PSID has no DB pension wealth (only ira_annuities, DC/IRA) -> `pension` is NOT surfaced for
+* PSID to avoid a concept mismatch with the SCF total-pension measure. hdebt/pdebt already exported.
+gen stocks = finast
+gen real_estate = primary_real_estate + other_real_estate
+// `business` already carries through from the reshape.
+
+rename wgt weight
 
 drop if missing(weight)
 
@@ -297,7 +318,7 @@ rename mgdebt hdebt
 
 replace consum_nore = . if year <2004 // clothing, entertainment only existed after ... can impute, but no
 
-export excel id income_year year quarter weight income wealth consum consum_nore assets finast illiqd liquid tdebt pdebt hdebt hhequiv using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID_nogrowth.xlsx", firstrow(variables) sheet("data",replace)
+export excel id income_year year quarter weight income wealth consum consum_nore assets finast illiqd liquid tdebt pdebt hdebt hhequiv stocks real_estate business using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID_nogrowth.xlsx", firstrow(variables) sheet("data", replace)
 
 // export excel id year weight income wealth consum consum_nore assets finast illiqd liquid tdebt pdebt hdebt hhequiv using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID_nogrowth.xlsx", firstrow(variables) sheet("data",replace)
 

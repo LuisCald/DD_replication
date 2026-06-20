@@ -188,6 +188,13 @@ edit are:
 * `blind_to`    — `Dict("dataset" => ["measure"...])`. Tells the model to
                   ignore a measure in a specific dataset (e.g., useful for
                   counterfactual runs that mute one signal).
+* `atom_measures`
+                — measures with a non-negligible point mass at zero
+                  (e.g. `["stocks"]`). Switches that measure to the two-part
+                  treatment: a participation scalar `π_t` plus a conditional
+                  Legendre quantile fit on the strictly-positive subsample.
+                  Empty (default) reproduces the paper exactly. See
+                  `doc/stocks_atom_design.md`.
 * `data_to_mute`
                 — `Dict("dataset" => Vector{QuarterlyDate})` of survey waves
                   to drop from the smoother. Used by the omitted-wave
@@ -202,7 +209,7 @@ prior model variants.
 @with_kw mutable struct ModelOptions{AE<:AbstractEstimator,AP<:AbstractPrior,B<:Bool,S<:String,I<:Integer,VS<:Vector{String},D<:Dict,DS<:Dict{String,String}}
     # ─── Estimator and prior ──────────────────────────────────────────────
     estimator::AE = SeriesEstimator(grid_pcf=11 + 1, grid_cop=11 + 1,
-                                    integral_pcf_grid=5, integral_cop_grid=5)
+                                    integral_pcf_grid=10, integral_cop_grid=10)
     prior::AP = Minnesota(hyperparameters=[0.05, 0.1, 0.5, 0.1, 2.0, 0.9, 0.9])
 
     # ─── What and how to model ────────────────────────────────────────────
@@ -233,6 +240,8 @@ prior model variants.
     # ─── Data treatment ───────────────────────────────────────────────────
     equivalized::B = false                                # OECD-equivalize income/consumption/wealth
     bottom_coded::Vector{Any} = []                        # variables to floor at a lower bound
+    atom_measures::Vector{String} = String[]              # semicontinuous measures with a point mass at 0 (e.g. ["stocks"]); enables the two-part / hurdle treatment. Empty = baseline behavior. See doc/stocks_atom_design.md
+    participation_link::Symbol = :logit                   # link for the participation scalar π_t carried alongside the Legendre coefficients of an atom measure (:logit keeps reconstructed π in [0,1]). Inert unless atom_measures is nonempty
     rm_seasonality::B = true                              # X-13 seasonal adjust applicable series
     data_cutoffs::DS = Dict("begin" => "", "end" => "")   # restrict the time index (extensive margin)
     data_to_mute = Dict("begin" => "", "end" => "")       # drop specific waves; see kwarg comments above
@@ -240,7 +249,8 @@ prior model variants.
     blind_to::D = Dict()                                  # dataset → measures to ignore, e.g. Dict("CEX" => ["wealth"])
 
     # ─── Output / experiment management ───────────────────────────────────
-    tag::S = " additional factors"                        # appended to result folder (note the leading space)
+    # tag::S = " additional factors"                        # appended to result folder (note the leading space)
+    tag::S = " additional factors II"
     compare_to_other_est::B = false                       # produce cross-model comparison tables
     plot_proof::B = false                                 # also write proof-of-concept figures (Figure 4/5)
 end
@@ -358,6 +368,27 @@ end
 
 # Canonical instances. `model_options` carries every knob the user typically
 # touches; `obs_data` loads the raw survey + aggregate data.
-const model_options = ModelOptions()
-const obs_data = ObservedData()
+#
+# Experiment variants live in `examples/Structures_<name>.jl`. Select one by
+# setting the `DD_EXAMPLE` environment variable before launching Julia, e.g.
+#     DD_EXAMPLE=stocks julia run_estimation.jl
+# A variant file is plain Julia that defines `const model_options` and
+# `const obs_data` with whatever measures / data files / options it needs.
+# With `DD_EXAMPLE` unset (the default) the published baseline below runs
+# unchanged.
+const DD_EXAMPLE = get(ENV, "DD_EXAMPLE", "")
+
+if isempty(DD_EXAMPLE)
+    const model_options = ModelOptions()
+    const obs_data = ObservedData()
+else
+    let example_file = joinpath(@__DIR__, "examples", "Structures_$(DD_EXAMPLE).jl")
+        isfile(example_file) || error("DD_EXAMPLE=\"$(DD_EXAMPLE)\" but $(example_file) does not exist.")
+        @info "Loading experiment configuration: $(example_file)"
+        include(example_file)
+    end
+end
+
+@assert (@isdefined model_options) "examples/Structures_$(DD_EXAMPLE).jl must define `const model_options`."
+@assert (@isdefined obs_data) "examples/Structures_$(DD_EXAMPLE).jl must define `const obs_data`."
 

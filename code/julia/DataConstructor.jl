@@ -1071,6 +1071,17 @@ function assign_quantile_groups_for_copula!(df, obs_meas, grid, grid_type)
 end
 
 function scale_to_aggregates(non_missing, rv, correction)
+    # Anchors the micro distribution's weighted mean to the per-HH aggregate `correction`,
+    # preserving ranks/shape. The result is micro * correction / mean(micro) (the additive
+    # `tot_scale` below is exactly 0 for the weighted mean), so this is SCALE-INVARIANT in
+    # the micro data: any constant rescaling of `rv` cancels.
+    #
+    # Consequence: frequency mismatches between micro and aggregate do NOT bias the output.
+    # e.g. PSID consumption is divided by 4 in data_cleaning.do (made "quarterly") while
+    # `consum_per_hh` is an annual rate (FRED PINCOME/PCE are SAAR) — the /4 is absorbed by
+    # `multiplier` (~4x larger) and cancels; the reconstructed level is set by the aggregate
+    # (annual-rate, per household). The micro's raw units only matter via the `multiplier > 20`
+    # guard below (a too-small micro mean inflates the multiplier toward that ceiling).
 
     # Get weighted mean of the measure
     tot_data = mean(non_missing[!, rv], weights(non_missing[:, :weight]))

@@ -1,6 +1,8 @@
 **# Cleaning the new wave of the SCF
 use "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022.dta", clear 
 
+// May have to run: max setvar 10000
+
 * Generate ID variable 
 rename y1 id 
 
@@ -31,10 +33,21 @@ save "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022_income.dta"
 // NFIN=VEHIC+HOUSES+ORESRE+NNRESRE+BUS+OTHNFIN;
 // Total debt: MRTHEL+RESDBT+OTHLOC+CCBAL+INSTALL+ODEBT;
 
-use "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022_wealth.dta", replace 
-drop income 
-rename y1 id 
+use "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022_wealth.dta", replace
+drop income
+rename y1 id
 gen wealth = nfin + fin - debt
+
+* DFA balance-sheet components (SCF summary-extract names) — match the SCF+ block.
+* `stocks` is also a raw var (directly-held equities), so build into a temp and rename.
+gen real_estate = houses + oresre + nnresre   // DFA "real estate" (= SCF+ house + oest)
+gen business    = bus                         // DFA "unincorporated business" (= SCF+ ffabus)
+gen pension     = retqliq                     // quasi-liquid retirement (~ SCF+ pen)
+gen vehicles    = vehic                       // DFA "consumer durables" (vehicles only)
+gen stocks_m    = stocks + nmmf               // DFA "corporate equities + mutual funds" (= SCF+ equity + mfun)
+drop stocks
+rename stocks_m stocks
+
 merge 1:1 id using "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022_income.dta"
 
 * Find weight variable 
@@ -49,12 +62,12 @@ gen id = year + id_string
 drop year 
 gen year = 2022 
 
-* Put in 2019 dollars 
-foreach var in income wealth {
+* Put in 2019 dollars
+foreach var in income wealth stocks real_estate business pension vehicles {
 	replace `var' = `var' * .83
 }
 
-keep id weight income wealth year
+keep id weight income wealth year stocks real_estate business pension vehicles
 
 * Append to SCF we have 
 save "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022_cleaned.dta", replace 

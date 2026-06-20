@@ -42,6 +42,71 @@ The replication package is organized into three stages:
 
 Pre-computed posterior estimates are provided in `output/estimates/`, allowing replicators to skip Stage 2 and go directly from Stage 1 to Stage 3.
 
+## DFA balance-sheet components (semicontinuous extension)
+
+Beyond the baseline `(consumption, income, wealth)` model, the code can model the joint
+distribution of `(income, wealth, <balance-sheet component>)` to replicate the Federal
+Reserve's **Distributional Financial Accounts (DFA)** one line item at a time — giving each
+component's distribution *by income group* and *by wealth group*. Components are
+**semicontinuous** (a point mass at 0 for non-holders plus a continuous part), so they use a
+two-part / hurdle treatment. See [`doc/stocks_atom_design.md`](doc/stocks_atom_design.md) for
+the design (participation scalar `π` + conditional Legendre fit; participation-split copula).
+
+**Selecting an experiment.** `Structures.jl` reads the `DD_EXAMPLE` environment variable and,
+if set, loads `code/julia/examples/Structures_<name>.jl` instead of the baseline options
+(unset = published baseline, unchanged):
+
+```bash
+DD_EXAMPLE=stocks julia run_estimation.jl   # also: real_estate, business, pension, mortgages, consumer_credit
+```
+
+**Data flow that feeds these (SCF and PSID).** Each survey's micro file carries the component
+columns (same name across surveys), and the per-household aggregate "correction" file carries a
+matching `<component>_per_hh` anchor:
+
+```
+SCF :  data_cleaning.do ──► SCF_noForbes_nogrowth.xlsx
+                              │  (GrowthCorrection.jl: align income to the wealth date)
+                              ▼
+                          SCF_noForbes.csv
+                              │  (generateForbes400.py: Forbes-400 augmentation)
+                              ▼
+                          SCF.csv                      ← read by the model
+
+PSID:  data_cleaning.do ──► PSID_nogrowth.xlsx ──(GrowthCorrection.jl)──► PSID.csv
+
+Aggregates:  import_aggregates.do ──► inflation_corrected_correction_series.xlsx
+             (per-HH anchors; component anchors need the new FRED series de-seasoned —
+              run code/R/X12_averages.R, then re-enable the anchors in import_aggregates.do)
+```
+
+Component → micro variable → FRED aggregate (`<x>_per_hh`):
+
+| DFA component | SCF micro | PSID micro | FRED aggregate |
+|---|---|---|---|
+| Corporate equities + mutual funds (`stocks`) | `equity+mfun` | `finast` | `HNOCEA+HNOMFSA` |
+| Real estate (`real_estate`) | `house+oest` | `primary+other_real_estate` | `HNOREMV` |
+| Unincorporated business (`business`) | `ffabus` | `business` | `BOGZ1LM152090205Q` |
+| Pension entitlements (`pension`) | `pen` | — (no DB) | `HNOPFAQ027S` |
+| Home mortgages (`hdebt`) | `hdebt` | `hdebt` | `HHMSDODNS` |
+| Consumer credit (`pdebt`) | `pdebt` | `pdebt` | `TOTALSL` |
+
+SIPP is excluded from the component work (only aggregate wealth/debt totals are extracted, and
+the raw files exceed local memory). Consumer durables has no clean DFA mapping (SCF captures
+vehicles only) and is dropped. DB vs DC pension cannot be separated in any source.
+
+**Files added/modified for this extension** (estimation core — marginal hurdle, copula split,
+reconstruction mixture — is still in progress; the data layer above is complete and run):
+
+- `code/julia/Structures.jl` — `atom_measures` / `participation_link` options; `DD_EXAMPLE` loader
+- `code/julia/examples/Structures_*.jl` — per-component experiment configs
+- `code/julia/atom_marginal.jl` — tested two-part / hurdle marginal building blocks
+- `code/julia/GrowthCorrection.jl` — growth step (recovered + carries the component columns)
+- `code/stata/data_cleaning.do`, `clean_SCF_2022.do` — surface component columns (SCF + PSID)
+- `code/stata/import_aggregates.do`, `other_results.do` — per-HH component anchors; canonical-writer fix
+- `code/R/X12_averages.R` — de-season the new component series into `averages_deseasoned.csv`
+- `doc/stocks_atom_design.md` — design note
+
 ## Data Availability Statement
 
 All data used in this paper are publicly available. Some datasets require free registration. No restricted-access or confidential data are used.

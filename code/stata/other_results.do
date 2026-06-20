@@ -16,7 +16,11 @@ foreach var in gdp_per_hh assets_per_hh consumption_per_hh debt_per_hh wealth_pe
 drop year inf_year M CPI_inf CPI_mat
 
 rename gdp_per_hh income_per_hh
-export excel using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/inflation_corrected_correction_series.xlsx", firstrow(variables) replace
+// DISABLED: import_aggregates.do is the canonical writer of
+// inflation_corrected_correction_series.xlsx (it provides consum_per_hh, which
+// GrowthCorrection.jl requires, plus the per-component anchors incl. stocks_per_hh).
+// This export used a different convention (consumption_per_hh) and would clobber it.
+// export excel using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/inflation_corrected_correction_series.xlsx", firstrow(variables) replace
 
 
 **# Importing the aggregates 
