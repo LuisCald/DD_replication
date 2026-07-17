@@ -26,6 +26,7 @@
 
 using StatsBase: sample
 using Random
+using LinearAlgebra
 
 # The repo's tracked synthetic-data folder (5_Code/data/synthetic), resolved
 # from this file's location — robust to BASE_PATH pointing at the repo parent.
@@ -45,6 +46,16 @@ Keyword arguments
 - `iteration = :last`: `:last` pools the final iteration of every chain
   (matches `generate_microdata_implicates`); `:all` pools every stored
   iteration × chain for more nearly-independent draws.
+- `state_uncertainty = true`: per θ-draw, add a draw of the *state* around the
+  smoothed mean, `x_t ~ N(x̂_{t|T}, Σ_{t|T})`, using the smoother's own
+  `sigma_smoothed`. With `false` you get mean paths only (parameter uncertainty
+  alone — the bands are then ~0 in data-rich periods, overselling precision).
+  Note: the state draws are *marginal per quarter* — exact for pointwise bands
+  and any per-date moment, which is what the downstream helpers compute. Joint
+  cross-date statistics (e.g. the change in a share between two dates within
+  one draw) would need a joint simulation smoother (Durbin–Koopman) instead.
+- `filename = "smoothed_factor_draws.csv"`: output file name (handy for
+  writing a comparison file without overwriting the default).
 - `out_dir = nothing`: output directory (defaults to `<BASE_PATH>/data/synthetic`).
 - `draws_file = nothing`: override the input JLD2 path.
 
@@ -53,6 +64,7 @@ Returns the path of the written CSV.
 function export_factor_draws(
     param_sizes, hyperpriors, Σ_ids, model_elements, model_options, time_params;
     n_draws::Int = 200, seed::Int = 12345, iteration::Symbol = :last,
+    state_uncertainty::Bool = true, filename::String = "smoothed_factor_draws.csv",
     out_dir = nothing, draws_file = nothing,
 )
     @unpack measures, tag = model_options
@@ -90,8 +102,16 @@ function export_factor_draws(
         smoother_output, _, _ = likeli(model_elements, θ, param_sizes, hyperpriors,
                                        Σ_ids, model_options; smooth = true)
         @unpack x_smoothed = smoother_output          # (factor_count, T)
-        R = size(x_smoothed, 1)
-        df = DataFrame(Matrix(x_smoothed'), ["x$i" for i in 1:R])
+        X = copy(x_smoothed)
+        if state_uncertainty
+            # add the smoother's own state uncertainty: x_t ~ N(x̂_{t|T}, Σ_{t|T})
+            @unpack sigma_smoothed = smoother_output
+            for t in 1:size(X, 2)
+                X[:, t] .+= _psd_sqrt(sigma_smoothed[t]) * randn(size(X, 1))
+            end
+        end
+        R = size(X, 1)
+        df = DataFrame(Matrix(X'), ["x$i" for i in 1:R])
         df[!, "time"] = collect(dts)
         df[!, "draw"] .= s
         append!(long, select(df, "draw", "time", :))
@@ -100,10 +120,18 @@ function export_factor_draws(
 
     out_dir = out_dir === nothing ? _PD_SYNTH : out_dir
     mkpath(out_dir)
-    out = joinpath(out_dir, "smoothed_factor_draws.csv")
+    out = joinpath(out_dir, filename)
     CSV.write(out, long)
-    @info "Wrote $n_draws posterior factor draws ($R factors × $(length(dts)) quarters) → $out"
+    unc = state_uncertainty ? "θ + state" : "θ only"
+    @info "Wrote $n_draws posterior factor draws ($unc; $R factors × $(length(dts)) quarters) → $out"
     return out
+end
+
+# Robust PSD square root: the smoothed state covariance can be numerically
+# singular (stacked-lag rows), so plain cholesky is not safe.
+function _psd_sqrt(S::AbstractMatrix)
+    E = eigen(Symmetric(Matrix(S)))
+    return E.vectors * Diagonal(sqrt.(max.(E.values, 0.0)))
 end
 
 """

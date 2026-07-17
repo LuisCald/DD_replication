@@ -23,9 +23,11 @@ func_data, time_params, model_elements = estimation_prep(obs_data, model_options
 _, param_sizes, priors, _, Σ_ids = set_params(model_elements, time_params, model_options)
 hyperpriors = priors[end-5:end]
 
-n_draws = parse(Int, get(ENV, "DD_N_DRAWS", "200"))
-@info "Exporting $n_draws posterior factor draws for tag = '$(model_options.tag)'..."
+n_draws   = parse(Int, get(ENV, "DD_N_DRAWS", "200"))
+state_unc = get(ENV, "DD_STATE_UNC", "1") != "0"   # θ+state by default; 0 = mean paths only
+@info "Exporting $n_draws posterior factor draws for tag = '$(model_options.tag)' (state_uncertainty=$state_unc)..."
 export_factor_draws(param_sizes, hyperpriors, Σ_ids, model_elements,
-                    model_options, time_params; n_draws=n_draws)
+                    model_options, time_params;
+                    n_draws=n_draws, state_uncertainty=state_unc)
 summarize_factor_draws()
 @info "Done. See data/synthetic/smoothed_factor_draws.csv and smoothed_factors_bands.csv"
