@@ -70,6 +70,14 @@ plus a per-quarter percentile summary `smoothed_factors_bands.csv`. Control
 the count with `DD_N_DRAWS` (default 200). See
 [`../julia/PosteriorDraws.jl`](../julia/PosteriorDraws.jl).
 
+By default each draw combines **parameter uncertainty** (posterior θ) with
+**state uncertainty** (a draw from the smoother's own `N(x̂_{t|T}, Σ_{t|T})`),
+so pointwise bands reflect total uncertainty. Set `DD_STATE_UNC=0` (or
+`state_uncertainty=false`) for mean paths only — parameter uncertainty alone,
+which shrinks to ~0 wherever the data pin the state down. The state draws are
+marginal per quarter: exact for pointwise bands and per-date moments (what
+these scripts compute), not for joint cross-date statistics within a draw.
+
 > The raw parameter draws (`posterior_draws/*.jld2`, hundreds of MB) are **not**
 > shipped in git — θ is not directly usable downstream, and the compact factor
 > draws above carry the same uncertainty in a form that plugs straight into
