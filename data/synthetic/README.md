@@ -19,8 +19,10 @@ Citation: please cite Bayer, Calderon, and Kuhn (2026). See [`CITATION.cff`](../
 | [`SCF_coefficients_average.csv`](SCF_coefficients_average.csv) | 248 × ~1.7 K | SCF reconstruction with averaged trend (extrapolation-friendly). |
 | [`CEX_coefficients_normal.csv`](CEX_coefficients_normal.csv) | 248 × ~1.7 K | CEX reconstruction with HP trend (in-sample). |
 | [`CEX_coefficients_average.csv`](CEX_coefficients_average.csv) | 248 × ~1.7 K | CEX reconstruction with averaged trend (extrapolation-friendly). |
-| `smoothed_factor_draws.csv` | (248·D) × (43+2) | **Posterior draws** of the latent factors: `draw, time, x1 … x43`, stacked over `D` posterior draws of the model parameters. Use for posterior uncertainty on any moment. |
+| `smoothed_factor_draws.csv` | (248·D) × (43+2) | **Posterior draws** of the latent factors: `draw, time, x1 … x43`, stacked over `D` posterior draws of the model parameters (each draw also includes the smoother's state uncertainty). Use for posterior uncertainty on any moment. |
 | `smoothed_factors_bands.csv` | 248 × (3·43+1) | Per-quarter posterior percentiles of each factor (`x{i}_p05, x{i}_p50, x{i}_p95`). A quick summary of the draws file. |
+| [`PSID_synthetic_microdata.csv`](PSID_synthetic_microdata.csv) | 247 000 × 10 | **Synthetic micro data**: one weighted cross-section per quarter (1000 rows = 10³ decile-copula cells) — `cop_share` (weight), decile-average `consum/income/wealth` relative to the per-HH mean, cell indices, `time`. Generated from the coefficient files by `code/moments_from_coefficients/coefficients_to_micro_data.jl`. |
+| [`aggregate_anchors.csv`](aggregate_anchors.csv) | 309 × 5 | Per-household aggregate anchors (`consum_per_hh, income_per_hh, wealth_per_hh, tot_hhs` by quarter) — the same series the estimation uses. Multiply relative values by these for dollar levels. |
 
 All time series are quarterly. Time index format: `1962-Q3 … 2024-Q1`.
 
@@ -82,7 +84,7 @@ r = Reconstruction("PSID_coefficients_normal.csv")
 
 # Marginal quantile function for consumption in 2008-Q3 at deciles
 r.quantile_at("2008-Q3", "consum", [0.1, 0.5, 0.9])
-# -> array([0.320, 0.734, 1.386])  (relative to mean)
+# -> array([0.325, 0.802, 1.874])  (relative to mean)
 
 # Copula density at the joint median
 r.copula_density_at("2008-Q3", 0.5, 0.5, 0.5)

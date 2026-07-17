@@ -148,7 +148,7 @@ All data used in this paper are publicly available. Some datasets require free r
 
 **Forbes 400 details:** The SCF+ is augmented with the Forbes 400. For the years 2021 to 2024, we use data directly from Forbes. For the years 1985 to 2020, we use the per capita dataset of Fernholz and Haslberger (2023), whose observations originate from families of the Forbes 400. This provides more complete coverage (nearly all 400 observations each year) than the Forbes website alone, which has incomplete records from the 1990s through the late 2000s.
 
-**Included in this package:** Synthetic (model-generated) microdata are provided in `data/synthetic/`. Pre-computed posterior parameter vectors are provided in `output/estimates/`.
+**Included in this package:** Synthetic (model-generated) microdata are provided in `data/synthetic/PSID_synthetic_microdata.csv` (weighted quarterly cross-sections; regenerate or customize with `code/moments_from_coefficients/coefficients_to_micro_data.jl`), alongside the factor estimates, posterior draws, coefficient files, and per-household aggregate anchors in `data/synthetic/`.
 
 **Not included:** Raw survey microdata must be downloaded by the replicator from the sources above. See `data/raw/DOWNLOAD_INSTRUCTIONS.md` for detailed variable lists and extraction instructions.
 
@@ -273,9 +273,11 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── HermiteSeriesEstimator.R   Hermite series density estimation
 │   │   ├── NonParametricCopula.R      Non-parametric copula estimation
 │   │   └── X12_script.R              X-12 seasonal adjustment
-│   └── moments_from_coefficients/     ⭐ Self-contained: moments + posterior bands from coefficients
+│   └── moments_from_coefficients/     ⭐ Self-contained: factors → coefficients → moments / micro data
 │       ├── README.md
-│       ├── moments_demo.jl / .py      Point-estimate moments from a coefficients file
+│       ├── factors_to_coefficients.jl / .py    FactorMap bridge (+ counterfactual hook)
+│       ├── coefficients_to_moments.jl / .py    Decile cut points + copula density
+│       ├── coefficients_to_micro_data.jl / .py Weighted synthetic cross-sections
 │       ├── posterior_bands.jl / .py   Posterior bands on any moment (via FactorMap)
 │       └── plot_factor_bands.jl / .py Plot factors with posterior bands
 │

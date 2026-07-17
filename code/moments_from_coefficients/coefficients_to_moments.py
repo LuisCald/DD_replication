@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-moments_demo.py — turn the published coefficient files into economic moments.
+coefficients_to_moments.py — turn the published coefficient files into economic moments.
 
 Point estimate only (no posterior uncertainty). For posterior bands, see
 `posterior_bands.py` in this folder.
 
 Run from anywhere:
 
-    python moments_demo.py                      # uses PSID, date 2008-Q3
-    python moments_demo.py --dataset SCF --date 2020-Q3
+    python coefficients_to_moments.py                      # uses PSID, date 2008-Q3
+    python coefficients_to_moments.py --dataset SCF --date 2020-Q3
 
-Writes `moments_demo_output.csv` next to this script.
+Writes `coefficients_to_moments_output.csv` next to this script.
 
 Only dependencies: numpy, pandas (same as the core helper it wraps).
 """
@@ -68,7 +68,7 @@ def main() -> None:
         rows.append({"date": args.date, "measure": "copula_median",
                      "quantile": np.nan, "value": c_med})
 
-    out = os.path.join(HERE, "moments_demo_output.csv")
+    out = os.path.join(HERE, "coefficients_to_moments_output.csv")
     pd.DataFrame(rows).to_csv(out, index=False)
     print(f"\nWrote {out}")
 

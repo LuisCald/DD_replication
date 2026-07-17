@@ -47,7 +47,7 @@ For ready-to-run demos (point-estimate moments **and** posterior bands), see the
 from reconstruct import Reconstruction
 r = Reconstruction("data/synthetic/PSID_coefficients_normal.csv")
 r.quantile_at("2008-Q3", "consum", [0.1, 0.5, 0.9])
-# → array([0.320, 0.734, 1.386])    (relative to per-HH mean)
+# → array([0.325, 0.802, 1.874])    (relative to per-HH mean)
 ```
 
 ```julia

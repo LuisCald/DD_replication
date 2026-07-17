@@ -1,12 +1,12 @@
 # ─────────────────────────────────────────────────────────────
-# moments_demo.jl — turn the published coefficient files into moments.
+# coefficients_to_moments.jl — turn the published coefficient files into moments.
 #
 # Point estimate only (no posterior uncertainty). For posterior bands see
 # `posterior_bands.jl` in this folder.
 #
 # Usage:
-#   julia --project=code/julia/env code/moments_from_coefficients/moments_demo.jl
-#   # optional: DATASET=SCF DATE=2020-Q3 TREND=normal julia ... moments_demo.jl
+#   julia --project=code/julia/env code/moments_from_coefficients/coefficients_to_moments.jl
+#   # optional: DATASET=SCF DATE=2020-Q3 TREND=normal julia ... coefficients_to_moments.jl
 #
 # Wraps the canonical helper code/julia/reconstruct.jl (single source of truth).
 # Only deps: CSV, DataFrames (same as the helper).
@@ -57,7 +57,7 @@ function main()
         push!(rows, (date, "copula_median", NaN, cmed))
     end
 
-    out = joinpath(HERE, "moments_demo_output.csv")
+    out = joinpath(HERE, "coefficients_to_moments_output.csv")
     CSV.write(out, rows)
     println("\nWrote $out")
 end
