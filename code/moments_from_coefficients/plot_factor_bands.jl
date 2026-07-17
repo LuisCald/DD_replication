@@ -51,26 +51,26 @@ function plot_factor_bands(;
 
     px = point === nothing ? nothing : quarter_to_num.(String.(point.time))
 
-    plt = plot(layout = (cld(n_factors, 2), 2), size = (1000, 210 * cld(n_factors, 2)),
+    plt = Plots.plot(layout = (cld(n_factors, 2), 2), size = (1000, 210 * cld(n_factors, 2)),
                legend = false, grid = false)
     for (k, c) in enumerate(cols)
         lob, hib, mdb = summ[!, "$(c)_lo"], summ[!, "$(c)_hi"], summ[!, "$(c)_md"]
         # shaded band via ribbon around the median
-        plot!(plt, x, mdb; ribbon = (mdb .- lob, hib .- mdb), subplot = k,
+        Plots.plot!(plt, x, mdb; ribbon = (mdb .- lob, hib .- mdb), subplot = k,
               fillalpha = 0.25, color = :firebrick, lw = 1.0,
               title = "Factor $(k)", titlefontsize = 9)
         if point !== nothing && c in names(point)
-            plot!(plt, px, point[!, c]; subplot = k, color = :black, lw = 1.0)
+            Plots.plot!(plt, px, point[!, c]; subplot = k, color = :black, lw = 1.0)
         end
-        hline!(plt, [0.0]; subplot = k, color = :gray, lw = 0.4, alpha = 0.6)
+        Plots.hline!(plt, [0.0]; subplot = k, color = :gray, lw = 0.4, alpha = 0.6)
     end
-    plot!(plt, plot_title = "Smoothed distributional factors — posterior " *
+    Plots.plot!(plt, plot_title = "Smoothed distributional factors — posterior " *
           "$(round(Int,100lo))–$(round(Int,100hi))% bands ($ndraws draws)",
           plot_titlefontsize = 11)
 
-    savefig(plt, out)
+    Plots.savefig(plt, out)
     png = replace(out, r"\.pdf$" => ".png")
-    savefig(plt, png)
+    Plots.savefig(plt, png)
     @info "Wrote $out and $png"
     return out
 end
