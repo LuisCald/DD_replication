@@ -81,6 +81,17 @@ def Q(m: int, u: np.ndarray) -> np.ndarray:
     return np.sqrt(2 * m + 1) * legendre(m, 2 * u - 1)
 
 
+def I(m: int, u: np.ndarray) -> np.ndarray:
+    """Integral of Q_m on [0, u]. Closed form from Bonnet's recursion:
+    I_0(u) = u;  I_m(u) = (P_{m+1}(2u-1) - P_{m-1}(2u-1)) / (2 sqrt(2m+1)), m >= 1.
+    """
+    u = np.asarray(u, dtype=float)
+    if m == 0:
+        return u.copy()
+    x = 2 * u - 1
+    return (legendre(m + 1, x) - legendre(m - 1, x)) / (2 * np.sqrt(2 * m + 1))
+
+
 # -----------------------------------------------------------------------------
 # Index mapping: (x1..x1694) -> mutable CartesianIndex in the 12^3 copula tensor
 # -----------------------------------------------------------------------------
@@ -186,7 +197,10 @@ class Reconstruction:
         u = np.atleast_1d(np.asarray(u, dtype=float))
         # Build basis matrix [n_u, n_orders]
         basis = np.stack([Q(o, u) for o in range(GRID_PCF)], axis=-1)
-        out = basis @ xi
+        # The stored xi are coefficients of asinh(q / per-HH mean) — see
+        # DataConstructor.jl (inverse_hyperbolic_sine at fitting) and
+        # CreateTimeSeries.jl (reverse_inverse_hyperbolic_sine at evaluation).
+        out = np.sinh(basis @ xi)
         return out if out.ndim > 0 else float(out)
 
     def copula_density_at(self, date: str, u_c, u_y, u_w) -> float | np.ndarray:
@@ -219,6 +233,31 @@ class Reconstruction:
         # kappa[a,b,c] * B[a,i] * B[b,j] * B[c,k] -> grid[i, j, k]
         return np.einsum("abc,ai,bj,ck->ijk", kappa, B, B, B)
 
+    def copula_pmf_grid(self, date: str, grid: np.ndarray | None = None) -> np.ndarray:
+        """
+        Probability masses of the copula on the cells defined by `grid` (default
+        deciles, 0.1 … 1.0) — a 10x10x10 array summing to 1 that matches the
+        published `ciw_*` columns. Mirrors `copula_pmf_grid` in
+        code/julia/reconstruct.jl: evaluate the copula CDF via the integrated
+        basis I, difference into cell masses, clip small negatives, renormalize.
+        """
+        if grid is None:
+            grid = np.arange(0.1, 1.0 + 1e-9, 0.1)
+        kappa = self._kappa(date)
+        Imat = np.stack([I(o, grid) for o in range(GRID_COP)], axis=0)  # (12, n)
+        # CDF(u_i, u_j, u_k) = sum_abc kappa[a,b,c] I_a(u_i) I_b(u_j) I_c(u_k)
+        cdf = np.einsum("abc,ai,bj,ck->ijk", kappa, Imat, Imat, Imat)
+        pad = np.zeros(tuple(s + 1 for s in cdf.shape))
+        pad[1:, 1:, 1:] = cdf
+        pmf = (pad[1:, 1:, 1:] - pad[:-1, 1:, 1:] - pad[1:, :-1, 1:] - pad[1:, 1:, :-1]
+               + pad[:-1, :-1, 1:] + pad[:-1, 1:, :-1] + pad[1:, :-1, :-1]
+               - pad[:-1, :-1, :-1])
+        pmf[pmf < 0] = 0.0
+        s = pmf.sum()
+        if s > 0:
+            pmf /= s
+        return pmf
+
     def marginal_grid(self, date: str, measure: str, n: int = 200) -> tuple[np.ndarray, np.ndarray]:
         """
         Evaluate the marginal quantile function on a regular grid u in (0, 1).
@@ -238,7 +277,7 @@ def quantile_from_row(row: np.ndarray, measure: str, u) -> np.ndarray:
     xi = _extract_xi(np.asarray(row, dtype=float), measure)
     u = np.atleast_1d(np.asarray(u, dtype=float))
     basis = np.stack([Q(o, u) for o in range(GRID_PCF)], axis=-1)
-    out = basis @ xi
+    out = np.sinh(basis @ xi)   # stored xi are asinh-scale; see Reconstruction.quantile_at
     return out if out.ndim > 0 else float(out)
 
 

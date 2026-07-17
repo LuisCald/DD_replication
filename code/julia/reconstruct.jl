@@ -31,6 +31,7 @@ using Statistics
 export Reconstruction,
     FactorMap,
     factors_at,
+    predict,
     quantile_at,
     copula_density_at,
     copula_density_grid,
@@ -206,7 +207,10 @@ function quantile_at(r::Reconstruction, date::AbstractString, measure::Symbol, u
     ξ = _xi(r, date, measure)
     u_vec = u isa Real ? [Float64(u)] : Vector{Float64}(u)
     basis = hcat([Q_m(o, u_vec) for o in 0:GRID_PCF-1]...)   # (n_u, GRID_PCF)
-    out = basis * ξ
+    # The stored ξ are coefficients of asinh(q / per-HH mean) — see
+    # DataConstructor.jl (`inverse_hyperbolic_sine` at fitting) and
+    # CreateTimeSeries.jl (`reverse_inverse_hyperbolic_sine` at evaluation).
+    out = sinh.(basis * ξ)
     return u isa Real ? out[1] : out
 end
 
@@ -327,7 +331,7 @@ function quantile_from_row(row::AbstractVector{<:Real}, measure::Symbol, u)
     ξ = _extract_xi(row, measure)
     u_vec = u isa Real ? [Float64(u)] : Vector{Float64}(u)
     basis = hcat([Q_m(o, u_vec) for o in 0:GRID_PCF-1]...)
-    out = basis * ξ
+    out = sinh.(basis * ξ)   # stored ξ are asinh-scale; see quantile_at
     return u isa Real ? out[1] : out
 end
 
