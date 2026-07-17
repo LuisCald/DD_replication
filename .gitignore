@@ -73,6 +73,9 @@ tmp/
 # Keep the published synthetic data files (intentionally tracked)
 !data/synthetic/*.csv
 
+# Keep pre-computed parameter vectors (intentionally tracked)
+!output/estimates/*.csv
+
 # Archives often used to store raw data
 *.zip
 *.7z
