@@ -93,6 +93,20 @@ for (c, k) in enumerate(keys(dv))
 end
 @info "Time series export and validation complete."
 
+# ── Step 4b: Export posterior draws of the factors (optional) ─
+# Reconstructs the smoothed factors at a sample of posterior θ-draws and
+# writes data/synthetic/smoothed_factor_draws.csv (+ a percentile-band file).
+# Heavy: runs the Kalman smoother once per draw. Set DD_EXPORT_DRAWS=0 to skip,
+# or DD_N_DRAWS to change the number of draws (default 200).
+if get(ENV, "DD_EXPORT_DRAWS", "1") != "0"
+    @info "Exporting posterior factor draws..."
+    n_draws = parse(Int, get(ENV, "DD_N_DRAWS", "200"))
+    export_factor_draws(param_sizes, hyperpriors, Σ_ids, model_elements,
+                        model_options, time_params; n_draws=n_draws)
+    summarize_factor_draws()
+    @info "Posterior factor draws exported."
+end
+
 # ── Step 5: Correlation tables ────────────────────────────────
 @info "Generating correlation tables..."
 type = "from_mcmc"

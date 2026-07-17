@@ -22,7 +22,9 @@
 
 See [`data/synthetic/README.md`](data/synthetic/README.md) for column naming, file formats, and a quick-start snippet.
 
-**Want to compute custom moments?** [`code/python/reconstruct.py`](code/python/reconstruct.py) is a standalone Python helper (numpy + pandas) that turns the `*_coefficients_*.csv` files into marginal quantile functions $\Xi^{-1}_{m,t}(u)$ and the trivariate copula density $dC_t(u_c, u_y, u_w)$ at arbitrary points. A Julia port lives at [`code/julia/reconstruct.jl`](code/julia/reconstruct.jl). Both also ship a `FactorMap` helper for factors → coefficients counterfactuals.
+**Want to compute custom moments?** [`code/moments_from_coefficients/`](code/moments_from_coefficients/) is a small, self-contained folder with runnable demos (Julia-first, Python twin) that turn the `*_coefficients_*.csv` files into marginal quantile functions $\Xi^{-1}_{m,t}(u)$ and the trivariate copula density $dC_t(u_c, u_y, u_w)$ at arbitrary points. They wrap the canonical helpers [`code/julia/reconstruct.jl`](code/julia/reconstruct.jl) / [`code/python/reconstruct.py`](code/python/reconstruct.py), which also ship a `FactorMap` helper for factors → coefficients counterfactuals.
+
+**Want posterior uncertainty, not just the point estimate?** [`data/synthetic/smoothed_factor_draws.csv`](data/synthetic/smoothed_factor_draws.csv) stacks the smoothed factors over posterior draws of the model parameters. Push each draw through `FactorMap` to get a posterior band on *any* moment — [`code/moments_from_coefficients/posterior_bands.jl`](code/moments_from_coefficients/posterior_bands.jl) and [`plot_factor_bands.jl`](code/moments_from_coefficients/plot_factor_bands.jl) do this out of the box. Generate the draws with [`code/julia/export_draws.jl`](code/julia/export_draws.jl) (the raw parameter draws are large and not shipped in git).
 
 **Want to run the model with your own settings?** See [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for a walkthrough of `ModelOptions` and the output folder layout, and the docstring on [`ModelOptions`](code/julia/Structures.jl) itself.
 
@@ -106,6 +108,27 @@ reconstruction mixture — is still in progress; the data layer above is complet
 - `code/stata/import_aggregates.do`, `other_results.do` — per-HH component anchors; canonical-writer fix
 - `code/R/X12_averages.R` — de-season the new component series into `averages_deseasoned.csv`
 - `doc/stocks_atom_design.md` — design note
+
+## Anatomy of the synthetic data (information & interpolation shares)
+
+The paper's "anatomy" figures ask *whose data* the estimate leans on and *where
+the panel is data-rich vs. model-driven*. They come from an exact,
+source-additive decomposition of the smoothed states (Koopman & Harvey, 2003):
+
+- [`code/julia/ObservationWeights.jl`](code/julia/ObservationWeights.jl) —
+  `observation_weight_decomposition` (per-source contribution to each smoothed
+  factor) and `information_shares` (absolute-weight shares $s^b_{k,t}$).
+- [`code/julia/ObservationWeightsPlots.jl`](code/julia/ObservationWeightsPlots.jl) —
+  the **information-share** figure (stacked $s^b_{k,t}$ by source) and the
+  **interpolation-share** figure ($\iota_{k,t}=\sigma^2_{k,t\mid T}/P^\infty_{kk}$,
+  data-pinned vs. model-driven).
+- [`code/julia/count_observations.jl`](code/julia/count_observations.jl) +
+  [`code/julia/data_timeline.jl`](code/julia/data_timeline.jl) — the appendix
+  data-timeline figure (micro sample sizes and coverage by source over time).
+
+The `ObservationWeights*` functions load with the model
+(`DistributionalDynamics.jl`); the two `*timeline*` scripts are standalone
+(they activate `code/julia/env` themselves) and run on the estimation machine.
 
 ## Data Availability Statement
 
@@ -197,9 +220,15 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── RobustProjection.jl        Robust factor projection
 │   │   ├── HyperparameterOptimization.jl  Hyperparameter tuning
 │   │   ├── Reconstruction.jl          Synthetic distribution reconstruction
+│   │   ├── PosteriorDraws.jl          Export posterior draws of the smoothed factors
+│   │   ├── export_draws.jl            Server-runnable driver for PosteriorDraws.jl
 │   │   ├── CreateTimeSeries.jl        Time series export (quantiles, shares, levels)
 │   │   ├── IntervalEstimation.jl      Confidence interval estimation
 │   │   ├── ForecastSSM.jl             Out-of-sample forecasting
+│   │   ├── ObservationWeights.jl      Anatomy: Koopman–Harvey source decomposition of the smoothed states
+│   │   ├── ObservationWeightsPlots.jl  Anatomy figures: information shares + interpolation shares
+│   │   ├── count_observations.jl      Micro-obs counts per (dataset, year, quarter) — data timeline
+│   │   ├── data_timeline.jl           Appendix data-timeline figure
 │   │   ├── Validation.jl              External validation (DFA, WID, SCF, CPS, ACS)
 │   │   ├── Correlations.jl            Correlation analysis
 │   │   ├── CorrelationTables.jl       Correlation table export
@@ -240,10 +269,15 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── clean_brake_data.py        Geographic data cleaning
 │   │   ├── MEILC_MEGC.py             Multivariate Gini coefficient
 │   │   └── multidim_inequality.py     Multidimensional inequality measures
-│   └── R/
-│       ├── HermiteSeriesEstimator.R   Hermite series density estimation
-│       ├── NonParametricCopula.R      Non-parametric copula estimation
-│       └── X12_script.R              X-12 seasonal adjustment
+│   ├── R/
+│   │   ├── HermiteSeriesEstimator.R   Hermite series density estimation
+│   │   ├── NonParametricCopula.R      Non-parametric copula estimation
+│   │   └── X12_script.R              X-12 seasonal adjustment
+│   └── moments_from_coefficients/     ⭐ Self-contained: moments + posterior bands from coefficients
+│       ├── README.md
+│       ├── moments_demo.jl / .py      Point-estimate moments from a coefficients file
+│       ├── posterior_bands.jl / .py   Posterior bands on any moment (via FactorMap)
+│       └── plot_factor_bands.jl / .py Plot factors with posterior bands
 │
 ├── data/
 │   ├── raw/                           Raw survey data (user-provided)
