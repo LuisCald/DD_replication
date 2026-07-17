@@ -56,6 +56,9 @@ Keyword arguments
   one draw) would need a joint simulation smoother (Durbin–Koopman) instead.
 - `filename = "smoothed_factor_draws.csv"`: output file name (handy for
   writing a comparison file without overwriting the default).
+- `digits = 6`: decimal rounding of the written values — keeps the CSV
+  GitHub-friendly (full 17-digit floats double the file size for noise far
+  below posterior uncertainty). `nothing` disables rounding.
 - `out_dir = nothing`: output directory (defaults to `<BASE_PATH>/data/synthetic`).
 - `draws_file = nothing`: override the input JLD2 path.
 
@@ -65,7 +68,7 @@ function export_factor_draws(
     param_sizes, hyperpriors, Σ_ids, model_elements, model_options, time_params;
     n_draws::Int = 200, seed::Int = 12345, iteration::Symbol = :last,
     state_uncertainty::Bool = true, filename::String = "smoothed_factor_draws.csv",
-    out_dir = nothing, draws_file = nothing,
+    digits::Union{Int,Nothing} = 6, out_dir = nothing, draws_file = nothing,
 )
     @unpack measures, tag = model_options
     m_label   = measures_folder(measures)
@@ -111,6 +114,7 @@ function export_factor_draws(
             end
         end
         R = size(X, 1)
+        digits === nothing || (X = round.(X; digits = digits))
         df = DataFrame(Matrix(X'), ["x$i" for i in 1:R])
         df[!, "time"] = collect(dts)
         df[!, "draw"] .= s
