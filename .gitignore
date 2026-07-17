@@ -25,6 +25,11 @@ Icon
 *.ji
 .julia/
 
+# X-13ARIMA-SEATS scratch output (dropped into cwd by seasonal adjustment)
+Rout.*
+Rout_*.html
+gra_Rout/
+
 # Python artifacts
 __pycache__/
 *.pyc
