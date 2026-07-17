@@ -39,6 +39,8 @@ The published coefficient files store Legendre polynomial weights. To turn them 
 
 Both implement the same orthonormal Legendre basis $Q_o(u) = \sqrt{2o+1}\,P_o(2u-1)$ and agree to machine precision.
 
+For ready-to-run demos (point-estimate moments **and** posterior bands), see the self-contained folder [`code/moments_from_coefficients/`](../code/moments_from_coefficients/) — Julia-first, with a Python twin.
+
 ### Marginal quantile function
 
 ```python
@@ -115,6 +117,31 @@ F[1] += 1.0
 quantile_at(fm, F, :consum, [0.1, 0.5, 0.9])
 copula_density_at(fm, F, 0.5, 0.5, 0.5)
 ```
+
+### Posterior bands on a moment
+
+`smoothed_factors.csv` is the posterior mode. `smoothed_factor_draws.csv`
+stacks the smoothed factors over posterior draws of the model parameters, so
+pushing each draw through `FactorMap` turns any moment into a posterior
+distribution. The drop-in scripts do this for you:
+
+```bash
+# posterior band on a marginal (default: wealth deciles, 2008-Q3)
+julia --project=code/julia/env code/moments_from_coefficients/posterior_bands.jl
+
+# plot the factors themselves with their bands
+julia --project=code/julia/env code/moments_from_coefficients/plot_factor_bands.jl
+```
+
+Don't have `smoothed_factor_draws.csv` yet? Generate it from the Stage-2 DIME
+output (on the estimation machine):
+
+```bash
+julia --project=code/julia/env code/julia/export_draws.jl   # DD_N_DRAWS controls the count
+```
+
+The raw parameter draws (`posterior_draws/*.jld2`) are hundreds of MB and not
+shipped; the compact factor draws carry the same uncertainty downstream.
 
 ---
 

@@ -31,7 +31,7 @@ const (param_vector, param_sizes, priors, meas_ind, Σ_ids) = set_params(model_e
 
 # ── Step 3: Run DIME sampler (black-box opt + MCMC) ───────────
 niter = 400
-bbo_opttime = length(param_vector) * 12 # seconds for black-box optimization
+bbo_opttime = length(param_vector) * 3 # seconds for black-box optimization
 @info "Starting DIME sampler with $niter iterations..."
 par_final = run_DIME_sampler(model_elements, niter, param_vector, param_sizes, priors, meas_ind, Σ_ids, model_options; bbo_opttime=bbo_opttime)
 @info "Estimation complete."
@@ -86,7 +86,7 @@ for (c, k) in enumerate(keys(dv))
     end
 
     within_stat_dict[k] = Dict()
-    for ty in ["normal"]
+    for ty in ["normal", "average"]
         within_stat_dict[k][ty], dv[k][ty] = export_functional_data(
             dv[k][ty], ty, k, kind_of_plots, obs_data, func_data,
             time_params, user_t, model_options, false, true;
