@@ -2,29 +2,20 @@
 
 > Christian Bayer, Luis Calderon, Moritz Kuhn
 
-## 📥 Synthetic data downloads
+## 📥 Looking for the data?
 
-**If you just want the ready-to-use, high-frequency distributional series — start here.** All files are quarterly from **1962-Q3 to 2024-Q1**, joint over consumption, income, and wealth.
+**The data product lives in its own repository: [github.com/LuisCald/DD_data](https://github.com/LuisCald/DD_data).**
+It ships the quarterly distributional series (1962-Q3 to 2024-Q1, joint over
+consumption, income, and wealth): the latent factors with 400 posterior draws,
+the reconstructed Legendre coefficient files, synthetic microdata, per-household
+aggregate anchors — plus small Julia/Python scripts for
+factors → coefficients → moments / micro data, including posterior bands on any
+moment.
 
-| Want | File | Size |
-|------|------|------|
-| The 43 latent factors $\hat F_t$ that summarize all dynamics | [`data/synthetic/smoothed_factors.csv`](data/synthetic/smoothed_factors.csv) | 209 KB |
-| Raw $\hat\phi^j_t$ inputs (PSID, with trend / cyclical) | [`PSID_functional_data.csv`](data/synthetic/PSID_functional_data.csv) · [`_detrended`](data/synthetic/PSID_functional_data_detrended.csv) | 2.9 MB · 5.5 MB |
-| Raw $\hat\phi^j_t$ inputs (SCF, with trend / cyclical) | [`SCF_functional_data.csv`](data/synthetic/SCF_functional_data.csv) · [`_detrended`](data/synthetic/SCF_functional_data_detrended.csv) | 1.7 MB · 1.7 MB |
-| **Reconstructed PSID coefficients** (in-sample, HP trend) | [`PSID_coefficients_normal.csv`](data/synthetic/PSID_coefficients_normal.csv) | 4.5 MB |
-| **Reconstructed PSID coefficients** (extrapolation, averaged trend) | [`PSID_coefficients_average.csv`](data/synthetic/PSID_coefficients_average.csv) | 8.3 MB |
-| Reconstructed SCF coefficients (HP / averaged trend) | [`_normal`](data/synthetic/SCF_coefficients_normal.csv) · [`_average`](data/synthetic/SCF_coefficients_average.csv) | 2.2 MB each |
-| Reconstructed CEX coefficients (HP / averaged trend) | [`_normal`](data/synthetic/CEX_coefficients_normal.csv) · [`_average`](data/synthetic/CEX_coefficients_average.csv) | 2.0 MB · 2.2 MB |
-
-**Trend convention:** `_normal` files add back the **HP-filter trend** (date-anchored — use inside 1962–2024). `_average` files add back the **time-average** of the HP trend (use for extrapolation / dates outside the sample).
-
-**Functional data vs coefficients:** `*_functional_data*.csv` are the *inputs* to the state-space model (per-dataset estimates with NaN where the survey wasn't run). `*_coefficients_*.csv` are the *outputs* of the Kalman smoother — dense across all 248 quarters.
-
-See [`data/synthetic/README.md`](data/synthetic/README.md) for column naming, file formats, and a quick-start snippet.
-
-**Want to compute custom moments?** [`code/moments_from_coefficients/`](code/moments_from_coefficients/) is a small, self-contained folder with runnable demos (Julia-first, Python twin) that turn the `*_coefficients_*.csv` files into marginal quantile functions $\Xi^{-1}_{m,t}(u)$ and the trivariate copula density $dC_t(u_c, u_y, u_w)$ at arbitrary points. They wrap the canonical helpers [`code/julia/reconstruct.jl`](code/julia/reconstruct.jl) / [`code/python/reconstruct.py`](code/python/reconstruct.py), which also ship a `FactorMap` helper for factors → coefficients counterfactuals.
-
-**Want posterior uncertainty, not just the point estimate?** [`data/synthetic/smoothed_factor_draws.csv`](data/synthetic/smoothed_factor_draws.csv) stacks the smoothed factors over posterior draws of the model parameters. Push each draw through `FactorMap` to get a posterior band on *any* moment — [`code/moments_from_coefficients/posterior_bands.jl`](code/moments_from_coefficients/posterior_bands.jl) and [`plot_factor_bands.jl`](code/moments_from_coefficients/plot_factor_bands.jl) do this out of the box. Generate the draws with [`code/julia/export_draws.jl`](code/julia/export_draws.jl) (the raw parameter draws are large and not shipped in git).
+This repository is the **replication package**: everything needed to reproduce
+the estimates (data cleaning, MCMC estimation, post-estimation results and
+figures). After a new estimation run, `bash publish_to_DD_data.sh` copies the
+regenerated outputs into a DD_data checkout for publishing.
 
 **Want to run the model with your own settings?** See [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for a walkthrough of `ModelOptions` and the output folder layout, and the docstring on [`ModelOptions`](code/julia/Structures.jl) itself.
 
@@ -148,7 +139,7 @@ All data used in this paper are publicly available. Some datasets require free r
 
 **Forbes 400 details:** The SCF+ is augmented with the Forbes 400. For the years 2021 to 2024, we use data directly from Forbes. For the years 1985 to 2020, we use the per capita dataset of Fernholz and Haslberger (2023), whose observations originate from families of the Forbes 400. This provides more complete coverage (nearly all 400 observations each year) than the Forbes website alone, which has incomplete records from the 1990s through the late 2000s.
 
-**Included in this package:** Synthetic (model-generated) microdata are provided in `data/synthetic/PSID_synthetic_microdata.csv` (weighted quarterly cross-sections; regenerate or customize with `code/moments_from_coefficients/coefficients_to_micro_data.jl`), alongside the factor estimates, posterior draws, coefficient files, and per-household aggregate anchors in `data/synthetic/`. The pre-computed posterior-mode parameter vector is provided in `output/estimates/` (loaded automatically by `run_postestimation.jl` when no estimation run is present).
+**Included in this package:** The pre-computed posterior-mode parameter vector is provided in `output/estimates/` (loaded automatically by `run_postestimation.jl` when no estimation run is present). The generated data product — factor estimates, posterior draws, coefficient files, synthetic microdata, aggregate anchors, and user-facing helper scripts — is published separately in [DD_data](https://github.com/LuisCald/DD_data).
 
 **Not included:** Raw survey microdata must be downloaded by the replicator from the sources above. See `data/raw/DOWNLOAD_INSTRUCTIONS.md` for detailed variable lists and extraction instructions.
 
@@ -269,27 +260,18 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── clean_brake_data.py        Geographic data cleaning
 │   │   ├── MEILC_MEGC.py             Multivariate Gini coefficient
 │   │   └── multidim_inequality.py     Multidimensional inequality measures
-│   ├── R/
-│   │   ├── HermiteSeriesEstimator.R   Hermite series density estimation
-│   │   ├── NonParametricCopula.R      Non-parametric copula estimation
-│   │   └── X12_script.R              X-12 seasonal adjustment
-│   └── moments_from_coefficients/     ⭐ Self-contained: factors → coefficients → moments / micro data
-│       ├── README.md
-│       ├── factors_to_coefficients.jl / .py    FactorMap bridge (+ counterfactual hook)
-│       ├── coefficients_to_moments.jl / .py    Decile cut points + copula density
-│       ├── coefficients_to_micro_data.jl / .py Weighted synthetic cross-sections
-│       ├── posterior_bands.jl / .py   Posterior bands on any moment (via FactorMap)
-│       └── plot_factor_bands.jl / .py Plot factors with posterior bands
+│   └── R/
+│       ├── HermiteSeriesEstimator.R   Hermite series density estimation
+│       ├── NonParametricCopula.R      Non-parametric copula estimation
+│       └── X12_script.R              X-12 seasonal adjustment
+│
+├── publish_to_DD_data.sh              Copy regenerated outputs to a DD_data checkout
 │
 ├── data/
 │   ├── raw/                           Raw survey data (user-provided)
 │   │   └── DOWNLOAD_INSTRUCTIONS.md
 │   ├── processed/                     Cleaned data (generated by Stage 1)
-│   ├── synthetic/                     ⭐ READY-TO-USE quarterly distributional series
-│   │   ├── README.md                  File-by-file documentation
-│   │   ├── smoothed_factors.csv       Latent factors F_t
-│   │   ├── *_functional_data*.csv     Inputs: raw phi-hat per dataset
-│   │   └── *_coefficients_*.csv       Outputs: Kalman-smoother reconstructions
+│   ├── synthetic/                     Pipeline output dir (published data lives in DD_data)
 │   └── aggregates/                    Public macro data
 │
 ├── output/
