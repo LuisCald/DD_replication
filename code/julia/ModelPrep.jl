@@ -1943,15 +1943,25 @@ function get_param_vector(measures, kind_of_plots, label, data_cutoffs, tag)
     m_label = measures_folder(measures)
     end_year = data_cutoffs["end"] != "" ? data_cutoffs["end"][1:4] : "all"
 
-    local θ_cop
-    if kind_of_plots == :mcmc
-        cop_nd_sol_path = init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/parameter_vectors/solution$label" * "_$end_year" * ".csv"
-        θ_cop = vec(Matrix(CSV.read(cop_nd_sol_path, DataFrame, header=0)))
-    else
-        cop_nd_sol_path = init_path * "/7_Results/$m_label" * "$tag" * "/from_optimization/parameter_vectors/solution$label" * "_$end_year" * ".csv"
-        θ_cop = vec(Matrix(CSV.read(cop_nd_sol_path, DataFrame, header=0)))
+    folder = kind_of_plots == :mcmc ? "from_mcmc" : "from_optimization"
+    fname = "solution$label" * "_$end_year" * ".csv"
+    cop_nd_sol_path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/parameter_vectors/" * fname
+
+    # Fallback: the pre-computed vector shipped with the replication package
+    # (output/estimates/, anchored to the repo so it works for any BASE_PATH).
+    # Tries the tag-specific name first, then the bare solution file.
+    if !isfile(cop_nd_sol_path)
+        est_dir = joinpath(dirname(dirname(@__DIR__)), "output", "estimates")
+        for candidate in (joinpath(est_dir, "$m_label$tag" * "_" * fname),
+                          joinpath(est_dir, fname))
+            if isfile(candidate)
+                cop_nd_sol_path = candidate
+                break
+            end
+        end
     end
-    return θ_cop
+
+    return vec(Matrix(CSV.read(cop_nd_sol_path, DataFrame, header=0)))
 end
 
 
