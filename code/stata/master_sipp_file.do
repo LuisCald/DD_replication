@@ -276,7 +276,11 @@ rename h_wgt weight
 rename h_totinc income
 
 * ── PREP (verify, then activate the fix below): era-1/2 net-worth check ──────
-* Census convention (see clean_SIPP_panels.do notes): hhtnw = hhtwlth - unsecured,
+* SIPP variable definitions (ported from the deleted clean_SIPP_panels.do):
+*   hhtwlth: total wealth of the household    hhdebt:  unsecured + secured debt
+*   hhtnw:   hhtwlth - unsecured              hhscdbt: secured debt
+*   hhusdbt: unsecured debt
+* Census convention: hhtnw = hhtwlth - unsecured,
 * i.e. "total wealth" already measures home/vehicle/business as EQUITY (net of
 * secured debt). If the diagnostic prints ~0, the active formula below
 * double-subtracts secured debt; switch to the commented line, which equals
