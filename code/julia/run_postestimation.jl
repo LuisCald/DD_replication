@@ -124,13 +124,13 @@ if occursin("HANK", tag)
     economy_number = parse(Int, split(strip(tag), " ")[end])
     # Generate the averaged table only on the last economy run
     # if economy_number == 10
- generate_averaged_hank_avg_corr_table(
-      11:11,
-      ["consum", "income", "wealth"],
-      "from_mcmc";
-      data_sources = ["c", "a", "d"]
-  )
-    end
+    generate_averaged_hank_avg_corr_table(
+        11:11,
+        ["consum", "income", "wealth"],
+        "from_mcmc";
+        data_sources = ["c", "a", "d"],
+    )
+    # end   # (matches the commented-out `if` above; a live `end` here broke parsing)
 end
 @info "Correlation tables complete."
 
