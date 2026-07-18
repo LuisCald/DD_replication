@@ -322,7 +322,7 @@ save "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SIPP/made_panels/sipp_198
 // 	rename monthcode month 		// no missings
 
 	
-foreach x in 2014 2018 2019 2020 2021 2022 2023 { 	// 
+foreach x in 2014 { // 2018 2019 2020 2021 2022 2023 { 	// 
 	cd /Users/lc/Dropbox/Distributional_Dynamics/1_Data/SIPP/raw_materials/`x'
 	
 	if `x' == 2014 {
@@ -445,7 +445,19 @@ foreach x in 2014 2018 2019 2020 2021 2022 2023 { 	//
 	
 // 	replace income = . if income == 0 // mostly, if not all observations where an ID is not observed for 4 quarters
 
-// 	gen wealth = assets - undebt - scdebt // net worth is computed weirdly by the SIPP at times 
+// 	gen wealth = assets - undebt - scdebt // net worth is computed weirdly by the SIPP at times
+
+	* Wealth-side variables are measured ONCE per reference year (as of ~Dec 31)
+	* and replicated by the Census across all monthly records — keeping them in
+	* all four quarters would feed the smoother the same number four times
+	* (asserting within-year constancy and overstating precision ~4x). Keep the
+	* stock variables only in Q4, the quarter the measurement refers to; Q1-Q3
+	* become missing and the smoother interpolates. Income is genuinely monthly
+	* and stays quarterly. (Old panels: topical-module wealth is already dated
+	* to interview waves — unchanged.)
+	foreach v in assets undebt scdebt tdebt mgdebt wealth {
+		replace `v' = . if quarter != 4
+	}
 
 	* Net worth in the SIPP is defined in a weird way
 	save "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SIPP/made_panels/sipp`x'_final.dta", replace
@@ -548,6 +560,11 @@ format qdate %tq
 * Keep if qdate >= (1996, 1)
 drop if qdate <= yq(1995, 4)
 
+* Drop panel-seam quarters (end-of-panel composition artifacts: mean income dips
+* 7-11% with the sample collapsing to ~1/3 — 1999Q4: n 6.5k vs 19.6k in 1999Q1;
+* 2003Q4: 6.0k vs 25.9k in 2004Q4. No macro counterpart at either date.)
+drop if qdate == yq(2003, 4)
+drop if qdate == yq(1999, 4)
 
 export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP2.csv", replace
 
@@ -563,9 +580,11 @@ format qdate %tq
 * Drop if qdate > (1996, 1)
 drop if qdate > yq(1995, 4)
 
-// * Drop 1988Q1 (Seam)
-// drop if qdate == yq(1988,1)
-// drop if qdate == yq(1985, 4)
+* Drop panel-seam quarters (the two lowest income quarters of the entire SIPP1
+* series: 1985Q4 and 1988Q1 dip 15-20% below neighbors with no macro counterpart
+* — both are panel-boundary quarters; see the audit note in SIPP2 slicing above.)
+drop if qdate == yq(1988, 1)
+drop if qdate == yq(1985, 4)
 
 export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP1.csv", replace
 
