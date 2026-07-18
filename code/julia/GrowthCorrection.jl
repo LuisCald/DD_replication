@@ -8,7 +8,7 @@
 #
 # Pipeline position (SCF):
 #   data_cleaning.do -> SCF_noForbes_nogrowth.xlsx
-#     -> [this file] -> SCF_noForbes.csv
+#     -> [this file] -> SCF_noForbes_new.csv   (originals PSID.csv/SCF.csv preserved)
 #       -> generateForbes400.py -> SCF.csv  (read by Julia model)
 #
 # PROVENANCE: recovered from git (_archive/GrowthCorrection.jl, parent of commit
@@ -157,7 +157,8 @@ filter!(row -> row.count >= 1000, PSID)
 
 # Save file to XLSX 
 select!(PSID, Not([:count, :year_quarter, :income_quarter]))
-CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID.csv", PSID)
+# CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID.csv", PSID)
+CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID_new.csv", PSID)
 
 
 
@@ -327,10 +328,12 @@ for c in [:income, :wealth, :assets, :finast, :illiqd, :liquid, :tdebt, :pdebt, 
 end
 
 # Save (no-Forbes, growth-applied). Forbes augmentation -> SCF.csv happens in generateForbes400.py.
-CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes.csv", final_df)
+# CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes.csv", final_df)
+CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes_new.csv", final_df)
 
 # Read in the same file using CSV
-b = CSV.read(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes.csv", DataFrame)
+# b = CSV.read(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes.csv", DataFrame)
+b = CSV.read(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes_new.csv", DataFrame)
 a = filter(row -> row.year == 2022, b)
 sort!(a, [:id, :year, :quarter])
 
@@ -343,7 +346,8 @@ filter!(row -> row.year != 2022, b)
 append!(b, a)
 
 # Save file to csv (impnum fixed for 2022 before Forbes augmentation reads it)
-CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes.csv", b)
+# CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes.csv", b)
+CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes_new.csv", b)
 
 
 # CEX =  DataFrame(XLSX.readtable(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/CEX.xlsx", "data", header=true,))
