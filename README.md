@@ -30,7 +30,7 @@ The replication package is organized into three stages:
 | Stage | Command | Description | Approx. Runtime |
 |-------|---------|-------------|-----------------|
 | 1: Data | `bash master.sh data` | Clean raw survey data | ~1 hour |
-| 2: Estimation | `bash master.sh estimate` | MCMC estimation (4 chains) | ~48-72 hours |
+| 2: Estimation | `bash master.sh estimate` | MCMC estimation (DIME ensemble sampler) | ~48-72 hours |
 | 3: Results | `bash master.sh results` | Post-estimation analysis, figures, tables | ~3 hours |
 
 Pre-computed posterior estimates are provided in `output/estimates/`, allowing replicators to skip Stage 2 and go directly from Stage 1 to Stage 3.
