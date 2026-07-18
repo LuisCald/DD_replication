@@ -256,20 +256,18 @@ prior model variants.
 end
 
 
-# ─── Tag / `data_to_mute` recipes used in past runs ──────────────────────────
-# Useful when reproducing a specific experiment:
-#   tag = " additional factors"
-#       baseline (8 distributional factors); default in this file
-#   tag = " 6 factors" / " 7 factors"
-#       fewer distributional factors retained from PCA (`number_of_dfs = 6/7`)
-#   tag = " excluding housing cycle wealth"
-#       set `data_to_mute = Dict("SCF" => muted_quarters_between(
-#           QuarterlyDate(2004, 1), QuarterlyDate(2009, 4)))`
-#   tag = " excluding recent 20 quarters"
-#       data_to_mute spans QuarterlyDate(2020, 1) → QuarterlyDate(2024, 1)
-#   tag = " every 4 years"
-#       data_to_mute = Dict("CEX" => muted_quarters_between(
-#           QuarterlyDate(1984, 1), QuarterlyDate(2021, 4)))  with stride 4
+# ─── Robustness / experiment runs ────────────────────────────────────────────
+# Every past-run recipe is now an executable example — select with DD_EXAMPLE:
+#   DD_EXAMPLE=6_factors / 7_factors      fewer distributional factors (MDD table)
+#   DD_EXAMPLE=no_housing_wealth          mute wealth rows 2004Q1–2009Q4 (all surveys)
+#   DD_EXAMPLE=no_recent_20q              mute ALL microdata 2020Q1–2024Q1
+#   DD_EXAMPLE=cex_every_4_years          CEX enters only every 4th year
+#   DD_EXAMPLE=new_data                   baseline on regenerated PSID_new/SCF_new
+#   DD_EXAMPLE=stocks / real_estate / …   DFA balance-sheet components
+# See examples/Structures_<name>.jl for the exact configs (incl. how the tag's
+# last word selects the muted measure in ModelPrep.set_measurements — the old
+# comment here showing Dict("SCF" => …) for the housing run matched no code
+# branch and was wrong).
 #
 # When introducing a new tag, sanity-check `tag`, `data_to_mute`, and
 # `compare_to_other_est` together — they tend to be coupled.

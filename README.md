@@ -320,36 +320,49 @@ All paths are configured in `code/julia/config.jl`. The script auto-detects the 
 
 The MCMC sampler uses Julia's default random number generator. For exact replication of the estimation, set `Random.seed!(12345)` at the top of `run_estimation.jl`. Post-estimation results are deterministic given the parameter estimates.
 
-## List of Tables and Figures
+## Results map: which run generates which paper exhibit
 
-### Main Text
+Ground truth from the live `\includegraphics`/`\input` paths in `main_JPE.tex`
+and its included appendices (audited 2026-07).
 
-| Exhibit | Source Code |
-|---------|-------------|
-| Figure 1 | TikZ (in main.tex) |
-| Figure 2 | `SeriesEstimators.jl` |
-| Figure 3 | TikZ (in main.tex) |
-| Figure 4 | `AllPlots.jl`: `gen_proof_of_concept_*()` |
-| Figure 5 | `AllPlots.jl`: `gen_proof_of_concept_*()` |
-| Figure 6 | `ForecastSSM.jl` |
-| Figure 7 | `CreateTimeSeries.jl`: `generate_specific_plots()` |
-| Figure 8 | Separate HANK replication package (not included) |
-| Figure 9 | Stata (TBD) |
-| Figure 10 | `OrderAnalysis.jl` |
-| Figure 11 | `OrderAnalysis.jl` |
-| Figure 12 | `OrderAnalysis.jl` |
-| Figure 13 | `DIMESampler.jl` |
-| Figure 14 | `CreateTimeSeries.jl` |
-| Figure 15 | `Validation.jl` |
-| Table 1 | `.tex` (manual) |
-| Table 2 | TBD |
-| Table 3 | `FEVD.jl` |
-| Table 4 | `FEVD.jl` |
-| Table 5 | `MDD.jl` |
-| Table 6 | TBD |
-| Table 7 | TBD |
-| Table 8 | TBD |
-| Table 9 | TBD |
+### One baseline run — `run_postestimation.jl` (all steps on by default)
+
+| Paper exhibit | Output | Step / gate |
+|---|---|---|
+| Reconstruction vs. survey panels (`*_quantilegroup_*`), external validation (`external_comparisons/*`) | `7_Results/<spec>/from_mcmc/plots/` | Step 4 (always) |
+| Posterior factor draws + bands | `data/synthetic/` | Step 4b (`DD_EXPORT_DRAWS`) |
+| Correlation tables | `7_Results/.../` | Step 5 (always) |
+| FEVD tables (Decompositions appendix) | `from_mcmc/data/fevd_table.*` | Step 6 (`DD_FULL_RESULTS`) |
+| Historical decomposition `hd_recessions_f1–f8` (+`_pre2000s`) | `from_mcmc/plots/historical_decomposition/` | Step 7 |
+| Information shares `ow_shares_f*`, interpolation share `ow_interp_share` | `from_mcmc/plots/anatomy/` | Step 8 |
+| Consumption dynamics across recessions (`consumption_plots/`) | via `generate_relative_to_peak_plots` | Step 9 |
+| Predictability given baseline params (`fig:recon_missing1`): CEX extensive forecasts + SCF drop-one-wave iterative | `.../forecasts/{extensive,iterative}/` | Step 10 |
+| Proof-of-concept figures (Legendre coefs, copula weights, KL) | `Plots/proof_of_concept/` | `DD_PLOT_PROOF=1` (during data prep) |
+| MCMC convergence `log_probs*` | `from_mcmc/bayesian_convergence/` | written during Stage 2 estimation |
+
+Figures land under `7_Results/` and are copied into the Overleaf `Plots/` tree
+for compilation (only `data_timeline.jl` writes to Overleaf directly).
+
+### Separate estimation runs — `DD_EXAMPLE=<name> julia run_estimation.jl`
+
+| Paper exhibit | Example |
+|---|---|
+| `fig:recon_missing2` — CEX every 4th year (re-estimated) | `cex_every_4_years` |
+| `fig:recon_missing2` — excluding recent 20 quarters | `no_recent_20q` |
+| `fig:recon_missing2` — excluding housing-cycle wealth | `no_housing_wealth` |
+| MDD table (`Tables/MDD.tex`): factor-count comparison | `6_factors`, `7_factors` + baseline, then `MDD.jl` across the three posterior JLD2s |
+| Baseline on regenerated data | `new_data` |
+| DFA balance-sheet components | `stocks`, `real_estate`, `business`, `pension`, `mortgages`, `consumer_credit` |
+
+### Generated outside `run_estimation.jl` / `run_postestimation.jl`
+
+| Paper exhibit | Source |
+|---|---|
+| Data timeline (`Plots/data_timeline.pdf`) | `count_observations.jl` + `data_timeline.jl` (standalone) |
+| Order-analysis / local-vs-global estimator figures (`Plots/order_analysis/`) | `SeriesEstimator.jl` (standalone) |
+| HANK validation figures (`Plots/HANK/`) | separate HANK replication package (not included) |
+| Consumption-along-income local projections (`Plots/IRFs_and_Trends/`) | Stata (`prep_micro_data.do` + local projections) |
+| `Tables/DataCoverage.tex`, hand-written tables, TikZ diagrams | manual / in the .tex |
 
 ## References
 
