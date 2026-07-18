@@ -4,19 +4,29 @@ import numpy as np
 
 url = 'http://www.forbes.com/ajax/list/data?year={}&uri=forbes-400&type=person'
 
-big_df = []
-for x in range(2021,2024+1):
-	# get json as dataframe
-	df = pd.read_json(u:= url.format(str(x)))
-	# add year and source url to dataframe
-	df['year'] = x
-	df['source_url'] = u
+# Cache-first: the live forbes.com endpoint is fragile and makes the data
+# stage non-reproducible offline. On the first successful scrape the raw
+# 2021-2024 records are saved next to the Fernholz-Haslberger data; later
+# runs read the cache. Delete the cache file to force a re-scrape.
+CACHE = "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/Forbes 400 Data Set/Forbes 400 scrape 2021-2024.csv"
+import os
+if os.path.exists(CACHE):
+	df = pd.read_csv(CACHE)
+else:
+	big_df = []
+	for x in range(2021,2024+1):
+		# get json as dataframe
+		df = pd.read_json(u:= url.format(str(x)))
+		# add year and source url to dataframe
+		df['year'] = x
+		df['source_url'] = u
 
-	big_df.append(df)
+		big_df.append(df)
 
-df = pd.concat(big_df)
-cols_to_keep = ["year", "lastName", "worth"]
-df = df[cols_to_keep]
+	df = pd.concat(big_df)
+	cols_to_keep = ["year", "lastName", "worth"]
+	df = df[cols_to_keep]
+	df.to_csv(CACHE, index=False)
 df = df.rename(columns={"worth": "wealth"})
 df["wealth"] = pd.to_numeric(df["wealth"])
 
