@@ -91,7 +91,8 @@ plt.tight_layout()
 plt.show()
 
 # Import SCF no forbes
-scf = pd.read_csv("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes.csv", encoding="latin")
+# scf = pd.read_csv("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes.csv", encoding="latin")
+scf = pd.read_csv("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes_new.csv", encoding="latin")
 scf["source"] = "SCF"
 
 # scf["weight"] = scf["weight"] * 5000
@@ -198,7 +199,7 @@ df = df.merge(
 )
 
 # 10) Construct the final adjusted weight
-# fill RF NaNs with 0 so outside-bin obs get zero adjustment
+# fill RF NaNs with 1 so outside-bin obs (below the Forbes minimum) keep their weight unchanged
 df["RF"] = df["RF"].fillna(1)
 
 # replace all +inf and -inf in the entire DataFrame with NaN
@@ -214,7 +215,8 @@ fin_df = fin_df.drop(columns="weight")
 fin_df  = fin_df.rename(columns={"weight_adj": "weight"})
 
 fin_df = fin_df.drop(columns=["bin", "RF", "Fmin", "source"])
-fin_df.to_csv("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF.csv", index=False)
+# fin_df.to_csv("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF.csv", index=False)
+fin_df.to_csv("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_new.csv", index=False)
 
 
 # # Plotting the top 1% wealth
