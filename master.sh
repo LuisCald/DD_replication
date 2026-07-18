@@ -93,7 +93,7 @@ run_data() {
     python3 "$PYTHON_DIR/make_stationary.py"
     python3 "$PYTHON_DIR/make_stationary_x12.py"
 
-    # 1d. R scripts
+    # 1f. R scripts
     echo "[1f] R: Hermite series estimation..."
     Rscript "$R_DIR/HermiteSeriesEstimator.R"
 
