@@ -158,6 +158,9 @@ filter!(row -> row.count >= 1000, PSID)
 # Save file to XLSX 
 select!(PSID, Not([:count, :year_quarter, :income_quarter]))
 # CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID.csv", PSID)
+let _p = raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID_new.csv"
+    isfile(_p) && rm(_p)  # avoid writing into a Dropbox online-only placeholder
+end
 CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID_new.csv", PSID)
 
 
@@ -329,6 +332,9 @@ end
 
 # Save (no-Forbes, growth-applied). Forbes augmentation -> SCF.csv happens in generateForbes400.py.
 # CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes.csv", final_df)
+let _p = raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes_new.csv"
+    isfile(_p) && rm(_p)  # avoid writing into a Dropbox online-only placeholder
+end
 CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes_new.csv", final_df)
 
 # Read in the same file using CSV
@@ -347,6 +353,9 @@ append!(b, a)
 
 # Save file to csv (impnum fixed for 2022 before Forbes augmentation reads it)
 # CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes.csv", b)
+let _p = raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes_new.csv"
+    isfile(_p) && rm(_p)  # avoid writing into a Dropbox online-only placeholder
+end
 CSV.write(raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_noForbes_new.csv", b)
 
 
