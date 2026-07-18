@@ -33,6 +33,12 @@ kind_of_plots = :mcmc
 opttag = "from_mcmc"
 
 # ── Step 1: Prepare data ─────────────────────────────────────
+# DD_PLOT_PROOF=1 also writes the proof-of-concept figures (Legendre coefs,
+# copula weights, quantile/KL approximation — Plots/proof_of_concept/*) during
+# data preparation. Off by default (adds runtime to estimation_prep).
+if get(ENV, "DD_PLOT_PROOF", "0") == "1"
+    model_options.plot_proof = true
+end
 @info "Preparing functional data..."
 const func_data, time_params, model_elements = estimation_prep(obs_data, model_options)
 const (param_vector, param_sizes, priors, meas_ind, Σ_ids) = set_params(model_elements, time_params, model_options)
@@ -128,74 +134,137 @@ if occursin("HANK", tag)
 end
 @info "Correlation tables complete."
 
-# # ── Step 6: FEVD ─────────────────────────────────────────────
-# @info "Computing forecast error variance decomposition..."
-# r_dist = param_sizes[1][1]
-# q_agg = param_sizes[2][2]
+# ═════════════════════════════════════════════════════════════
+# Full results (Steps 6–10). Each step is independent, wrapped in
+# try/catch, and gated by DD_FULL_RESULTS (default ON; set =0 to skip).
+# These regenerate every baseline-run exhibit of the paper that does not
+# require a different estimation spec (those live in examples/ — see the
+# README results map).
+# ═════════════════════════════════════════════════════════════
+run_full = get(ENV, "DD_FULL_RESULTS", "1") != "0"
 
-# A, B_mat, C, D, Ω_var, Ω_corr, Σ = matrisize(par_final[1:end-6], param_sizes)
-# Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)
-# mat_Ω_corr = Matrix(Ω_corr)
-# Ω = Ω_var * mat_Ω_corr * Ω_var'
+results_dir = BASE_PATH * "/7_Results/$m_label" * "$tag" * "/from_mcmc"
 
-# r, q = size(B_mat)
-# nₛ = 4r + q
-# Tval = eltype(A)
+if run_full
 
-# Φ = zeros(Tval, nₛ, nₛ)
-# AI = Matrix{Tval}(I, r, r)
-# @views begin
-#     Φ[1:r, 1:r] .= A
-#     Φ[1:r, 4r+1:4r+q] .= B_mat
-#     Φ[r+1:2r, 1:r] .= AI
-#     Φ[2r+1:3r, r+1:2r] .= AI
-#     Φ[3r+1:4r, 2r+1:3r] .= AI
-#     Φ[4r+1:end, 1:r] .= C
-#     Φ[4r+1:end, 4r+1:end] .= D
-# end
+# ── Step 6: FEVD (Decompositions appendix tables) ─────────────
+@info "Computing forecast error variance decomposition..."
+local Φ, Ω, r, q   # shared with Steps 7/9
+try
+    r_dist = param_sizes[1][1]
+    q_agg = param_sizes[2][2]
 
-# ids_sub = vcat(1:r, 4r+1:4r+q)
-# Φ_sub = Φ[ids_sub, ids_sub]
+    A, B_mat, C, D, Ω_var, Ω_corr, Σ = matrisize(par_final[1:end-6], param_sizes)
+    Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)
+    mat_Ω_corr = Matrix(Ω_corr)
+    global Ω = Ω_var * mat_Ω_corr * Ω_var'
 
-# tbl = fevd_dist_vs_agg(model_elements, model_options, obs_data, Φ_sub, Ω;
-#     r, q, horizon=20, factor_names=nothing, shock_order=:agg_first
-# )
-# @info "FEVD complete."
+    global r, q = size(B_mat)
+    nₛ = 4r + q
+    Tval = eltype(A)
 
-# # ── Step 7: Historical decomposition ─────────────────────────
-# @info "Computing historical decomposition..."
-# smoother_res, _, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
-# @unpack x_smoothed, dε_smoothed = smoother_res
+    global Φ = zeros(Tval, nₛ, nₛ)
+    AI = Matrix{Tval}(I, r, r)
+    @views begin
+        Φ[1:r, 1:r] .= A
+        Φ[1:r, 4r+1:4r+q] .= B_mat
+        Φ[r+1:2r, 1:r] .= AI
+        Φ[2r+1:3r, r+1:2r] .= AI
+        Φ[3r+1:4r, 2r+1:3r] .= AI
+        Φ[4r+1:end, 1:r] .= C
+        Φ[4r+1:end, 4r+1:end] .= D
+    end
 
-# hd = historical_decomp_factors_blockchol(Φ, r, q, dε_smoothed, x_smoothed, Ω;
-#     splitting=:group, shock_order=:agg_first
-# )
-# @info "Historical decomposition complete. Max reconstruction error: $(hd.maxerr)"
+    ids_sub = vcat(1:r, 4r+1:4r+q)
+    Φ_sub = Φ[ids_sub, ids_sub]
 
-# # ── Step 8: Cyclicality of consumption ────────────────────────
-# @info "Generating cyclicality of consumption analysis..."
-# try
-#     generate_relative_to_peak_plots()
-#     @info "Cyclicality analysis complete."
-# catch e
-#     @warn "Cyclicality analysis skipped: $e"
-# end
+    tbl = fevd_dist_vs_agg(model_elements, model_options, obs_data, Φ_sub, Ω;
+        r, q, horizon=20, factor_names=nothing, shock_order=:agg_first)
+    mkpath(results_dir * "/data")
+    if tbl isa DataFrame
+        CSV.write(results_dir * "/data/fevd_table.csv", tbl)
+    else
+        open(results_dir * "/data/fevd_table.txt", "w") do io
+            show(io, MIME("text/plain"), tbl)
+        end
+    end
+    @info "FEVD complete → $(results_dir)/data/"
+catch e
+    @warn "FEVD failed" exception=(e, catch_backtrace())
+end
 
-# # ── Step 9: Out-of-sample forecasts ──────────────────────────
-# @info "Running out-of-sample forecasts..."
-# how_much = 1
-# perform_forecast("SCF", par_final, param_sizes, priors, meas_ind, Σ_ids, how_much,
-#     obs_data, model_options, model_elements, time_params, user_t, func_data,
-#     kind_of_plots, ["iterative"]
-# )
+# ── Step 7: Historical decomposition (hd_recessions_f*.pdf) ───
+@info "Computing historical decomposition..."
+try
+    smoother_res, _, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
+    hd = historical_decomp_factors_blockchol(Φ, r, q, smoother_res.dε_smoothed, smoother_res.x_smoothed, Ω;
+        splitting=:group, shock_order=:agg_first)
+    @info "Historical decomposition: max reconstruction error $(hd.maxerr)"
 
-# @unpack time_dict, year_vec = time_params
-# periods_to_remove = muted_quarters_between(QuarterlyDate(1984, 1), QuarterlyDate(2021, 4))
-# filtering_criteria = Dict("periods_to_remove" => periods_to_remove)
-# perform_forecast("CEX", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
-#     filtering_criteria, obs_data, model_options, model_elements, time_params,
-#     user_t, func_data, kind_of_plots, ["extensive", "data_only"]
-# )
-# @info "Forecasts complete."
+    dts_hd = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
+    hd_dir = results_dir * "/plots/historical_decomposition"
+    mkpath(hd_dir)
+    make_hd_tables(hd.cube, hd.order, hd.ids, year.(dts_hd), quarter.(dts_hd);
+        make_recession_plots=true, out_dir=hd_dir)
+    @info "HD recession plots → $hd_dir"
+catch e
+    @warn "Historical decomposition failed" exception=(e, catch_backtrace())
+end
 
-# @info "═══ Stages 3-5 finished ═══"
+# ── Step 8: Anatomy — information & interpolation shares ──────
+@info "Computing observation-weight anatomy (information shares)..."
+try
+    dec = observation_weight_decomposition(model_elements, obs_data.df_vec.df_names,
+        par_final, param_sizes, hyperpriors, Σ_ids, model_options)
+    dec2 = merge_groups(dec)
+    dts_an = collect(QuarterlyDate(tmin["year"], tmin["quarter"]) .+ Quarter.(0:size(dec.full, 2)-1))
+    an_dir = results_dir * "/plots/anatomy"
+    mkpath(an_dir)
+    plot_all_factors(dec2; r=param_sizes[1][1], dates=dts_an, outdir=an_dir)
+    export_decomposition_csv(dec2, an_dir * "/ow_decomposition.csv"; dates=dts_an)
+
+    sm, _, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
+    A2, B2, C2, D2, Ωv2, Ωc2, _ = matrisize(par_final[1:end-6], param_sizes)
+    Ωv2[diagind(Ωv2)] = log.(exp.(Ωv2[diagind(Ωv2)]) .+ 1)
+    Ω2 = Ωv2 * Matrix(Ωc2) * Ωv2'
+    Φ2, Ωbig = build_Phi_Omega(A2, B2, C2, D2, Ω2, 4)
+    P∞ = stationary_cov(Φ2, Ωbig)
+    plot_interpolation_share(sm.sigma_smoothed, P∞; states=1:param_sizes[1][1], dates=dts_an,
+        outfile=an_dir * "/ow_interp_share.pdf")
+    @info "Anatomy figures → $an_dir"
+catch e
+    @warn "Anatomy step failed" exception=(e, catch_backtrace())
+end
+
+# ── Step 9: Cyclicality of consumption (recession panels) ─────
+@info "Generating cyclicality-of-consumption plots..."
+try
+    generate_relative_to_peak_plots(; tag=tag)
+    @info "Cyclicality analysis complete."
+catch e
+    @warn "Cyclicality analysis failed" exception=(e, catch_backtrace())
+end
+
+# ── Step 10: Out-of-sample forecasts (fig: recon_missing1) ────
+@info "Running out-of-sample forecasts (SCF iterative + CEX extensive)..."
+try
+    how_much = 1
+    perform_forecast("SCF", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, how_much,
+        obs_data, model_options, model_elements, time_params, user_t, func_data,
+        kind_of_plots, ["iterative"])
+catch e
+    @warn "SCF iterative forecast failed" exception=(e, catch_backtrace())
+end
+try
+    periods_to_remove = muted_quarters_between(QuarterlyDate(1984, 1), QuarterlyDate(2021, 4))
+    filtering_criteria = Dict("periods_to_remove" => periods_to_remove)
+    perform_forecast("CEX", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
+        filtering_criteria, obs_data, model_options, model_elements, time_params,
+        user_t, func_data, kind_of_plots, ["extensive", "data_only"])
+catch e
+    @warn "CEX extensive forecast failed" exception=(e, catch_backtrace())
+end
+
+end  # run_full
+
+@info "═══ Stages 3-5 finished ═══"
