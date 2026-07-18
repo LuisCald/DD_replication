@@ -247,6 +247,7 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── prep_functional_data.do    Functional data preparation
 │   │   ├── prep_actualCEX.do          CEX data with income imputation
 │   │   ├── ginis_and_consumption_trends.do  Gini coefficients and trends
+│   │   ├── consumption_recessions.do  Recession consumption panels (post-estimation)
 │   │   ├── other_results.do           Aggregate correlations
 │   │   └── SIPP/                      SIPP panel do-files by wave
 │   ├── python/
@@ -360,7 +361,7 @@ for compilation (only `data_timeline.jl` writes to Overleaf directly).
 | Order-analysis / local-vs-global estimator figures (`Plots/order_analysis/`) | `SeriesEstimator.jl` (standalone) |
 | HANK validation figures (`Plots/HANK/`) | separate HANK replication package (not included) |
 | Consumption-along-income local projections (`Plots/IRFs_and_Trends/`) | Stata (`prep_micro_data.do` + local projections) |
-| Consumption dynamics across recessions (`consumption_plots/*.jpg`) | Stata — NOTE: no do-file in the repo writes these filenames; recover the producing script |
+| Consumption dynamics across recessions (`consumption_plots/*.jpg`) | Stata: `code/stata/consumption_recessions.do` (standalone; reads the model's synthetic-micro export, writes `7_Results/Application/with_time_varying_trend/`) |
 | `Tables/DataCoverage.tex`, hand-written tables, TikZ diagrams | manual / in the .tex |
 
 ## References
