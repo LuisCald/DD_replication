@@ -537,8 +537,13 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
     Σ̂⁻¹²ⱼ = Vector{Matrix{Float64}}(undef, length(sources))
     max_draws = 999
 
-    # File to save the sigma matrix. Only higher orders require a different computation
-    ci_tag = tag == " higher order15" ? tag : ""
+    # File to save the sigma matrix. Only higher orders require a different computation.
+    # The cache key must also separate DATA VINTAGES: intervals and noise draws are
+    # bootstrapped from the raw survey files, so a run on regenerated data (the
+    # " new data" example: PSID_new/SCF_new + corrected SIPP1-3) must neither reuse
+    # the baseline caches nor overwrite them. Any tag containing "new data" gets its
+    # own cache namespace.
+    ci_tag = (tag == " higher order15" || occursin("new data", tag)) ? tag : ""
     sigma_file_name = init_path * "/noise_distributions/sigma_" * m_label * grid_tag * "_" * data_label * "_$end_year" * ci_tag * ".jld2"
     sigma_exists = isfile(sigma_file_name)
 
