@@ -52,6 +52,8 @@ if set, loads `code/julia/examples/Structures_<name>.jl` instead of the baseline
 ```bash
 DD_EXAMPLE=stocks julia run_estimation.jl   # also: real_estate, business, pension, mortgages, consumer_credit
 DD_EXAMPLE=new_data julia run_estimation.jl # baseline spec on the regenerated PSID_new/SCF_new files
+DD_EXAMPLE=6_factors julia run_estimation.jl # robustness: also 7_factors, no_housing_wealth,
+                                             # no_recent_20q, cex_every_4_years (see replication map)
 ```
 
 **Data flow that feeds these (SCF and PSID).** Each survey's micro file carries the component
@@ -62,12 +64,15 @@ matching `<component>_per_hh` anchor:
 SCF :  data_cleaning.do ──► SCF_noForbes_nogrowth.xlsx
                               │  (GrowthCorrection.jl: align income to the wealth date)
                               ▼
-                          SCF_noForbes.csv
-                              │  (generateForbes400.py: Forbes-400 augmentation)
+                          SCF_noForbes_new.csv
+                              │  (generateForbes400.py: Forbes-400 augmentation,
+                              │   cached 2021–24 scrape)
                               ▼
-                          SCF.csv                      ← read by the model
+                          SCF_new.csv    ← read via DD_EXAMPLE=new_data
+                                           (baseline still reads the frozen SCF.csv
+                                            until the new files are promoted)
 
-PSID:  data_cleaning.do ──► PSID_nogrowth.xlsx ──(GrowthCorrection.jl)──► PSID.csv
+PSID:  data_cleaning.do ──► PSID_nogrowth.xlsx ──(GrowthCorrection.jl)──► PSID_new.csv
 
 Aggregates:  import_aggregates.do ──► inflation_corrected_correction_series.xlsx
              (per-HH anchors; component anchors need the new FRED series de-seasoned —
@@ -132,7 +137,7 @@ All data used in this paper are publicly available. Some datasets require free r
 | Survey of Consumer Finances (SCF) | Federal Reserve Board | Public download | 1962-2022 | https://www.federalreserve.gov/econres/scfindex.htm |
 | Consumer Expenditure Survey (CEX) | Bureau of Labor Statistics | Public download | 1984-2023 | https://www.bls.gov/cex/ |
 | Current Population Survey (CPS) | Census Bureau / IPUMS | Free registration | 1964-2023 | https://cps.ipums.org/ |
-| Survey of Income and Program Participation (SIPP) | Census Bureau | Public download | 1984-2022 | https://www.census.gov/programs-surveys/sipp.html |
+| Survey of Income and Program Participation (SIPP) | Census Bureau | Public download | 1983-2022 | https://www.census.gov/programs-surveys/sipp.html |
 | World Inequality Database (WID) | WID.world | Public download | 1962-2023 | https://wid.world/ |
 | Distributional Financial Accounts (DFA) | Federal Reserve Board | Public download | 1989-2023 | https://www.federalreserve.gov/releases/z1/dataviz/dfa/ |
 | FRED Economic Data | Federal Reserve Bank of St. Louis | Public download | Various | https://fred.stlouisfed.org/ |
@@ -202,7 +207,6 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── DataConstructor.jl         Data loading and preprocessing
 │   │   ├── ModelPrep.jl               Functional data preparation and PCA
 │   │   ├── Model.jl                   State-space model specification
-│   │   ├── MCMC.jl                    MCMC sampling and optimization
 │   │   ├── SelectPrior.jl             Minnesota prior construction
 │   │   ├── DIMES.jl                   DIME sampler integration
 │   │   ├── DIMESampler.jl             DIME sampler implementation
@@ -249,7 +253,7 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── ginis_and_consumption_trends.do  Gini coefficients and trends
 │   │   ├── consumption_recessions.do  Recession consumption panels (post-estimation)
 │   │   ├── other_results.do           Aggregate correlations
-│   │   └── SIPP/                      SIPP panel do-files by wave
+│   │   └── SIPP/                      Legacy Census ASCII readers (unused by the pipeline)
 │   ├── python/
 │   │   ├── convert_monthly_to_quarterly.py  Frequency conversion
 │   │   ├── make_stationary.py         Stationarity transformations
