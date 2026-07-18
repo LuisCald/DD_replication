@@ -35,7 +35,14 @@ The replication package is organized into three stages:
 
 Pre-computed posterior estimates are provided in `output/estimates/`, allowing replicators to skip Stage 2 and go directly from Stage 1 to Stage 3.
 
-## DFA balance-sheet components (semicontinuous extension)
+## DFA balance-sheet components (semicontinuous extension) — 🚧 Coming soon!
+
+> **Status: not yet estimated.** The data layer below is complete and has been
+> run (component columns in the survey files, per-HH aggregate anchors), but the
+> estimation core for semicontinuous measures (marginal hurdle, participation-split
+> copula, reconstruction mixture) is still in progress — no DFA-component results
+> exist yet. The `DD_EXAMPLE=stocks` (etc.) configs load but will not produce
+> valid component estimates until that core lands.
 
 Beyond the baseline `(consumption, income, wealth)` model, the code can model the joint
 distribution of `(income, wealth, <balance-sheet component>)` to replicate the Federal
@@ -50,7 +57,7 @@ if set, loads `code/julia/examples/Structures_<name>.jl` instead of the baseline
 (unset = published baseline, unchanged):
 
 ```bash
-DD_EXAMPLE=stocks julia run_estimation.jl   # also: real_estate, business, pension, mortgages, consumer_credit
+DD_EXAMPLE=stocks julia run_estimation.jl   # also: real_estate, business, pension, mortgages, consumer_credit (🚧 coming soon — see status above)
 DD_EXAMPLE=new_data julia run_estimation.jl # baseline spec on the regenerated PSID_new/SCF_new files
 DD_EXAMPLE=6_factors julia run_estimation.jl # robustness: also 7_factors, no_housing_wealth,
                                              # no_recent_20q, cex_every_4_years (see replication map)
