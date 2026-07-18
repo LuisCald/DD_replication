@@ -290,8 +290,16 @@ summ _nw_check, d
 count if abs(_nw_check) > 1 & !missing(_nw_check)
 drop _nw_check
 
-gen wealth = assets - undebt - scdebt // net worth is computed weirdly by the SIPP at times 
-* gen wealth = assets - undebt   // <- activate after the check (= hhtnw; consistent with 2013+); comment out the line above
+// gen wealth = assets - undebt - scdebt // net worth is computed weirdly by the SIPP at times
+* Diagnostic result (2026-07-18, 554,309 obs): hhtnw - (assets - undebt) = 0 at
+* every percentile 1-99 (largest negatives ~ -3e-11, float noise). 1,954 obs
+* (0.35%) differ by large positive amounts up to the 999999 top-code sentinel:
+* there the COMPONENT arithmetic is corrupted while hhtnw is the official value.
+* So use the survey's own net worth directly (mirrors THNETWORTH for 2013+),
+* falling back to the component formula only where hhtnw is missing.
+gen wealth = hhtnw
+replace wealth = assets - undebt if missing(wealth)
+* gen wealth = assets - undebt   // (equivalent for 99.65% of obs; kept for reference)
 drop hhtnw
 
 * Net worth in the SIPP is defined in a weird way
