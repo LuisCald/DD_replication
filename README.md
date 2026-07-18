@@ -51,6 +51,7 @@ if set, loads `code/julia/examples/Structures_<name>.jl` instead of the baseline
 
 ```bash
 DD_EXAMPLE=stocks julia run_estimation.jl   # also: real_estate, business, pension, mortgages, consumer_credit
+DD_EXAMPLE=new_data julia run_estimation.jl # baseline spec on the regenerated PSID_new/SCF_new files
 ```
 
 **Data flow that feeds these (SCF and PSID).** Each survey's micro file carries the component
