@@ -321,6 +321,14 @@ save "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SIPP/made_panels/sipp_198
 // 	rename shhadid h_add		// recommended not to use
 // 	rename monthcode month 		// no missings
 
+// foreach x in 2014 2018 2019 2020 2021 2022 2023 {
+//     use "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SIPP/made_panels/sipp`x'_final.dta", clear
+//     foreach v in assets undebt scdebt tdebt mgdebt wealth {
+//         replace `v' = . if quarter != 4
+//     }
+//     save "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SIPP/made_panels/sipp`x'_final.dta", replace
+// }
+
 	
 foreach x in 2014 2018 2019 2020 2021 2022 2023 { 	//
 	cd /Users/lc/Dropbox/Distributional_Dynamics/1_Data/SIPP/raw_materials/`x'
