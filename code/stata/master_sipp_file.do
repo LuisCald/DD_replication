@@ -404,8 +404,19 @@ foreach x in 2014 2018 2019 2020 2021 2022 2023 { 	//
 	
 	* concerned with households with 2 to 9 members
 	bysort hh_id year month: gen n_members=_N
-	keep if n_members>=1 & n_members<10 
-	
+	keep if n_members>=1 & n_members<10
+
+	* Screen implausible asset values (diagnosed 2026-07-18): in the 2014-panel
+	* wave 3 (ref-2015), 28 households carry thval_ast in a narrow $110-150M band,
+	* 17-156x their OWN values in adjacent waves (median ~30-50x) — the top-code
+	* substitution values appear misscaled ~100x. Divided by 100 the band lands at
+	* $1.1-1.5M, exactly the top-code replacement range. No SIPP sample (no wealth
+	* oversample) legitimately contains $100M+ households (W1/W2/W4: 60/12/0 such
+	* person-months vs W3's 849). Analogue of the junk-code screens for the old
+	* panels above. Wealth becomes missing for these obs; income is unaffected.
+	replace thnetworth = . if thval_ast >= 1e8 & !missing(thval_ast)
+	replace thval_ast  = . if thval_ast >= 1e8 & !missing(thval_ast)
+
 	collapse (max) thval_ast thdebt_usec thdebt_sec thdebt_ast thnetworth thdebt_home thtotinc (mean) weight (first) spanel,  by(hh_id year month)
 
 	gen quarter=.
@@ -534,12 +545,9 @@ generate qdate = yq(year, quarter)
 * Tell Stata to display it in yearq format (e.g. 2025q3)
 format qdate %tq
 
-* Drop if qdate > (1996, 1)
+* Keep if qdate >= (1996, 1)
 drop if qdate <= yq(1995, 4)
 
-* Drop 2003Q4 (Seam)
-drop if qdate == yq(2003,4)
-drop if qdate == yq(1999, 4)
 
 export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP2.csv", replace
 
@@ -555,9 +563,9 @@ format qdate %tq
 * Drop if qdate > (1996, 1)
 drop if qdate > yq(1995, 4)
 
-* Drop 1988Q1 (Seam)
-drop if qdate == yq(1988,1)
-drop if qdate == yq(1985, 4)
+// * Drop 1988Q1 (Seam)
+// drop if qdate == yq(1988,1)
+// drop if qdate == yq(1985, 4)
 
 export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP1.csv", replace
 
@@ -568,7 +576,7 @@ export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_process
 // egen tt = group(year quarter)
 // tsset tt
 
-foreach var in income {
+foreach var in wealth {
 	collapse (mean) `var' (p10) `var'10=`var' (p20) `var'20=`var' (p30) `var'30=`var' (p40) `var'40=`var' (p50) `var'50=`var' (p60) `var'60=`var' (p70) `var'70=`var' (p80) `var'80=`var' (p90) `var'90=`var' (p99) `var'99=`var' [pw=weight], by(year quarter)
 	drop if missing(`var')
 	egen tt = group(year quarter)
