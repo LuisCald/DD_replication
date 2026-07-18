@@ -583,7 +583,7 @@ function gen_proof_of_concept_figure(d_data_dict::Dict, r_data_dict::Dict, model
                             Plots.scatter!([], [], marker=:square, mc=:white, msc=:black, msw=4, dpi=500)
                         end
                     end
-                    println(size(scale_transformation(o, r_data_dict[m][o]["data"][sequence, :])))
+                    # println(size(scale_transformation(o, r_data_dict[m][o]["data"][sequence, :])))
 
                     Plots.scatter!(
                         sxaxis,

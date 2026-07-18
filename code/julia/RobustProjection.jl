@@ -102,7 +102,7 @@ function overlay_datasets(MV; type="tallest")
         end
 
         # Find new No
-        println(where_second_block_begins)
+        # println(where_second_block_begins)
         tot_NaN = sum(isnan.(M[where_second_block_ends[1], :]))
         new_No = size(M, 2) - tot_NaN
 
@@ -202,8 +202,8 @@ function run_TP_algorithm(MV, pr)
 
     # Step 1: Identify T_o and N_o
     T_o, N_o = find_Nₒ_Tₒ(X)
-    println("T_o: ", T_o)
-    println("N_o: ", N_o)
+    # println("T_o: ", T_o)
+    # println("N_o: ", N_o)
     tall_block, wide_block, _, _ = reorganize_matrix(X, N_o, T_o)
 
     # Step 2: Estimate factors from the tall block using PCA

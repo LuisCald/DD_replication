@@ -63,7 +63,7 @@ function perform_iterative_table_forecast(par_final, param_sizes, hyperpriors, m
 
     # Create a column for each object 
     for (j, k) in enumerate(data_sources)
-        println(k)
+        # println(k)
         stat_df = DataFrame()
 
         # create date column
@@ -74,8 +74,8 @@ function perform_iterative_table_forecast(par_final, param_sizes, hyperpriors, m
             end
         end
         stat_df[!, :release_date] = rel_vec
-        println(length(rel_vec))
-        println(length(stat_dict_r[k]["copula"]))
+        # println(length(rel_vec))
+        # println(length(stat_dict_r[k]["copula"]))
 
         # Create copula column 
         stat_df[!, "copula"] = stat_dict_r[k]["copula"]
@@ -106,8 +106,8 @@ function compute_forecast_mse(dv, func_dict, model_elements, orig_MV, MV, data_s
     pcfs = Dict()
 
     for (j, k) in enumerate(sort!(data_sources)) # TODO: includes consensus 
-        println(k)
-        # Get indices of the observations 
+        # println(k)
+        # Get indices of the observations
         pcfs[k] = Dict()
         pcf_ids[k] = Dict()
         cop_ids[k] = findall(x -> all(.!isnan.(x)), eachcol(func_dict[k]["copulas"]["data"]))
@@ -118,7 +118,8 @@ function compute_forecast_mse(dv, func_dict, model_elements, orig_MV, MV, data_s
             try
                 pcf_ids[k][m] = findall(x -> !all(isnan.(x)), eachcol(func_dict[k][m]["quantiles"]["data"]))
             catch ee
-                println(ee)
+                @warn "Could not find pcf quantile indices for $k / $m" exception = ee
+                # println(ee)
                 pcf_ids[k][m] = []
             end
             pcfs[k][m] = func_dict[k][m]["quantiles"]["data"][:, pcf_ids[k][m]]
@@ -273,7 +274,7 @@ function perform_extensive_forecast(dataset_choice, par_final, param_sizes, hype
         # Based on grid, find the indices associated with the dataset
         n = size(MV[1], 1)
         data_indices = collect((data_id-1)*n+1:data_id*n)
-        println((data_id-1)*n+1:data_id*n)
+        # println((data_id-1)*n+1:data_id*n)
     else
         n = size(y, 1)
         data_indices = collect(1:n) #weird, but necessary 
@@ -285,7 +286,7 @@ function perform_extensive_forecast(dataset_choice, par_final, param_sizes, hype
         dates_of_est = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
         start_ind = findall(dates_of_est .== QuarterlyDate(filtering_criteria["dates"][1]))[1]
         end_ind = findall(dates_of_est .== QuarterlyDate(filtering_criteria["dates"][2]))[1]
-        println(start_ind, end_ind)
+        # println(start_ind, end_ind)
         y[data_indices, start_ind:end_ind] .= NaN # removes X quarters of data, independent of which dataset it is or object 
     elseif collect(keys(filtering_criteria)) == ["periods"]
         T = size(y, 2)

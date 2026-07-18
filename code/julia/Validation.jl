@@ -1136,7 +1136,7 @@ function compare_to_data(dv, ty, func_data, obs_data, user_t, time_params, model
                         nothing
                     else
                         cond = source != "consensus" ? findall(!isnan, dist[source*"_obs"][obj][meas]) : [1] # .!isnan.(all_lv_o[1][:, j])
-                        println(cond)
+                        # println(cond)
                         s_axis = xaxis[cond[1]:cond[end]] # start at the first observation 
                         s_data = dist[source][obj][meas][cond[1]:cond[end]]
 
@@ -1469,7 +1469,8 @@ function nan_floor(type, corr)
         a = floor(type, corr)
         return a
     catch e
-        println(corr)
+        @warn "nan_floor: floor failed, returning NaN" corr exception = e
+        # println(corr)
         return NaN
     end
 end

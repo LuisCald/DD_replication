@@ -169,8 +169,9 @@ function remove_seasonality_from_quarterly_data!(dfs, names, time_dict)
             df_id = findall(x -> x == j, names)[1]
             X13_seasonality_adjustment!(dfs[df_id], time_dict[df_id], j)
         catch ee
-            println(ee)
-            println("No dataset $j found.")
+            # println(ee)
+            # println("No dataset $j found.")
+            @warn "No dataset $j found." exception = ee
         end
         # sipp2_id = findall(x -> x == "SIPP2", names)[1]
     end
@@ -204,7 +205,7 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
 
     # Define data intervals # TODO: for the future, run this after data_constructor so that we construct intervals for all data and then subset to the timeframe we want vs. estimating separate intervals for different time frames 
     confidence_intervals, Σ̂⁻¹² = define_data_intervals(df_vec, model_options, init_path, time_p, obs_data)
-    println("Intervals defined.")
+    @info "Intervals defined."
 
     # Perform proof of concept reconstruction
     # First, select a df where all measures are observed 
@@ -245,7 +246,7 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
         # Dataset is after the PP
         dataset_names = split(tag[5:end], " ") # there could be multiple datasets
         common_names = intersect(dataset_names, df_vec.df_names)
-        println(common_names)
+        # println(common_names)
         ids_of_df = Vector{Int8}(undef, length(common_names))
 
         for i in eachindex(ids_of_df)
@@ -575,8 +576,8 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
         ci_file_name = init_path * "/confidence_intervals/ci_draws_" * m_label * grid_tag * "_" * ci_source * "_$end_year" * ci_tag * ".jld2"
         noise_file_name = init_path * "/noise_distributions/noise_draws_" * m_label * grid_tag * "_" * ci_source * "_$end_year" * ci_tag * ".jld2"
 
-        println(ci_file_name)
-        println(noise_file_name)
+        # println(ci_file_name)
+        # println(noise_file_name)
 
         # Check if the files exist
         ci_file_exists = isfile(ci_file_name)
@@ -626,7 +627,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
     if sigma_exists
         Σ̂⁻¹² = jldopen(sigma_file_name, "r")["sigma"]
     else
-        println("Sigma did not exist!")
+        @info "Sigma did not exist!"
         Σ̂⁻¹² = cat(Σ̂⁻¹²ⱼ...; dims=(1, 2))
         JLD2.save(sigma_file_name, "sigma", Σ̂⁻¹²)
     end
@@ -826,11 +827,11 @@ function find_completely_informed_periods(dfs, freq, time_p)
     for (j, df) in enumerate(dfs)
         years_of_df = year_vec[j]' .+ hack
         dated_df = vcat(years_of_df, df)  # hack is for dealing with duplicate years and tagging the dataframe 
-        println("test")
+        # println("test")
         valid_columns = [all(!isnan.(col)) for col in eachcol(comb_dfs[j])]
-        println(dated_df[:, valid_columns][1, :])
-        println("test")
-        println(dated_df[:, mapslices(col -> all((!isnan).(col)), comb_dfs[j], dims=1)[:]][1, :])
+        # println(dated_df[:, valid_columns][1, :])
+        # println("test")
+        # println(dated_df[:, mapslices(col -> all((!isnan).(col)), comb_dfs[j], dims=1)[:]][1, :])
         comp_years[j] = dated_df[:, mapslices(col -> all((!isnan).(col)), comb_dfs[j], dims=1)[:]][1, :]  # Only complete data, actual years 
         # dated_df[1, :]    = round.((dated_df[1, :] .- tmin["year"]) * freq, digits=2)
         hack += hack_size
@@ -1071,7 +1072,7 @@ function define_timeframe(agg_data, year_vec, freq_type, time_dict, data_cutoffs
     #         max["quarter"] = meas_max_q 
     #     end
     # end
-    println(min, max)
+    # println(min, max)
     @info("Agreed upon estimation period: $(min["year"]), $(min["quarter"]) to $(max["year"]), $(max["quarter"])")
 
     # Filter, in-place, 'year_vec'
@@ -1150,7 +1151,7 @@ function align_data_with_timeframe!(dfs, year_vec, time_p, data_cutoffs)
 
     # This step removes observations from above, according to 'data_cutoffs'
     for j in eachindex(dfs)
-        println(j)
+        # println(j)
         # Identify the upper bound of the data and the estimation upper bound wanted 
         ub_cutoff = [key for key in keys(time_dict[j]) if !(key <= end_year)] # keys that are above 2016 e.g.
         lb_cutoff = [key for key in keys(time_dict[j]) if !(key >= beg_yr)] # keys that are below 1980 e.g.
@@ -1347,7 +1348,7 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
         elseif tag == " Γ all 85"
             pcs, proj = run_TW_algorithm(MV, 0.85, "second tallest")
         end
-        println("The size of the projection matrix for TW is $(size(proj))")
+        @info "The size of the projection matrix for TW is $(size(proj))"
 
         if plot_proof
             perform_proof_of_concept_Γ_comparison(MV, df_vec, gdp_series, time_p, freq_type, time_dict, model_options, means, stds, trend)
@@ -1479,8 +1480,8 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # Create new data matrix with information on the lags 
         r_max = 30 # just some high number 
         MOdim = n_factors(pool', r_max) # pool' is a T x N matrix
-        println("The maximum number of aggregate factors with other estimator is $MOdim")
-        println(tag)
+        @info "The maximum number of aggregate factors with other estimator is $MOdim"
+        # println(tag)
 
         M = MultivariateStats.fit(PCA, pool; pratio=0.95, method=:svd, mean=0)  # TODO: unfix this!
         pcs = MultivariateStats.transform(M, pool)
@@ -1488,7 +1489,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         λ = sqrt.(principalvars(M))
         pcs_s = pcs ./ λ
         proj = projection(M) * diagm(λ)
-        println("The size of the projection matrix for the aggs. is $(size(proj))")
+        @info "The size of the projection matrix for the aggs. is $(size(proj))"
         
         Mdim = tag == " less AF" ? 3 : tag == " more AF" ? 15 : tag == " all AF" ? 30 : tag == " less DF and AF" ? 3 : occursin("HANK", tag) ? 8 : 11
 
@@ -1542,7 +1543,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
                 file_name = BASE_PATH * "/7_Results/consum_and_income_and_wealth PP CEX_annual/other_results/CEX_block.jld2"
                 additional_data_blocks = jldopen(file_name, "r")["block"]
             end
-            println(size(additional_data_blocks[1]))
+            # println(size(additional_data_blocks[1]))
 
             # Partial out variation from original data block 
             for g in eachindex(additional_data_blocks)

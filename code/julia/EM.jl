@@ -58,16 +58,16 @@ function check_convergence(likelihoods::Vector{Float64}, tol::Float64=1e-4, pati
     # Check if the change in likelihood is below the tolerance over 'patience' iterations
     ll = length(likelihoods)
     recent_changes = [likelihoods[i] - likelihoods[i-1] for i in (ll - patience + 1):ll]
-    println(recent_changes)
+    # println(recent_changes)
     if all(abs(change) < tol for change in recent_changes)
-        println("Algorithm is stuck: minimal improvement in likelihood.")
+        @info "Algorithm is stuck: minimal improvement in likelihood."
         return true
     end
 
     # Check for oscillating pattern
     diffs = diff(likelihoods[end-(patience):end])
     if all(diffs[i] * diffs[i-1] < 0 for i in 2:length(diffs))
-        println("Algorithm is stuck: oscillating likelihood values detected.")
+        @info "Algorithm is stuck: oscillating likelihood values detected."
         return true
     end
 
@@ -106,7 +106,7 @@ function run_EM_algorithm(par_final, param_sizes, meas_ind, Σ_ids, model_elemen
         # Run Kalman-Filter Smoother
         # log_P, alarm               = prioreval([[A_new..., B_new...], Matrix(Ω_new), diagm(Float64.(Δ_new))], priors, case) # TODO: see why it doesnt work now.
         smoother_output, log_D, alarm             = recurse_kalman_filter(A_new,B_new,Ω_new,Δ_new,G_new,y,u,true)
-        println("iteration $i: ", log_D)
+        @info "iteration $i: $(log_D)"
 
         if alarm 
             return A_old, B_old, Ω_old, Δ_old, G_old, log_D_vec, Δ_log
@@ -131,7 +131,7 @@ function run_EM_algorithm(par_final, param_sizes, meas_ind, Σ_ids, model_elemen
 
             # Stop if likelihood increased 5 times in a row
             if decrease_count >= 5
-                println("Stopping early: Likelihood increased 5 times in a row at iteration $i")
+                @info "Stopping early: Likelihood increased 5 times in a row at iteration $i"
                 return A_new, B_new, Ω_new, Δ_new, G_new, log_D_vec, Δ_log
             end
             
@@ -199,7 +199,8 @@ function run_EM_algorithm(par_final, param_sizes, meas_ind, Σ_ids, model_elemen
         try
             A_new = E_FF_mix * inv(E_FF_lag) #TODO: breaks here sometimes
         catch ee
-            println("here A")
+            @warn "Inverting E_FF_lag failed; falling back to nearest SPD approximation" exception = ee
+            # println("here A")
             A_new = E_FF_mix * inv(nearest_spd(E_FF_lag)) # TODO: still doesnt work
         end
         # uu    = uₜ * uₜ' # this is just a diagonal matrix, where each element is equal to size(uₜ, 2) 
@@ -254,7 +255,7 @@ function run_EM_algorithm(par_final, param_sizes, meas_ind, Σ_ids, model_elemen
             # Wt(:, i_idio_i) * (Zsmooth(rp1 + i_idio_ii, t+1) * Zsmooth(bl_idxM(i, :), t+1)' + Vsmooth(rp1 + i_idio_ii, bl_idxM(i, :), t+1));
 
             if i == T
-                println("inverting")
+                # println("inverting")
                 # invert 'denom' by block
                 for j in 1:n
                     if sum(select_mat[j]) != 0
@@ -408,7 +409,7 @@ function reconstruct_data_short(A_new,B_new,Ω_new,Δ_new,G_new, likeli_vec, Δ_
 
         # Save the matrices first
         @unpack measures, data_cutoffs = model_options
-        println(tag)
+        # println(tag)
         label = "3D_A non-diag"
         m_label   = measures_folder(measures)
         init_path = BASE_PATH
@@ -562,9 +563,9 @@ function convert_Δ_new_to_vec(Δ_new, model_options, model_elements)
         # Find rows associated non-NaN 
         # cond = all(!isnan, cop_rows, dims=2)[:]
         rows_with_non_nan = findall(row -> any(!isnan, cop_rows[row, :]), axes(cop_rows, 1))
-        println(rows_with_non_nan)
+        # println(rows_with_non_nan)
         me = [mean(Δ_new_split[i][rows_with_non_nan])]
-        println(me)
+        # println(me)
         append!(Δ_to_export, me)
 
         start = cop_id
@@ -574,7 +575,7 @@ function convert_Δ_new_to_vec(Δ_new, model_options, model_elements)
             cond1 = (!isnan).(MV[i][start+1:start+grid_pcf, :])
             if any(cond1)
                 me = [mean(Δ_new_split[i][start+1:start+grid_pcf])]
-                println(me)
+                # println(me)
                 append!(Δ_to_export, me)
             end
             start += grid_pcf

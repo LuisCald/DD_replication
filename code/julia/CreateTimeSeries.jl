@@ -1112,7 +1112,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                         ρ2 = round(nancor(cex_all_est[ids_to_use], outside_est[ids_to_use]), digits=2) # correlate estimates with estimates of full CEX model
 
                                         # Correlation for entire series and subsection
-                                        println([ρ1, ρ2])
+                                        # println([ρ1, ρ2])
                                         correlations_dict[meas][esttag][k] .= [ρ1, ρ2]
                                     end
 
@@ -1207,8 +1207,8 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                         end
                     end
 
-                    # Compare to other estimates, but now in logs and HP 
-                    println("Second comparison")
+                    # Compare to other estimates, but now in logs and HP
+                    # println("Second comparison")
 
                     for esttag in collect(keys(qu_outside_est))
                         cond_cex = findall(!isnan, qu_o[1][dist[1][1], :]) # indices of observations used in current estimation    
@@ -1913,7 +1913,7 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
         @unpack gdp_series = obs_data
         avg_series = deepcopy(gdp_series)
     else
-        println(data_name)
+        # println(data_name)
         avg_series = generate_average_series(data_dict, gdp_series, measures)
     end
 
@@ -2476,7 +2476,7 @@ function export_table_to_tex_with_strings(measures, type)
 
         for header in headers
             first_m = collect(keys(cycle_dict))[1]
-            println(collect(keys(cycle_dict[first_m])))
+            # println(collect(keys(cycle_dict[first_m])))
             if header ∉ collect(keys(cycle_dict[first_m]))
                 nothing
             else
@@ -2507,7 +2507,8 @@ function export_table_to_tex_with_strings(measures, type)
                                 ρ_values = cycle_dict[m][header][k]
                                 table *= " & " * "$(ρ_values[zz])"
                             catch ee
-                                println(ee)
+                                @warn "correlation table entry missing; using placeholder" exception = ee
+                                # println(ee)
                                 table *= " & " * "-"
                             end
                         end
@@ -2586,7 +2587,8 @@ function generate_correlations_table_for_external_comparisons(data_choice, measu
             try
                 corr_wid_dfa = ext_corr["quantiles"][meas][series_type][lowercasefirst(seg_othdict[q])]["WID-DFA"]
             catch ee
-                println(ee)
+                @warn "WID-DFA correlation lookup failed; using placeholder" exception = ee
+                # println(ee)
                 corr_wid_dfa = "-"
             end
 

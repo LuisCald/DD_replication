@@ -965,7 +965,8 @@ function interval_time_correction(confidence_intervals, periods, time_p, k, freq
         try
             confidence_interval_dict[bound]["copula"] = order_measures(confidence_intervals[bound]["copula"], periods, tot_periods, freq, freq_type[k], tmin, time_dict[k], start)
         catch ee
-            println("don't forget copula intervals")
+            @warn "don't forget copula intervals" exception = ee
+            # println("don't forget copula intervals")
         end
     end
 
@@ -1799,7 +1800,7 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
 
     for y in eachindex(u_years)
         yr = u_years[y]
-        println("$y of $(length(u_years))")
+        @info "$y of $(length(u_years))"
         local rep_w
         if occursin("SCF", source)
             rep_w = CSV.read(init_path * "/1_Data/SCF+/replicate_weights/replicate_weights_$yr.csv", DataFrame)
@@ -2402,12 +2403,12 @@ function gen_proof_of_concept_figure_Γ_comparison(d_data_dict, r_data_dict, mod
                 # cond   = length(sequence) == 1 ? vec(.!any(isnan.(dataₒ), dims=2)) : vec(.!any(isnan.(dataₒ), dims=1))
                 cond = length(sequence) == 1 ? vec(.!any(isnan.(r_data_dict[m][o]["data"][sequence..., :]), dims=2)) : vec(.!any(isnan.(r_data_dict[m][o]["data"][sequence, :]), dims=1))
 
-                println(r_data_dict[m][o]["data"][sequence, :])
-                println(d_data_dict[m][o]["data"][sequence, :])
-                println(cond)
-                println(length(cond))
-                println(sequence)
-                println(dataₒ)
+                # println(r_data_dict[m][o]["data"][sequence, :])
+                # println(d_data_dict[m][o]["data"][sequence, :])
+                # println(cond)
+                # println(length(cond))
+                # println(sequence)
+                # println(dataₒ)
 
                 sxaxis = xaxis[cond]
                 sdata = length(sequence) == 1 ? dataₒ[cond] : dataₒ[:, cond]

@@ -167,7 +167,7 @@ function bridge_sampler(model_mcmc, model_elements, param_sizes, priors, meas_in
     # samples_4_fit = vcat([samples[fit_index, i, :] for i in 1:nchains]...)
     samples_4_iter = vcat([samples[nperchain:nperchain, i, :] for i in 1:nchains]...) # making one long chain from last iteration
     lprobs_sub = model_mcmc["lprobs"][nperchain:nperchain, :][:]
-    println(size(samples_4_iter))
+    # println(size(samples_4_iter))
 
     # Fit proposal distribution 
     N1 = size(samples_4_iter, 1)
@@ -244,7 +244,7 @@ function bridge_sampler(model_mcmc, model_elements, param_sizes, priors, meas_in
         r = (N1 / N2) * numerator / denominator
         criterion_val = abs((r - r_old) / r)
         i += 1
-        println("Iteration: $i -- Log marginal likelihood estimate: $(round((log(r) + lstar), digits=6))")
+        @info "Iteration: $i -- Log marginal likelihood estimate: $(round((log(r) + lstar), digits=6))"
     end
 
     bridge_dict["logml"] = log(r) + lstar

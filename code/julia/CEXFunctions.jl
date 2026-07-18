@@ -128,7 +128,7 @@ function clean_cex_all(IS_prefixes, years, key_selector, fmli_cols, mtbi_cols, i
             # println(names(df[1]))
             df[1] = generate_veh_repairs!(df[1])
         else
-            println("This data does not have MTBI UCCs to extract")
+            @warn "This data does not have MTBI UCCs to extract"
             df[1] = DataFrame()
         end
 
@@ -139,7 +139,7 @@ function clean_cex_all(IS_prefixes, years, key_selector, fmli_cols, mtbi_cols, i
             df[3] = renaming_columns!(df[3], itbi_names_dict)
             
         else
-            println("This data does not have ITBI UCCs to extract")
+            @warn "This data does not have ITBI UCCs to extract"
             df[3] = DataFrame()
         end 
 
@@ -162,7 +162,7 @@ function clean_cex_all(IS_prefixes, years, key_selector, fmli_cols, mtbi_cols, i
             try 
                 rename!(df[2], :NUM_AUTO => :VEHQ)
             catch ee
-                println("No NUM_AUTO column")
+                @warn "No NUM_AUTO column"
             end
         end
 
@@ -276,7 +276,7 @@ function clean_cex(IS_prefixes, years, key_selector, fmli_cols, mtbi_cols, fmli_
             # println(names(df[1]))
             df[1] = generate_veh_repairs!(df[1])
         else
-            println("This data does not have MTBI UCCs to extract")
+            @warn "This data does not have MTBI UCCs to extract"
             df[1] = DataFrame()
         end
 
@@ -340,8 +340,9 @@ function clean_final_df(data)
         old_c = c[1:end-2]
         try 
             data[!, old_c] = coalesce.(data[:, old_c], data[:, c])
-        catch e 
-            println("Error: ", e)
+        catch e
+            @warn "Failed to coalesce column $(old_c)" exception = e
+            # println("Error: ", e)
         end
     end
 
@@ -752,7 +753,7 @@ function clean_debt_df(debt_df, group_cols, wealth_cols, type)
         for (i,c) in enumerate(wealth_cols)
 
             if c ∈ names(quarterly_df)
-                println(c)
+                # println(c)
                 cols_expr    = [Symbol(c) =>sum]
 
                 df = select(quarterly_df, [:CUSTOM_CUID, :REF_DATE, :REFMO, Symbol(c)])
@@ -914,7 +915,7 @@ function merge_fmli_files(fmli_files, mnemonics::Vector{String})
 
     # Loop over monthly tables
     for (k, v) in fmli_files
-        println(k)
+        # println(k)
 
         # Select target variables
         selected_cols = filter(x -> x !== nothing, [col in names(v) ? col : nothing for col in mnemonics])
@@ -1094,7 +1095,7 @@ function csv_files_to_dataframes(survey_id::String, download_folder::String, pre
         end
 
     catch ee
-        println("No files found for survey $(survey_id)")
+        @warn "No files found for survey $(survey_id)"
         @info(ee)
     end
 
@@ -1410,11 +1411,11 @@ end
 
 function check_duplicality(sep_dfs)
     for (k,v) in sep_dfs
-        println(k)
-        println("Number of duplicates: ", sum(nonunique(v[:, ["CUSTOM_CUID", "REF_DATE"]])))
-        println("Number of unique: ", nrow(unique(v[:, ["CUSTOM_CUID", "REF_DATE"]])))
-        println("Number of rows: ", size(v, 1))
-        println("Number of columns: ", size(v, 2))
+        # println(k)
+        # println("Number of duplicates: ", sum(nonunique(v[:, ["CUSTOM_CUID", "REF_DATE"]])))
+        # println("Number of unique: ", nrow(unique(v[:, ["CUSTOM_CUID", "REF_DATE"]])))
+        # println("Number of rows: ", size(v, 1))
+        # println("Number of columns: ", size(v, 2))
     end 
 end
 
