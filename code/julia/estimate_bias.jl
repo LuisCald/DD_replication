@@ -283,4 +283,4 @@ for meas in ["income", "wealth", "consum"]
     end
 end
 
-println("\nDone.")
+@info "Done."

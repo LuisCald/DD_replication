@@ -100,7 +100,7 @@ function estimate_tau²s(MV, pcs, number_of_dfs)
         cond = vec(mapslices(col -> all((!isnan).(col)), MV[i], dims=1))
         data = MV[i][:, cond]
         var = diag(cov(data'))
-        println(var)
+        # println(var)
         Σ_tau² += mean(var)
     end
     Σ_tau² = Σ_tau² ./ number_of_dfs
@@ -109,7 +109,7 @@ function estimate_tau²s(MV, pcs, number_of_dfs)
     cond = vec(mapslices(col -> all((!isnan).(col)), pcs, dims=1))
     data = pcs[:, cond]
     var = diag(cov(data'))
-    println(var)
+    # println(var)
     Ω_tau² = mean(var)
     return Ω_tau², Σ_tau²
 end

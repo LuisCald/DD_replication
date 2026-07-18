@@ -169,7 +169,7 @@ function generate_counterfactual_agg_factors(agg_data, counterfactuals_dict_choi
     # else
     # end
     dropped_rows_ub = nrow(new_aggs) - nrow(b)
-    println(dropped_rows_ub)
+    # println(dropped_rows_ub)
 
     select!(new_aggs, Not(["date", "time", "year", "quarter"]))
         
@@ -490,7 +490,7 @@ function generate_m_shares_levels_quantiles(data_dict, counterfactuals_data_dict
     # Plotting
     for source in collect(keys(data_dict))
         for meas in measures 
-            println("Generating plots for $meas")
+            @info "Generating plots for $meas"
             if grid == 10
             # For the reconstruction 
                 # Top 10
@@ -675,7 +675,7 @@ function generate_c_shares_levels_quantiles(data_dict, counterfactuals_data_dict
 
     for source in collect(keys(data_dict))
         for meas in measures 
-            println("Generating plots for $meas")
+            @info "Generating plots for $meas"
             # if grid == 10
             # For the reconstruction 
                 # # Top 10
@@ -737,8 +737,8 @@ function generate_c_shares_levels_quantiles(data_dict, counterfactuals_data_dict
                 cond     = source != "consensus" ? findall(!isnan, qu[i, :]) : [1] # .!isnan.(all_lv_o[1][:, j])
 
                 if isempty(cond)
-                    println(source)
-                    println(qu'[:, i])
+                    # println(source)
+                    # println(qu'[:, i])
                     break
                 end
 
@@ -747,8 +747,8 @@ function generate_c_shares_levels_quantiles(data_dict, counterfactuals_data_dict
                 s_dts    = dts[cond[1]:cond[end]]
 
                 for (j,k) in enumerate(collect(keys(cf_dict)))
-                    println(size(cf_dict[k]["bottomq"]))
-                    println(size(cf_dict[k]["topq"]))
+                    # println(size(cf_dict[k]["bottomq"]))
+                    # println(size(cf_dict[k]["topq"]))
                     Plots.plot(s_axis, 
                                 s_data,
                                 xlabel = L"\textrm{Year}",
@@ -772,7 +772,7 @@ function generate_c_shares_levels_quantiles(data_dict, counterfactuals_data_dict
             end
 
             # Top quantile  
-            println(size(top_qu))
+            # println(size(top_qu))
             cond     = source != "consensus" ? findall(!isnan, top_qu) : [1] # .!isnan.(all_lv_o[1][:, j])
             if isempty(cond)
                 break

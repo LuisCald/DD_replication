@@ -67,13 +67,13 @@ function fevd_dist_vs_agg(
 
     # S = hcat(S_f, S_y)               # n × (r+q) --- in the general case, its basically the identity
     if shock_order === :dist_first
-        println("--- FEVD: Distributional shocks ordered first ---")
+        @info "--- FEVD: Distributional shocks ordered first ---"
         # Original ordering: [Distributional, Aggregates]
         S = hcat(S_f, S_y)
         dist_shock_indices = 1:r
         agg_shock_indices = (r+1):(r+q)
     elseif shock_order === :agg_first
-        println("--- FEVD: Aggregate shocks ordered first ---")
+        @info "--- FEVD: Aggregate shocks ordered first ---"
         # New ordering: [Aggregates, Distributional]
         S = hcat(S_y, S_f) # Concatenate Y shocks first
         agg_shock_indices = 1:q         # Aggregate shocks are now first

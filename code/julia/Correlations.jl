@@ -31,7 +31,7 @@ function create_micro_df(copula_obj, pcfs, data_tag, k, folder, time_params, met
     # p = Progress(T, desc="Creating micro data for $k")
     # Threads.@threads 
 
-    println("Creating micro data for $k")
+    @info "Creating micro data for $k"
     for y in eachindex(q_dates)
         if any(isfinite, copula_obj[cop_ind..., y])
             # Make dataframe 
@@ -51,7 +51,8 @@ function create_micro_df(copula_obj, pcfs, data_tag, k, folder, time_params, met
     try
         sort!(micro_full_df, :time)
     catch ee
-        println(ee)
+        @warn "Failed to sort micro data by time" exception = ee
+        # println(ee)
     end
 
     # Export the data
@@ -1038,7 +1039,7 @@ function compute_tail_dependence(copula_obj, pcfs, data_name, folder, time_param
         # Export tail_dep_l and tail_dep_u to excel # TODO: to check indices
         half_way_p = floor(Int, grid / 2)
         for (cc, c) in enumerate(combs)
-            println(c)
+            # println(c)
             tail_dep_u[c*"_df"] = DataFrame(tail_dep_u[c][:, half_way_p+1:grid-1], Symbol.(["tdu_$(i)" for i in half_way_p+1:grid-1]))
             tail_dep_l[c*"_df"] = DataFrame(tail_dep_l[c][:, 1:half_way_p], Symbol.(["tdl_$(i)" for i in 1:half_way_p]))
 
@@ -1057,7 +1058,7 @@ function compute_tail_dependence(copula_obj, pcfs, data_name, folder, time_param
 
             Plots.plot()
             for i in eachindex(seq)
-                println(L"%$(q_dates[seq[i]])"[1:5] * "\$")
+                # println(L"%$(q_dates[seq[i]])"[1:5] * "\$")
                 # println(q_dates[seq[i]])
 
                 Plots.plot!(

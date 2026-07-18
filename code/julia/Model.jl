@@ -1664,7 +1664,7 @@ function data_likelihood_contribution(eta, P)
     if sign_logdet < 0
         # println("reversing at ", t)
         logC = -1.e12
-        println(logdet_P)
+        # println(logdet_P)
     else
         LinearAlgebra.inv!(lu!(P))  # in-place inverse. alternative to lu! is cholesky!, but I would need a spd matrix, but it doubles the time it takes 
         logC = -(length(measures)*log(2π)+logdet_P.+eta'*(P*eta))[1] .* 0.5  # white noise case. P = inv_P header

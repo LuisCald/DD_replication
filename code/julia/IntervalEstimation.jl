@@ -23,7 +23,8 @@ function bootstrap_non_parametric_approach!(sub_boot_dict, DCT_boot, period_data
                 multiplier                                     = abs.(avg_aggr / meas_average)
                 
                 if multiplier[1] > 20
-                    println(multiplier[1])
+                    # println(multiplier[1])
+                    @warn "interval bootstrap: blanking draw for $meas (level multiplier $(round(multiplier[1], digits = 1)) > 20)"
                     sub_boot_dict[meas]["levels"][:, d, count]     .= NaN
                     sub_boot_dict[meas]["quantiles"][:, d, count]  .= NaN
                     sub_boot_dict[meas]["shares"][:, d, count]     .= NaN
