@@ -236,16 +236,9 @@ catch e
     @warn "Anatomy step failed" exception=(e, catch_backtrace())
 end
 
-# ── Step 9: Cyclicality of consumption (recession panels) ─────
-@info "Generating cyclicality-of-consumption plots..."
-try
-    generate_relative_to_peak_plots(; tag=tag)
-    @info "Cyclicality analysis complete."
-catch e
-    @warn "Cyclicality analysis failed" exception=(e, catch_backtrace())
-end
+# (The consumption-across-recessions panels are produced in Stata, not here.)
 
-# ── Step 10: Out-of-sample forecasts (fig: recon_missing1) ────
+# ── Step 9: Out-of-sample forecasts (fig: recon_missing1) ─────
 @info "Running out-of-sample forecasts (SCF iterative + CEX extensive)..."
 try
     how_much = 1
