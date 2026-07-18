@@ -11,57 +11,74 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
     qr = periods[yr][1]  # first quarter of the first year
 
     R"""
-    library(x12)                       # x13binary must be installed
+    suppressMessages(library(x12))     # x13binary must be installed
     """
 
-    # Loop over these rows
-    for i in condition_axes
-        indexing = tuple(i, :)
+    # The X-13 banner ("Execution began ...") is printed by the x13 BINARY,
+    # a child process — R-level capture.output cannot catch it. Redirecting
+    # Julia's stdout at the FD level silences the child too; @warn goes to
+    # stderr, so genuine failures stay visible.
+    redirect_stdout(devnull) do
+        # Loop over these rows
+        for i in condition_axes
+            indexing = tuple(i, :)
 
-        df_row = df_to_des[indexing...]
+            df_row = df_to_des[indexing...]
 
-        # Find indices of NaNs across columns
-        nan_ids = findall(isnan, df_row)
+            # Find indices of NaNs across columns
+            nan_ids = findall(isnan, df_row)
 
-        # Since x12 cannot handle NaNs, we fill them with linear interpolation. We do not use these values anyway, so, its completely fine.
-        df_row = fill_between_mean!(df_row)
+            # Since x12 cannot handle NaNs, we fill them with linear interpolation. We do not use these values anyway, so, its completely fine.
+            df_row = fill_between_mean!(df_row)
 
-        # TODO: does not work on my machine due to the R installed on my machine being rosetta based i think
-        R"""
-        an.error.occured <- FALSE
-        tryCatch({
-            # 1  Build the ts object (this prints nothing, so no need to silence)
-            ts_obj <- ts(
-                $(df_row),
-                frequency = 4,
-                start = c($yr, $qr)
-            )
-
-            # 2  Run X‑13ARIMA/SEATS quietly
-            invisible(
-            capture.output(
-                adjusted <- x12(ts_obj)
-            )
-            )
-
-            # 3  Extract the X‑11 adjusted component
-            d <- adjusted@d11
-            cat("success row", $i, "\n")
-
-        }, error = function(e) {
-            an.error.occured <<- TRUE
-            cat("error row", $i, ":", e$message, "\n")
+            # TODO: does not work on my machine due to the R installed on my machine being rosetta based i think
+            R"""
+            an_error_occured <- FALSE
+            err_msg <- ""
             d <- $(df_row)                 # fallback: keep original series
-        })
+            tryCatch({
+                # 1  Build the ts object (this prints nothing, so no need to silence)
+                ts_obj <- ts(
+                    $(df_row),
+                    frequency = 4,
+                    start = c($yr, $qr)
+                )
 
-        """
+                # 2  Run X‑13ARIMA/SEATS quietly
+                invisible(
+                capture.output(
+                    adjusted <- x12(ts_obj)
+                )
+                )
 
-        @rget d
-        # Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
-        # Plots.plot!(df_row, label="Original series", linestyle=:dash)
-        # Plots.savefig("x11_$(source)_$i.pdf")
-        df_to_des[i, :] = d
-        df_to_des[i, nan_ids] .= NaN
+                # 3  Extract the X‑11 adjusted component
+                d <<- adjusted@d11
+                # cat("success row", $i, "\n")
+
+            }, error = function(e) {
+                an_error_occured <<- TRUE
+                err_msg <<- e$message
+                # cat("error row", $i, ":", e$message, "\n")
+                # d <- $(df_row)           # BUG (old): assigned a LOCAL d, so on
+                #                          # failure @rget reused the previous
+                #                          # row's adjusted values — fallback is
+                #                          # now set before the tryCatch.
+            })
+
+            """
+
+            @rget d
+            @rget an_error_occured
+            if an_error_occured
+                @rget err_msg
+                @warn "X-13 failed for row $i of $source; keeping original series" err_msg
+            end
+            # Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
+            # Plots.plot!(df_row, label="Original series", linestyle=:dash)
+            # Plots.savefig("x11_$(source)_$i.pdf")
+            df_to_des[i, :] = d
+            df_to_des[i, nan_ids] .= NaN
+        end
     end
 
     return df_to_des
