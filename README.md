@@ -153,7 +153,7 @@ All data used in this paper are publicly available. Some datasets require free r
 | Julia | >= 1.10 | Model estimation and all quantitative analysis |
 | Stata | >= 17 (MP recommended) | Survey data cleaning and local projections |
 | Python | >= 3.10 | Data preprocessing (stationarity, seasonal adjustment) |
-| R | >= 4.3 | Hermite series estimation, copula estimation, X-12 |
+| R | >= 4.3 | optional: X-12 deseasoning of DFA-component anchors (`X12_averages.R`) |
 
 ### Julia Packages
 
@@ -259,9 +259,7 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── MEILC_MEGC.py             Multivariate Gini coefficient
 │   │   └── multidim_inequality.py     Multidimensional inequality measures
 │   └── R/
-│       ├── HermiteSeriesEstimator.R   Hermite series density estimation
-│       ├── NonParametricCopula.R      Non-parametric copula estimation
-│       └── X12_script.R              X-12 seasonal adjustment
+│       └── X12_averages.R             X-12 deseasoning of DFA-component anchors (optional)
 │
 ├── publish_to_DD_data.sh              Copy regenerated outputs to a DD_data checkout
 │
