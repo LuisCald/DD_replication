@@ -15,8 +15,17 @@ NREF = 80_000
 h(n) = 0.42 * sqrt(n / NREF) + 0.03
 klabel(n) = latexstring("\\bar n \\approx ", string(round(Int, n / 1000)), "\\textrm{k}")
 
-# publication lags in years (draft numbers, VERIFY)
-LAG = Dict("SCF" => 1.75, "CPS" => 0.75, "PSID" => 1.7, "SIPP" => 1.5,
+# Publication lags in years, from each wave's model-dated quarter to public
+# microdata release. Verified 2026-07-18:
+#   SCF  : 2022 wave (dated 2022Q3) released 2023-10-18            -> ~1.2
+#   CPS  : ASEC microdata ~Sept of survey yr; income dated Q4(Y-1) -> ~0.75
+#   PSID : family-file early release ~1.7-1.9y after Q2 interviews
+#   SIPP : wealth dated Q4 of ref yr; 2023 SIPP released 2024-12-12 -> ~2.0
+#   CEX  : 2023 PUMD released 2024-09-25; last quarter 2023Q4      -> ~1.0
+#   Aggregates: NIPA second estimate ~2 months                     -> ~0.15
+# LAG = Dict("SCF" => 1.75, "CPS" => 0.75, "PSID" => 1.7, "SIPP" => 1.5,
+#            "CEX" => 1.0, "Aggregates" => 0.15)   # old draft numbers
+LAG = Dict("SCF" => 1.2, "CPS" => 0.75, "PSID" => 1.8, "SIPP" => 2.0,
            "CEX" => 1.0, "Aggregates" => 0.15)
 
 scf  = pick("SCF")
