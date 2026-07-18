@@ -170,7 +170,9 @@ function fevd_dist_vs_agg(
                     for i in 1:integral_pcf_grid
                         # Using coefs, generate pcf function and then integrate pcf function over diff. intervals
                         # integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, h, s], grid_pcf - 1, u))[1] .* select_series[s, correction_names[m]], intervals[i], intervals[i+1], rtol=1e-8)
-                        integral, _ = quadgk(u -> eval_quantile_function(split_pcfs[m], grid_pcf - 1, u)[1], intervals[i], intervals[i+1], rtol=1e-8)
+                        # integral, _ = quadgk(u -> eval_quantile_function(split_pcfs[m], grid_pcf - 1, u)[1], intervals[i], intervals[i+1], rtol=1e-8)
+                        # Pure polynomial integrand → exact via the closed-form Legendre integrals
+                        integral = sum(split_pcfs[m][o+1] * (integrate_legendre_polynomial(o, intervals[i+1]) - integrate_legendre_polynomial(o, intervals[i])) for o in 0:grid_pcf-1)
 
                         # Undo treatment of data => gives us average quantile within the interval
                         new_data_pcf[m][i, s, h] = integral / (intervals[i+1] - intervals[i]) #reverse_inverse_hyperbolic_sine(integral)[1] .* select_series[t, correction_names[m]] #./ (intervals[i+1] - intervals[i])

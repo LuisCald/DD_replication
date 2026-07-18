@@ -1801,7 +1801,8 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
                 else
                     for i in 1:integral_pcf_grid
                         # Using coefs, generate pcf function and then integrate pcf function over diff. intervals
-                        integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, t], max_order, u))[1] .* select_series[t, correction_names[m]], intervals[i], intervals[i+1], rtol=1e-8)
+                        # integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, t], max_order, u))[1] .* select_series[t, correction_names[m]], intervals[i], intervals[i+1], rtol=1e-8)
+                        integral = gauss_legendre_integrate(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, t], max_order, u))[1] * select_series[t, correction_names[m]], intervals[i], intervals[i+1])
 
                         # Undo treatment of data => gives us average quantile within the interval
                         new_data_pcf[m][i, t] = integral / (intervals[i+1] - intervals[i]) #reverse_inverse_hyperbolic_sine(integral)[1] .* select_series[t, correction_names[m]] #./ (intervals[i+1] - intervals[i])
@@ -2373,7 +2374,8 @@ function get_implicate!(data_vector, q_dict, draw, data_name, type, obs_data, fu
                     for i in 1:integral_pcf_grid
                         # Using coefs, generate pcf function and then integrate pcf function over diff. intervals 
                         # try
-                        integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, t], grid_pcf - 1, u))[1] .* select_series[t, correction_names[m]], intervals[i], intervals[i+1], rtol=1e-8)
+                        # integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, t], grid_pcf - 1, u))[1] .* select_series[t, correction_names[m]], intervals[i], intervals[i+1], rtol=1e-8)
+                        integral = gauss_legendre_integrate(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, t], grid_pcf - 1, u))[1] * select_series[t, correction_names[m]], intervals[i], intervals[i+1])
                         # catch E
                         #     println(split_pcfs[m][:, t])
                         #     println(select_series[t, correction_names[m]])

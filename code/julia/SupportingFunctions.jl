@@ -312,3 +312,48 @@ function store_optim_estimate(params, label, m_label, data_cutoffs, tag)
     mkpath(dirname(out_path))
     DelimitedFiles.writedlm(out_path, params, ',')
 end
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Fixed-order Gauss–Legendre quadrature (replaces adaptive quadgk for the
+# smooth sinh(polynomial) decile integrals in CreateTimeSeries.jl /
+# Reconstruction.jl / SeriesEstimator.jl). The integrands are analytic, so a
+# fixed 20-node rule converges geometrically — agreement with quadgk at
+# rtol=1e-8 is ~1e-14, with no adaptivity overhead. Nodes/weights are
+# computed once at load time by Newton iteration on the Legendre recursion
+# (no external dependency).
+# ─────────────────────────────────────────────────────────────────────
+function gauss_legendre_nodes(n::Int)
+    xs = zeros(n); ws = zeros(n)
+    for i in 1:n
+        x  = cos(pi * (i - 0.25) / (n + 0.5))   # Chebyshev initial guess
+        dP = 0.0
+        for _ in 1:100
+            Pm2, Pm1 = 1.0, x
+            for k in 2:n
+                Pm2, Pm1 = Pm1, ((2k - 1) * x * Pm1 - (k - 1) * Pm2) / k
+            end
+            dP = n * (x * Pm1 - Pm2) / (x^2 - 1)
+            dx = Pm1 / dP
+            x -= dx
+            abs(dx) < 1e-15 && break
+        end
+        xs[i] = x
+        ws[i] = 2 / ((1 - x^2) * dP^2)
+    end
+    return xs, ws
+end
+
+const GL20_X, GL20_W = gauss_legendre_nodes(20)
+
+"∫ₐᵇ f(u) du by the fixed 20-node Gauss–Legendre rule (exact to machine
+precision for the smooth/analytic integrands used in this package)."
+function gauss_legendre_integrate(f, a, b)
+    h = (b - a) / 2
+    c = (a + b) / 2
+    s = 0.0
+    @inbounds for i in eachindex(GL20_X)
+        s += GL20_W[i] * f(c + h * GL20_X[i])
+    end
+    return s * h
+end

@@ -923,7 +923,8 @@ function integrate_quantile_functions!(new_data_pcf, split_pcfs, grid_pcf, inter
             else
                 for i in axes(new_data_pcf[m], 1)
                     # Using coefs, generate pcf function and then integrate pcf function over diff. intervals
-                    integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, t], use_order, u))[1] * agg_corr[t, m], intervals[i], intervals[i+1], rtol=1e-8)
+                    # integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, t], use_order, u))[1] * agg_corr[t, m], intervals[i], intervals[i+1], rtol=1e-8)
+                    integral = gauss_legendre_integrate(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, t], use_order, u))[1] * agg_corr[t, m], intervals[i], intervals[i+1])
 
                     # Undo treatment of data => gives us average quantile within the interval
                     new_data_pcf[m][i, t] = integral / (intervals[i+1] - intervals[i])
