@@ -33,9 +33,11 @@ do "${init_path}/5_Code/code/stata/clean_SCF_2022.do"
 * ── Step 2: SIPP panel construction ───────────────────────────
 display _n "──── Step 2: SIPP panel construction ────"
 do "${init_path}/5_Code/code/stata/master_sipp_file.do"
-do "${init_path}/5_Code/code/stata/clean_SIPP_panels.do"
-do "${init_path}/5_Code/code/stata/sipp_panel_constructor.do"
-do "${init_path}/5_Code/code/stata/connect_SIPP_panels.do"
+* Dead ends (audit 2026-07): their outputs are read by nothing downstream —
+* master_sipp_file.do re-reads the raw panels itself and alone writes SIPP1-3.csv.
+* do "${init_path}/5_Code/code/stata/clean_SIPP_panels.do"
+* do "${init_path}/5_Code/code/stata/sipp_panel_constructor.do"
+* do "${init_path}/5_Code/code/stata/connect_SIPP_panels.do"
 
 * ── Step 3: Main data cleaning (SCF, PSID, CEX, ACS, CPS) ────
 display _n "──── Step 3: Main data cleaning ────"
