@@ -68,30 +68,39 @@ run_data() {
     echo "[1a] Python: converting monthly series to quarterly..."
     python3 "$PYTHON_DIR/convert_monthly_to_quarterly.py"
 
-    echo "[1a] Python: generating Forbes 400 data..."
-    python3 "$PYTHON_DIR/generateForbes400.py"
-
     echo "[1a] Python: cleaning Brake data..."
     python3 "$PYTHON_DIR/clean_brake_data.py"
 
-    # 1b. Stata data cleaning
+    # 1b. Stata data cleaning (writes *_nogrowth.xlsx, SIPP1-3.csv, aggregates)
     echo "[1b] Stata: running master data pipeline..."
     cd "$PROJECT_ROOT"
     stata-mp -b do "$STATA_DIR/00_master_data.do"
 
-    # 1c. Python stationarity transformations
-    echo "[1c] Python: stationarity transformations..."
+    # 1c. Growth correction (Julia): align PSID/SCF income to the wealth date
+    #     *_nogrowth.xlsx -> PSID_new.csv + SCF_noForbes_new.csv
+    #     (was missing from this script; Forbes below depends on its output)
+    echo "[1c] Julia: growth correction..."
+    julia --project="$JULIA_DIR/env" "$JULIA_DIR/GrowthCorrection.jl"
+
+    # 1d. Forbes-400 augmentation: SCF_noForbes_new.csv -> SCF_new.csv
+    #     (moved AFTER Stata + growth correction — it consumes their output;
+    #      previously ran first and used stale inputs)
+    echo "[1d] Python: generating Forbes 400 data..."
+    python3 "$PYTHON_DIR/generateForbes400.py"
+
+    # 1e. Python stationarity transformations
+    echo "[1e] Python: stationarity transformations..."
     python3 "$PYTHON_DIR/make_stationary.py"
     python3 "$PYTHON_DIR/make_stationary_x12.py"
 
     # 1d. R scripts
-    echo "[1d] R: Hermite series estimation..."
+    echo "[1f] R: Hermite series estimation..."
     Rscript "$R_DIR/HermiteSeriesEstimator.R"
 
-    echo "[1d] R: non-parametric copula estimation..."
+    echo "[1f] R: non-parametric copula estimation..."
     Rscript "$R_DIR/NonParametricCopula.R"
 
-    echo "[1d] R: X-12 seasonal adjustment..."
+    echo "[1f] R: X-12 seasonal adjustment..."
     Rscript "$R_DIR/X12_script.R"
 
     echo "Stage 1 complete."
