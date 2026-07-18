@@ -227,7 +227,6 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── FEVD.jl                    Forecast error variance decomposition
 │   │   ├── HistoricalDecomposition.jl Historical decomposition
 │   │   ├── CounterfactualRuns.jl      Counterfactual exercises
-│   │   ├── CyclicalityOfConsumption2.jl  Recession consumption dynamics
 │   │   ├── AllPlots.jl                Proof-of-concept and main figures
 │   │   ├── CEXFunctions.jl            CEX data utilities
 │   │   ├── MDD.jl                     Marginal data density
@@ -335,8 +334,7 @@ and its included appendices (audited 2026-07).
 | FEVD tables (Decompositions appendix) | `from_mcmc/data/fevd_table.*` | Step 6 (`DD_FULL_RESULTS`) |
 | Historical decomposition `hd_recessions_f1–f8` (+`_pre2000s`) | `from_mcmc/plots/historical_decomposition/` | Step 7 |
 | Information shares `ow_shares_f*`, interpolation share `ow_interp_share` | `from_mcmc/plots/anatomy/` | Step 8 |
-| Consumption dynamics across recessions (`consumption_plots/`) | via `generate_relative_to_peak_plots` | Step 9 |
-| Predictability given baseline params (`fig:recon_missing1`): CEX extensive forecasts + SCF drop-one-wave iterative | `.../forecasts/{extensive,iterative}/` | Step 10 |
+| Predictability given baseline params (`fig:recon_missing1`): CEX extensive forecasts + SCF drop-one-wave iterative | `.../forecasts/{extensive,iterative}/` | Step 9 |
 | Proof-of-concept figures (Legendre coefs, copula weights, KL) | `Plots/proof_of_concept/` | `DD_PLOT_PROOF=1` (during data prep) |
 | MCMC convergence `log_probs*` | `from_mcmc/bayesian_convergence/` | written during Stage 2 estimation |
 
@@ -362,6 +360,7 @@ for compilation (only `data_timeline.jl` writes to Overleaf directly).
 | Order-analysis / local-vs-global estimator figures (`Plots/order_analysis/`) | `SeriesEstimator.jl` (standalone) |
 | HANK validation figures (`Plots/HANK/`) | separate HANK replication package (not included) |
 | Consumption-along-income local projections (`Plots/IRFs_and_Trends/`) | Stata (`prep_micro_data.do` + local projections) |
+| Consumption dynamics across recessions (`consumption_plots/*.jpg`) | Stata — NOTE: no do-file in the repo writes these filenames; recover the producing script |
 | `Tables/DataCoverage.tex`, hand-written tables, TikZ diagrams | manual / in the .tex |
 
 ## References
