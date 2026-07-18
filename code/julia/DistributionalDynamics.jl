@@ -16,7 +16,7 @@
 using Pkg
 Pkg.activate(joinpath(@__DIR__, "env"))
 using ProgressMeter
-using QuadGK
+# using QuadGK  # replaced by closed-form Legendre integrals + fixed Gauss–Legendre (SupportingFunctions.jl)
 using Distributed
 # using BAT 
 # using ValueShapes

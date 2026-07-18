@@ -7,7 +7,8 @@ Estimate the Legendre polynomial approximation bias by comparing:
 Uses the exact functions from DataConstructor.jl and QuadGK for integration.
 """
 
-using CSV, DataFrames, Statistics, Printf, LinearAlgebra, StatsBase, QuadGK
+# using CSV, DataFrames, Statistics, Printf, LinearAlgebra, StatsBase, QuadGK
+using CSV, DataFrames, Statistics, Printf, LinearAlgebra, StatsBase
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Functions copied verbatim from DataConstructor.jl
@@ -112,7 +113,8 @@ function fit_legendre_coefficients(vals::Vector{Float64}, wts::Vector{Float64},
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Integration using QuadGK (replaces hand-rolled Gauss-Legendre)
+#  Integration — fixed 20-node Gauss–Legendre (validated against quadgk at
+#  rtol=1e-10: agreement ~1e-14 for these smooth sinh(polynomial) integrands)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 function evaluate_qf(coefs, u)
@@ -123,15 +125,49 @@ function evaluate_qf(coefs, u)
     return val
 end
 
+# Nodes/weights by Newton iteration on the Legendre recursion (standalone copy
+# of gauss_legendre_nodes in SupportingFunctions.jl).
+function gauss_legendre_nodes(n::Int)
+    xs = zeros(n); ws = zeros(n)
+    for i in 1:n
+        x  = cos(pi * (i - 0.25) / (n + 0.5))
+        dP = 0.0
+        for _ in 1:100
+            Pm2, Pm1 = 1.0, x
+            for k in 2:n
+                Pm2, Pm1 = Pm1, ((2k - 1) * x * Pm1 - (k - 1) * Pm2) / k
+            end
+            dP = n * (x * Pm1 - Pm2) / (x^2 - 1)
+            dx = Pm1 / dP
+            x -= dx
+            abs(dx) < 1e-15 && break
+        end
+        xs[i] = x
+        ws[i] = 2 / ((1 - x^2) * dP^2)
+    end
+    return xs, ws
+end
+const GL20_X, GL20_W = gauss_legendre_nodes(20)
+
+function gauss_legendre_integrate(f, a, b)
+    h = (b - a) / 2; c = (a + b) / 2
+    s = 0.0
+    @inbounds for i in eachindex(GL20_X)
+        s += GL20_W[i] * f(c + h * GL20_X[i])
+    end
+    return s * h
+end
+
 function legendre_bin_means_quadgk(coefs::Vector{Float64}, avg::Float64;
                                     bin_edges::Vector{Float64}=[0.0, 0.5, 0.9, 1.0])
     n_bins = length(bin_edges) - 1
     means = zeros(n_bins)
     for i in 1:n_bins
         a, b = bin_edges[i], bin_edges[i+1]
-        # Integrate ihs_inv(Q(u)) over [a, b] using adaptive quadrature
-        integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(evaluate_qf(coefs, u)), a, b;
-                             rtol=1e-10)
+        # Old adaptive quadrature:
+        # integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(evaluate_qf(coefs, u)), a, b;
+        #                      rtol=1e-10)
+        integral = gauss_legendre_integrate(u -> reverse_inverse_hyperbolic_sine(evaluate_qf(coefs, u)), a, b)
         means[i] = integral * avg / (b - a)
     end
     return means

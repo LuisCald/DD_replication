@@ -65,15 +65,28 @@ function Q_m(m, x)
 end
 
 
+# ∫₀ᵘ Q_m(s) ds in closed form (Bonnet's recursion; boundary terms at 0
+# cancel since P_n(−1) = (−1)ⁿ). Exact — the quadgk version below ran at
+# rtol=1e-3, so this is both faster and up to ~1e-3 more accurate.
 function integrate_legendre_polynomial(m, u)
     if m == 0
         return u
     else
-        integral_cop, _ = quadgk(u -> Q_m(m, u), 0, u, rtol=1e-3)
-
-        return integral_cop
+        x = 2u - 1
+        return (legendre_polynomial(m + 1, x) - legendre_polynomial(m - 1, x)) / (2 * sqrt(2m + 1))
     end
 end
+
+# Old quadrature-based version (kept for reference):
+# function integrate_legendre_polynomial(m, u)
+#     if m == 0
+#         return u
+#     else
+#         integral_cop, _ = quadgk(u -> Q_m(m, u), 0, u, rtol=1e-3)
+#
+#         return integral_cop
+#     end
+# end
 
 # Function to integrate the shifted Legendre polynomial
 function I_m(m, u)
@@ -470,7 +483,8 @@ Plots.savefig(joinpath(RESULTS_DIR, "mse_qf_$(String(measure_of_choice)).pdf"))
 # Integration 
 n_coefs = 21
 q_weights = get_quantile_weights(data, weights, n_coefs)
-integral, err = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(q_weights, n_coefs, u)) .* a[1, :income_per_hh], 0.1, 0.2, rtol=1e-8)
+# integral, err = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(q_weights, n_coefs, u)) .* a[1, :income_per_hh], 0.1, 0.2, rtol=1e-8)
+integral = gauss_legendre_integrate(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(q_weights, n_coefs, u)) * a[1, :income_per_hh], 0.1, 0.2)
 
 to_store = rand(n_coefs)
 for (i, j) in enumerate(0.0:0.01:0.099)
