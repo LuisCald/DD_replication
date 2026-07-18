@@ -93,15 +93,11 @@ run_data() {
     python3 "$PYTHON_DIR/make_stationary.py"
     python3 "$PYTHON_DIR/make_stationary_x12.py"
 
-    # 1f. R scripts
-    echo "[1f] R: Hermite series estimation..."
-    Rscript "$R_DIR/HermiteSeriesEstimator.R"
-
-    echo "[1f] R: non-parametric copula estimation..."
-    Rscript "$R_DIR/NonParametricCopula.R"
-
-    echo "[1f] R: X-12 seasonal adjustment..."
-    Rscript "$R_DIR/X12_script.R"
+    # (R is not part of the baseline data stage. HermiteSeriesEstimator.R and
+    #  NonParametricCopula.R were output-less estimator explorations, and
+    #  X12_script.R belonged to the Distributional_Oil project — all removed
+    #  2026-07. code/R/X12_averages.R remains for the optional DFA-component
+    #  anchor deseasoning; run it manually when enabling component anchors.)
 
     echo "Stage 1 complete."
 }
