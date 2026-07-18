@@ -322,7 +322,7 @@ save "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SIPP/made_panels/sipp_198
 // 	rename monthcode month 		// no missings
 
 	
-foreach x in 2014 { // 2018 2019 2020 2021 2022 2023 { 	// 
+foreach x in 2014 2018 2019 2020 2021 2022 2023 { 	//
 	cd /Users/lc/Dropbox/Distributional_Dynamics/1_Data/SIPP/raw_materials/`x'
 	
 	if `x' == 2014 {
