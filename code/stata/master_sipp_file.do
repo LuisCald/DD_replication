@@ -275,7 +275,19 @@ rename hhdebt tdebt
 rename h_wgt weight
 rename h_totinc income
 
+* ── PREP (verify, then activate the fix below): era-1/2 net-worth check ──────
+* Census convention (see clean_SIPP_panels.do notes): hhtnw = hhtwlth - unsecured,
+* i.e. "total wealth" already measures home/vehicle/business as EQUITY (net of
+* secured debt). If the diagnostic prints ~0, the active formula below
+* double-subtracts secured debt; switch to the commented line, which equals
+* hhtnw and matches the THNETWORTH concept used for 2013+.
+gen double _nw_check = hhtnw - (assets - undebt)
+summ _nw_check, d
+count if abs(_nw_check) > 1 & !missing(_nw_check)
+drop _nw_check
+
 gen wealth = assets - undebt - scdebt // net worth is computed weirdly by the SIPP at times 
+* gen wealth = assets - undebt   // <- activate after the check (= hhtnw; consistent with 2013+); comment out the line above
 drop hhtnw
 
 * Net worth in the SIPP is defined in a weird way
@@ -475,7 +487,11 @@ export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_process
 restore
 
 keep if year >= 2013
-export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP2.csv", replace
+* export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP2.csv", replace
+* ^ BUG (fixed): the 2013+ block was exported to SIPP2.csv (typo for SIPP3.csv) and
+*   then overwritten below — so SIPP3.csv was never produced by this pipeline and
+*   the trimming loop that follows had no effect. The export now happens AFTER the
+*   trim, to SIPP3.csv.
 
 sort year quarter 
 
@@ -494,6 +510,8 @@ foreach y of local years {
 		}
     }
 }
+
+export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP3.csv", replace
 
 * Break SIPP 1 into two pieces
 import delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP1.csv", clear
