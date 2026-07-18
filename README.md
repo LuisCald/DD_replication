@@ -237,10 +237,7 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── 00_master_data.do          Master Stata script (Stage 1)
 │   │   ├── data_cleaning.do           Main survey data cleaning (SCF, PSID, CEX, ACS, CPS)
 │   │   ├── clean_SCF_2022.do          SCF 2022 wave cleaning
-│   │   ├── clean_SIPP_panels.do       SIPP panel cleaning
-│   │   ├── connect_SIPP_panels.do     SIPP panel concatenation
-│   │   ├── sipp_panel_constructor.do  SIPP quarterly aggregation
-│   │   ├── master_sipp_file.do        SIPP utilities
+│   │   ├── master_sipp_file.do        SIPP construction (raw panels → SIPP1-3.csv)
 │   │   ├── insert_interview_dates.do  PSID interview date formatting
 │   │   ├── import_aggregates.do       FRED macro series import
 │   │   ├── x12series.do               X-12 seasonal adjustment
