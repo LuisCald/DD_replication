@@ -27,6 +27,16 @@ const HANK_ECON = get(ENV, "HANK_ECON", "1")
 const model_options = ModelOptions(
     tag = " HANK $(HANK_ECON)",
     number_of_dfs = 5,   # five replica datasets (a–e)
+    # HANK runs use QUINTILE integration grids (the replica moment targets are
+    # quintile bin means; polynomial orders unchanged from the baseline) —
+    # matches the historic HANK config and the grid_choice == 5 branch of the
+    # interval series ("bottom40" / "next40" / "top20").
+    estimator = SeriesEstimator(
+        grid_pcf = 11 + 1,
+        grid_cop = 11 + 1,
+        integral_pcf_grid = 5,
+        integral_cop_grid = 5,
+    ),
 )
 
 const obs_data = ObservedData(
