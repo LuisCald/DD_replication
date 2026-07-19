@@ -612,24 +612,38 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
     Σ̂⁻¹²ⱼ = Vector{Matrix{Float64}}(undef, length(sources))
     max_draws = 999
 
-    # File to save the sigma matrix. Only higher orders require a different computation.
-    # The cache key must also separate DATA VINTAGES: intervals and noise draws are
-    # bootstrapped from the raw survey files, so a run on regenerated data (the
-    # " new data" example: PSID_new/SCF_new + corrected SIPP1-3) must neither reuse
-    # the baseline caches nor overwrite them. Any tag containing "new data" gets its
-    # own cache namespace.
-    ci_tag = (tag == " higher order15" || occursin("new data", tag)) ? tag : ""
-    sigma_file_name = init_path * "/noise_distributions/sigma_" * m_label * grid_tag * "_" * data_label * "_$end_year" * ci_tag * ".jld2"
+    # Cache namespaces. Two cases:
+    #  - " higher order15" changes the estimator itself → ALL per-source caches
+    #    and the joint sigma differ from baseline (global namespace).
+    #  - Data-vintage runs (tag contains "new data") swap only SOME input files
+    #    (PSID_new / SCF_new). The vintage namespace applies PER SOURCE, only to
+    #    datasets whose input file is a regenerated "_new" file — unchanged
+    #    surveys (CEX, CPS, SIPP1-3) reuse their baseline caches instead of
+    #    re-bootstrapping identical data under a new name. Sigma is a joint
+    #    object across all sources, so it keeps the run-level namespace.
+    ci_tag_global = (tag == " higher order15" || occursin("new data", tag)) ? tag : ""
+    # ci_tag = (tag == " higher order15" || occursin("new data", tag)) ? tag : ""
+    sigma_file_name = init_path * "/noise_distributions/sigma_" * m_label * grid_tag * "_" * data_label * "_$end_year" * ci_tag_global * ".jld2"
     sigma_exists = isfile(sigma_file_name)
 
-    # Threads.@threads 
+    # Threads.@threads
     for j in axes(df_vec[1], 1) # TODO: threading possible when I don't compute the correlations. Why? it doesn't use RCall
         # Data name + container
         source = sources[j]
         ci_source = occursin("SCF", source) ? "SCF" : source
         confidence_intervals[source] = Dict()
 
-        # File name for the confidence intervals and noise distributions 
+        # Per-source cache namespace (see above)
+        ci_tag = if tag == " higher order15"
+            tag
+        elseif occursin("new data", tag) &&
+               occursin("_new", basename(get(obs_data.files, source, "")))
+            tag
+        else
+            ""
+        end
+
+        # File name for the confidence intervals and noise distributions
         ci_file_name = init_path * "/confidence_intervals/ci_draws_" * m_label * grid_tag * "_" * ci_source * "_$end_year" * ci_tag * ".jld2"
         noise_file_name = init_path * "/noise_distributions/noise_draws_" * m_label * grid_tag * "_" * ci_source * "_$end_year" * ci_tag * ".jld2"
 
