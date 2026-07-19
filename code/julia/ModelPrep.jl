@@ -1584,6 +1584,15 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         else
             M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
         end
+
+        # How much variation do the retained distributional factors capture?
+        let pv = principalvars(M), tv = MultivariateStats.tvar(M)
+            shares = pv ./ tv
+            @info "Distributional PCA ($(length(pv)) factors retained): " *
+                  "cumulative variance = $(round(100 * sum(shares); digits = 1))%" *
+                  "\n  per-factor %: $(round.(100 .* shares; digits = 1))"
+        end
+
         # Why do I do this? X = P * F, but if we want F = pcs to have unit variance, we must divide it by the square root of the eigenvalues of the covariance matrix of X.
         # But to maintain equality of the two sides, we must multiply P by the square root of the eigenvalues of the covariance matrix of X.
         pcs = MultivariateStats.transform(M, data_matrix) # predict() produces the same
