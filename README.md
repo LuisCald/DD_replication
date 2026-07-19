@@ -17,7 +17,12 @@ the estimates (data cleaning, MCMC estimation, post-estimation results and
 figures). After a new estimation run, `bash publish_to_DD_data.sh` copies the
 regenerated outputs into a DD_data checkout for publishing.
 
-**Want to run the model with your own settings?** See [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for a walkthrough of `ModelOptions` and the output folder layout, and the docstring on [`ModelOptions`](code/julia/Structures.jl) itself.
+## 🛠️ Run the model yourself — own settings or own data
+
+See [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md):
+
+* **Your own settings** (tag, factor count, muted waves): a walkthrough of `ModelOptions` and the output folder layout, plus the docstring on [`ModelOptions`](code/julia/Structures.jl) itself.
+* **Your own microdata** (another country, firms, …): [a complete worked example](docs/USER_GUIDE.md#estimate-on-your-own-data) — the three data ingredients, cleaning field notes, and the single config file you write.
 
 ---
 
