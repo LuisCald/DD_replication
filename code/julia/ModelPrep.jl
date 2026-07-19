@@ -1,5 +1,11 @@
+# Cache of per-dataset adjustment decisions (row masks). Filled on the first
+# (point-data) pass; the interval-estimation bootstrap (transform_DCT_boot)
+# reuses these decisions instead of re-testing every draw, so the M7 screen
+# adds no cost to the noise/CI construction.
+const _X13_ROW_MASKS = Dict{String,Vector{Bool}}()
+
 function X13_seasonality_adjustment!(df_to_des, periods, source)
-    # Find rows with at least one observation 
+    # Find rows with at least one observation
     condition_axes = findall(row -> !all(isnan, row), eachrow(df_to_des))
 
     qd_vec = [QuarterlyDate(y, q)
@@ -9,6 +15,26 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
 
     yr = minimum(year.(qd_vec))
     qr = periods[yr][1]  # first quarter of the first year
+
+    # Calendar quarter (1–4) of each column, for the observation-pattern screen
+    col_quarter = quarter.(qd_vec)
+
+    # Two screens decide, per series (row), whether seasonal adjustment is
+    # warranted; both fire only on the first pass for a dataset, after which
+    # the decision mask is cached (bootstrap draws reuse it):
+    #  (i)  pattern screen: the series must be OBSERVED (pre-interpolation) in
+    #       at least 3 distinct calendar quarters — a series measured only in
+    #       Q4 (e.g. post-2013 SIPP wealth) has no identifiable seasonality,
+    #       and X-13 would just perturb the only genuine observations;
+    #  (ii) identifiability test: X-13's M7 statistic (identifiable stable
+    #       seasonality; pass = M7 < 1) must hold. The diagnostic comes from
+    #       the same x12 run that produces the adjusted series, so the test
+    #       costs no extra R calls. If M7 is unavailable, we fall back to
+    #       adjusting pattern-quarterly series (the pre-screen behavior) and
+    #       say so once.
+    decided = haskey(_X13_ROW_MASKS, source)
+    mask = decided ? _X13_ROW_MASKS[source] : fill(false, size(df_to_des, 1))
+    m7_unavailable = false
 
     R"""
     suppressMessages(library(x12))     # x13binary must be installed
@@ -21,12 +47,23 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
     redirect_stdout(devnull) do
         # Loop over these rows
         for i in condition_axes
+            decided && !mask[i] && continue   # cached decision: leave unadjusted
+
             indexing = tuple(i, :)
 
             df_row = df_to_des[indexing...]
 
             # Find indices of NaNs across columns
             nan_ids = findall(isnan, df_row)
+
+            # (i) pattern screen — on observed (pre-interpolation) columns only
+            if !decided
+                obs_quarters = unique(col_quarter[setdiff(eachindex(df_row), nan_ids)])
+                if length(obs_quarters) < 3
+                    mask[i] = false
+                    continue
+                end
+            end
 
             # Since x12 cannot handle NaNs, we fill them with linear interpolation. We do not use these values anyway, so, its completely fine.
             df_row = fill_between_mean!(df_row)
@@ -35,6 +72,7 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
             R"""
             an_error_occured <- FALSE
             err_msg <- ""
+            m7 <- NA_real_
             d <- $(df_row)                 # fallback: keep original series
             tryCatch({
                 # 1  Build the ts object (this prints nothing, so no need to silence)
@@ -51,34 +89,50 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
                 )
                 )
 
-                # 3  Extract the X‑11 adjusted component
+                # 3  Extract the X‑11 adjusted component + M7 diagnostic
                 d <<- adjusted@d11
-                # cat("success row", $i, "\n")
+                m7 <<- tryCatch(as.numeric(adjusted@dg$m7), error = function(e) NA_real_)
 
             }, error = function(e) {
                 an_error_occured <<- TRUE
                 err_msg <<- e$message
-                # cat("error row", $i, ":", e$message, "\n")
-                # d <- $(df_row)           # BUG (old): assigned a LOCAL d, so on
-                #                          # failure @rget reused the previous
-                #                          # row's adjusted values — fallback is
-                #                          # now set before the tryCatch.
             })
 
             """
 
             @rget d
             @rget an_error_occured
+            @rget m7
             if an_error_occured
                 @rget err_msg
                 @warn "X-13 failed for row $i of $source; keeping original series" err_msg
+                decided || (mask[i] = false)
+                continue
             end
-            # Plots.plot(d, title="X-11 adjusted series for $i", xlabel="Time", ylabel="Value")
-            # Plots.plot!(df_row, label="Original series", linestyle=:dash)
-            # Plots.savefig("x11_$(source)_$i.pdf")
+
+            # (ii) identifiability test (first pass only; cached afterwards)
+            if !decided
+                if isnan(m7)
+                    m7_unavailable = true
+                    mask[i] = true          # fallback: pre-screen behavior
+                else
+                    mask[i] = m7 < 1.0
+                end
+            end
+            mask[i] || continue             # tested, not identifiably seasonal
+
             df_to_des[i, :] = d
             df_to_des[i, nan_ids] .= NaN
         end
+    end
+
+    if !decided
+        _X13_ROW_MASKS[source] = mask
+        m7_unavailable &&
+            @warn "X-13 ($source): M7 diagnostic unavailable from the x12 object; " *
+                  "adjusted all pattern-quarterly series (pre-screen behavior)"
+        @info "X-13 ($source): adjusting $(count(mask)) of $(length(condition_axes)) " *
+              "observed series (pattern + M7 screens)"
     end
 
     return df_to_des
@@ -161,8 +215,11 @@ end
 
 
 function remove_seasonality_from_quarterly_data!(dfs, names, time_dict)
-    sim_data = filter(x -> occursin("SimData", x), names)
-    datasets_that_need_adjustment = ["SIPP1", "SIPP2", "SIPP3", sim_data..., "CEX"]
+    # sim_data = filter(x -> occursin("SimData", x), names)
+    # datasets_that_need_adjustment = ["SIPP1", "SIPP2", "SIPP3", sim_data..., "CEX"]
+    # SimData (HANK replicas) removed from the list: the model has no seasonal
+    # component, so X-13 could only remove noise from the replica moment series.
+    datasets_that_need_adjustment = ["SIPP1", "SIPP2", "SIPP3", "CEX"]
 
     for j in datasets_that_need_adjustment
         try
