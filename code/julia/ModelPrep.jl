@@ -1586,11 +1586,23 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         end
 
         # How much variation do the retained distributional factors capture?
+        # The full spectrum comes from a separate full-rank fit of the same
+        # matrix (one extra SVD, diagnostics only — retention is unchanged).
         let pv = principalvars(M), tv = MultivariateStats.tvar(M)
-            shares = pv ./ tv
-            @info "Distributional PCA ($(length(pv)) factors retained): " *
-                  "cumulative variance = $(round(100 * sum(shares); digits = 1))%" *
-                  "\n  per-factor %: $(round.(100 .* shares; digits = 1))"
+            Mfull = MultivariateStats.fit(
+                PCA,
+                data_matrix;
+                maxoutdim = minimum(size(data_matrix)),
+                method = :svd,
+            )
+            sf = principalvars(Mfull) ./ MultivariateStats.tvar(Mfull)
+            nshow = min(length(sf), 15)
+            cum(k) = round(100 * sum(sf[1:min(k, length(sf))]); digits = 1)
+            @info "Distributional PCA ($(length(pv)) factors retained, " *
+                  "$(round(100 * sum(pv ./ tv); digits = 1))% of variance):" *
+                  "\n  full spectrum, per-factor %: $(round.(100 .* sf[1:nshow]; digits = 1))" *
+                  (length(sf) > nshow ? " … ($(length(sf)) components total)" : "") *
+                  "\n  cumulative at 5 / 8 / 11 factors: $(cum(5))% / $(cum(8))% / $(cum(11))%"
         end
 
         # Why do I do this? X = P * F, but if we want F = pcs to have unit variance, we must divide it by the square root of the eigenvalues of the covariance matrix of X.
