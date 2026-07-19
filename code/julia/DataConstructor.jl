@@ -192,10 +192,22 @@ function perturb_coefficients_sd!(
 end
 
 
+# Participation shares for semicontinuous (atom) measures, route A of
+# doc/stocks_atom_design.md: the Legendre block carries the CONDITIONAL
+# (holders-only) marginal — state-space layout unchanged — while the weighted
+# zero share π̂_mt is recorded here per dataset/measure, in period-call order
+# (aligned with the moment-matrix time axis; NaN for unobserved periods), and
+# applied at reconstruction. Keyed "df_name/measure". Recording happens only
+# on the point-data pass (record_pi=true from get_percentile_functions!);
+# bootstrap draws refit the conditional marginal but record nothing.
+const ATOM_PI = Dict{String,Vector{Float64}}()
+
 function data_constructor(obs_data::ObservedData, model_options)
     """Prepares data, of any frequency, for estimation."""
 
     # sigma_invhalf_path=nothing, sigma_sources=nothing, rng=Random.default_rng(), sigma_noise_scale::Real=1.0
+
+    empty!(ATOM_PI)   # fresh π store per data construction
 
     @unpack files, df_vec, gdp_series = obs_data
     @unpack estimator, number_of_dfs, measures, information, equivalized, bottom_coded, blind_to, tag = model_options
@@ -468,18 +480,23 @@ end
 # TODO: if some data has missings within the year, then drop those before estimation 
 function get_percentile_functions!(period_data, meas, non_missing_cols, obs_meas, correction, key, estimator)
 
-    # If the measure is always missing ... 
+    is_atom = String(meas) in model_options.atom_measures
+
+    # If the measure is always missing ...
     if meas ∉ non_missing_cols
+        # keep the π store time-aligned with the moment matrix
+        is_atom && push!(get!(ATOM_PI, "$key/$meas", Float64[]), NaN)
         return NaN
     end
 
-    # If the measure is missing this period 
+    # If the measure is missing this period
     if meas ∉ obs_meas
+        is_atom && push!(get!(ATOM_PI, "$key/$meas", Float64[]), NaN)
         return NaN
     end
 
 
-    pcf = perform_percentile_corrections!(period_data, meas, key, estimator, true, correction)
+    pcf = perform_percentile_corrections!(period_data, meas, key, estimator, true, correction; record_pi = true)
 
     return pcf
 
@@ -1134,10 +1151,23 @@ function assign_quantile_groups!(non_missing, rv, grid, grid_points)
     select!(non_missing, Not(:running_weight))
 end
 
-function treat_quantile_functions(non_missing, rv, grid, grid_points, correction, estimator)
+function treat_quantile_functions(non_missing, rv, grid, grid_points, correction, estimator; atom::Bool=false)
 
     q_vec = fill(NaN, grid)
+
+    # Atom (semicontinuous) measures, two-part/hurdle marginal (route A,
+    # doc/stocks_atom_design.md §2): the zero mask MUST be taken before
+    # scale_to_aggregates — its additive mean-correction step moves exact
+    # zeros off zero (float dust), while its multiplicative step preserves
+    # them. π̂ = weighted zero share; the Legendre fit runs on holders only,
+    # so the coefficient block keeps its baseline size.
+    zero_mask = atom ? (non_missing[!, rv] .== 0.0) : falses(0)
+
     non_missing_scaled = scale_to_aggregates(non_missing, rv, correction)
+
+    if atom && !(typeof(estimator) <: SeriesEstimator)
+        error("atom_measures require the SeriesEstimator (hurdle marginal not implemented for $(typeof(estimator)))")
+    end
 
     if typeof(estimator) <: HistogramEstimator
         assign_quantile_groups!(non_missing_scaled, rv, grid, grid_points)
@@ -1156,6 +1186,24 @@ function treat_quantile_functions(non_missing, rv, grid, grid_points, correction
         return pcf
 
     elseif typeof(estimator) <: SeriesEstimator
+        if atom
+            # π̂ before any sorting (mask is aligned to current row order);
+            # weights are untouched by scale_to_aggregates.
+            w_all = non_missing_scaled[!, :weight]
+            π̂ = sum(w_all[zero_mask]) / max(sum(w_all), eps())
+
+            holders = non_missing_scaled[.!zero_mask, :]
+            if nrow(holders) == 0 || all(isnan, holders[!, rv])
+                # nobody holds (or measure was blanked by the multiplier guard):
+                # no conditional marginal to fit
+                return (coefs = fill(NaN, grid), π = π̂)
+            end
+            sort!(holders, rv)
+            t_rv = inverse_hyperbolic_sine(holders[:, rv] ./ correction)
+            coefs = series_estimator(t_rv, holders[:, :weight], grid - 1)
+            return (coefs = coefs, π = π̂)
+        end
+
         sort!(non_missing_scaled, rv)
 
         t_rv = inverse_hyperbolic_sine(non_missing_scaled[:, rv] ./ correction)
@@ -1420,10 +1468,15 @@ function chebyshev_nodes(n)
 end
 
 
-function perform_percentile_corrections!(df, rv, df_name, estimator, pcf=false, correction=false)
+function perform_percentile_corrections!(df, rv, df_name, estimator, pcf=false, correction=false; record_pi::Bool=false)
     non_missing = filter(rv => !isnan, df)
     non_missing = coalesce.(non_missing, NaN)
     filter!("weight" => !isnan, non_missing)
+
+    # Semicontinuous (atom) measure? Conditional fit applies EVERYWHERE (point
+    # data and bootstrap alike, so noise draws use the same estimator); π is
+    # recorded only when record_pi=true (the point-data pass).
+    is_atom = String(rv) in model_options.atom_measures
 
     @unpack grid_pcf = estimator
 
@@ -1447,23 +1500,40 @@ function perform_percentile_corrections!(df, rv, df_name, estimator, pcf=false, 
         end
     end
 
-    # Sort columns by the measure and id  and creating column of running weights 
+    # Sort columns by the measure and id  and creating column of running weights
     if df_name != "SCF"
         if pcf != false
-            return treat_quantile_functions(non_missing, rv, grid_pcf, grid_points, correction, estimator)
+            # return treat_quantile_functions(non_missing, rv, grid_pcf, grid_points, correction, estimator)
+            out = treat_quantile_functions(non_missing, rv, grid_pcf, grid_points, correction, estimator; atom = is_atom)
+            if is_atom
+                record_pi && push!(get!(ATOM_PI, "$df_name/$rv", Float64[]), out.π)
+                return out.coefs
+            end
+            return out
         end
     elseif df_name == "SCF"
         pcf_I = zeros(grid_pcf, 5)
+        π_I = fill(NaN, 5)
 
-        # # Must loop over all implicates 
+        # # Must loop over all implicates
         if pcf != false
             for i in 1:5
                 non_missingᵢ = filter(row -> row.impnum == i, non_missing)
-                pcf_I[:, i] .= treat_quantile_functions(non_missingᵢ, rv, grid_pcf, grid_points, correction, estimator)
+                # pcf_I[:, i] .= treat_quantile_functions(non_missingᵢ, rv, grid_pcf, grid_points, correction, estimator)
+                out = treat_quantile_functions(non_missingᵢ, rv, grid_pcf, grid_points, correction, estimator; atom = is_atom)
+                if is_atom
+                    pcf_I[:, i] .= out.coefs
+                    π_I[i] = out.π
+                else
+                    pcf_I[:, i] .= out
+                end
 
                 # return treat_quantile_functions(non_missingᵢ, rv, grid_pcf, grid_points, correction, estimator)
             end
         end
+        # Record the implicate-averaged participation share
+        is_atom && record_pi &&
+            push!(get!(ATOM_PI, "$df_name/$rv", Float64[]), mean(π_I))
         # Return the mean of the means
         pcf = mean(pcf_I, dims=2)
 
