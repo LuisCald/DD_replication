@@ -86,7 +86,12 @@ for (c, k) in enumerate(keys(dv))
     end
 
     within_stat_dict[k] = Dict()
-    for ty in ["normal", "average"]
+    # HANK runs skip the trend/"average" pass: the replicas have no trend
+    # concept (truth per-HH averages come straight from the model), and the
+    # pass overwrites the detrended outputs (correlations_*.jld2, quantile
+    # PDFs share filenames across passes).
+    # for ty in ["normal", "average"]
+    for ty in (occursin("HANK", tag) ? ["normal"] : ["normal", "average"])
         within_stat_dict[k][ty], dv[k][ty] = export_functional_data(
             dv[k][ty], ty, k, kind_of_plots, obs_data, func_data,
             time_params, user_t, model_options, false, true;
