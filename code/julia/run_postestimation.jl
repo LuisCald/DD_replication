@@ -119,18 +119,21 @@ type = "from_mcmc"
 export_table_to_tex_with_strings(measures, :from_mcmc)
 generate_correlations_table_for_external_comparisons("SCF", measures, tag, type, "cycle")
 
-# Cross-conditional averaged correlation table (economies 2–10)
+# Cross-conditional averaged correlation table, averaged over all economies.
+# Generated once, when the LAST economy's post-estimation runs (needs every
+# economy's correlations file to exist).
 if occursin("HANK", tag)
     economy_number = parse(Int, split(strip(tag), " ")[end])
-    # Generate the averaged table only on the last economy run
-    # if economy_number == 10
-    generate_averaged_hank_avg_corr_table(
-        11:11,
-        ["consum", "income", "wealth"],
-        "from_mcmc";
-        data_sources = ["c", "a", "d"],
-    )
-    # end   # (matches the commented-out `if` above; a live `end` here broke parsing)
+    if economy_number == 10
+        # generate_averaged_hank_avg_corr_table(
+        #     11:11,  # (stale range from the old single-economy workflow)
+        generate_averaged_hank_avg_corr_table(
+            1:10,
+            ["consum", "income", "wealth"],
+            "from_mcmc";
+            data_sources = ["c", "a", "d"],
+        )
+    end
 end
 @info "Correlation tables complete."
 
