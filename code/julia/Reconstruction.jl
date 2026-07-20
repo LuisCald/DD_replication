@@ -756,7 +756,7 @@ function check_observed_measures(A, measures)
 end
 
 
-function generate_copula_densities(X, measures, grid_size_data_cop; given_integrals=false)
+function generate_copula_densities(X, measures, grid_size_data_cop; given_integrals=false, atom_dim=nothing, atom_π=nothing, atom_hyw=nothing)
     # In the case of the reconstructions, if the dataset ONCE had 3 measures observed, then predictions will be made for all 3 
 
     # 'd' has to be based on the coefficients that are obsered <==> the observed measures 
@@ -787,6 +787,13 @@ function generate_copula_densities(X, measures, grid_size_data_cop; given_integr
 
         if obs_d <= 1
             nothing
+        elseif atom_dim !== nothing && atom_π !== nothing && atom_hyw !== nothing &&
+               obs_d == D && D == 3
+            # Participation-mixture copula for semicontinuous (atom) measures:
+            # slab below π carries the derived non-holder (Y,W) copula, above π
+            # the holder tensor at the rescaled coordinate (task 6, route A).
+            new_dv[colons..., t] .= atom_copula_cell_masses(
+                Array(X[colons..., t]), atom_hyw[:, t], atom_π[t], atom_dim, x)
         else
             # XX no longer needed — copula_cdf_estimator now uses array indices directly
             # XX = obs_d == 2 ? [[x[i], x[j]] for i in eachindex(x), j in eachindex(x)] : [[x[i], x[j], x[k]] for i in eachindex(x), j in eachindex(x), k in eachindex(x)]
@@ -1091,12 +1098,20 @@ end
 # end
 
 
-function integrate_quantile_functions!(new_data_pcf, split_pcfs, grid_pcf, intervals, agg_corr; max_order::Int = grid_pcf - 1)
+function integrate_quantile_functions!(new_data_pcf, split_pcfs, grid_pcf, intervals, agg_corr; max_order::Int = grid_pcf - 1, atom_m::Union{Nothing,Int}=nothing, atom_π=nothing)
     use_order = min(max_order, grid_pcf - 1)
     for m in eachindex(new_data_pcf)
         for t in axes(new_data_pcf[m], 2)
             if all(isnan.(split_pcfs[m][:, t]))
                 new_data_pcf[m][:, t] .= NaN
+            elseif m == atom_m && atom_π !== nothing
+                # Mixed quantile function for the atom measure: zero on the
+                # atom segment [0, π_t], conditional inverse above (task 6).
+                for i in axes(new_data_pcf[m], 1)
+                    new_data_pcf[m][i, t] = atom_bin_mean(
+                        split_pcfs[m][:, t], use_order, atom_π[t],
+                        intervals[i], intervals[i+1], agg_corr[t, m])
+                end
             else
                 for i in axes(new_data_pcf[m], 1)
                     # Using coefs, generate pcf function and then integrate pcf function over diff. intervals
