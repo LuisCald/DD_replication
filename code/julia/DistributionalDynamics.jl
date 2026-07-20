@@ -113,6 +113,7 @@ include("HistoricalDecomposition.jl")
 include("IntervalEstimation.jl")
 include("Correlations.jl")
 include("CreateTimeSeries.jl")
+include("plot_HANK.jl")           # HANK-replica plotting + correlations export (restored from 6435306^; the exercise runs in this repo again)
 include("PosteriorDraws.jl")
 include("ObservationWeights.jl")       # anatomy: information/interpolation shares
 include("ObservationWeightsPlots.jl")  # anatomy figures (Koopman–Harvey decomposition)
