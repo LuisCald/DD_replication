@@ -30,8 +30,13 @@ deseason_series <- function(x, daten) {
   nz <- which(!is.na(x))
   if (length(nz) < 16) return(x)                 # too short to seasonally adjust
   a <- nz[1]; b <- nz[length(nz)]
+  # Early Z.1 history is ANNUAL (Q4-only until ~1951q4): deseason only the
+  # gapless quarterly tail; the early annual points have no seasonal dimension
+  # and pass through unadjusted.
+  gaps <- setdiff(a:b, nz)
+  if (length(gaps) > 0) a <- max(gaps) + 1
+  if (b - a + 1 < 16) return(x)                  # gapless tail too short
   seg <- x[a:b]
-  if (any(is.na(seg))) return(x)                 # internal gaps -> leave as-is
   # true calendar start of the observed span (daten like "1947q2") — without it,
   # ts() labels position 1 as Q1 and the calendar phase is wrong for any series
   # starting mid-year (harmless for the pure seasonal filter, wrong for calendar

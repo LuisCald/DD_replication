@@ -348,6 +348,16 @@ export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_process
 import delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/averages_deseasoned.csv", clear
 cap drop v1
 
+* R writes missing as the text "NA" -> import delimited types those columns as
+* strings; convert back (NA stripped to missing) before any numeric operation
+foreach v in hnocea hnomfsa hnoremv bogz1lm152090205q hnopfaq027s {
+	capture confirm string variable `v'
+	if !_rc {
+		quietly replace `v' = "" if `v' == "NA"
+		destring `v', replace
+	}
+}
+
 gen time = quarterly(daten, "YQ")
 format time %tq
 tsset time
