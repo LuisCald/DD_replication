@@ -47,7 +47,22 @@ const OW_COLORS = Dict(
     "aggregates"     => "#e34948",
     "state dynamics" => "#a5a39b",
 )
-_ow_color(name) = get(OW_COLORS, name, "#7a4dbf")
+# _ow_color(name) = get(OW_COLORS, name, "#7a4dbf")
+# HANK replica sources ("HANK a 3", …) inherit their target dataset's color
+# (a→PSID, b→CPS, c→CEX, d→SCF, e→SIPP); previously they all fell to the
+# purple default and were indistinguishable in the anatomy plots.
+function _ow_color(name)
+    haskey(OW_COLORS, name) && return OW_COLORS[name]
+    if occursin("HANK", name)
+        target = occursin("HANK a", name) ? "PSID" :
+                 occursin("HANK b", name) ? "CPS" :
+                 occursin("HANK c", name) ? "CEX" :
+                 occursin("HANK d", name) ? "SCF" :
+                 occursin("HANK e", name) ? "SIPP" : ""
+        target != "" && return OW_COLORS[target]
+    end
+    return "#7a4dbf"
+end
 _ow_label(name) = latexstring("\\textrm{", replace(uppercasefirst(name), " " => "\\ "), "}")
 
 const OW_STYLE = (guidefontsize=22, xtickfontsize=20, ytickfontsize=20,
