@@ -200,7 +200,7 @@ end
 # applied at reconstruction. Keyed "df_name/measure". Recording happens only
 # on the point-data pass (record_pi=true from get_percentile_functions!);
 # bootstrap draws refit the conditional marginal but record nothing.
-const ATOM_PI = Dict{String,Vector{Float64}}()
+const ATOM_PI = Dict{String,Dict{QuarterlyDate,Float64}}()   # "df/meas" → (date → π̂)
 
 # Holder (Y,W)-copula coefficients κ^{YWS}|_{YW} for atom runs (task 5, route b
 # of doc/stocks_atom_design.md §3): the copula block keeps its baseline layout —
@@ -214,7 +214,7 @@ const ATOM_PI = Dict{String,Vector{Float64}}()
 # (get_copulas' return shape is consumed with .=, so it can't change); the
 # bootstrap refits the split copula but records nothing (and never writes the
 # Ref, so threaded draws don't race).
-const ATOM_HOLDER_YW = Dict{String,Dict{Int,Vector{Float64}}}()
+const ATOM_HOLDER_YW = Dict{String,Dict{QuarterlyDate,Vector{Float64}}}()
 const _ATOM_HYW_LAST = Ref{Union{Nothing,Vector{Float64}}}(nothing)
 
 function data_constructor(obs_data::ObservedData, model_options)
@@ -304,6 +304,9 @@ function data_constructor(obs_data::ObservedData, model_options)
             for (p, actual_period) in enumerate(time_dict[j][yr])
                 obs_meas = String[]
                 period_data = filter(row -> row[ft] == actual_period, year_data)
+                # calendar key for the atom side stores (annual data dated mid-year)
+                rec_date = ft == "quarter" ? QuarterlyDate(yr, Int(actual_period)) :
+                           QuarterlyDate(yr, 2)
 
                 s = 1
                 # Per measure ...  
@@ -322,7 +325,7 @@ function data_constructor(obs_data::ObservedData, model_options)
                             end
 
                             # Get percentile functions for each period
-                            pcfs[m][:, q+p] = get_percentile_functions!(period_data, meas, non_missing_cols, obs_meas, correction_q, df_name, estimator)
+                            pcfs[m][:, q+p] = get_percentile_functions!(period_data, meas, non_missing_cols, obs_meas, correction_q, df_name, estimator, rec_date)
                         else
                             pcfs[m][:, q+p] .= NaN
                         end
@@ -336,7 +339,7 @@ function data_constructor(obs_data::ObservedData, model_options)
                     copulas[:, q+p] .= get_copulas(period_data, measures, obs_meas, estimator; record_atom = true) # TODO: of course, a subcopula is not guaranteed to be observed -> use length of obs_meas
                     if _ATOM_HYW_LAST[] !== nothing
                         am = intersect(String.(measures), model_options.atom_measures)[1]
-                        get!(ATOM_HOLDER_YW, "$df_name/$am", Dict{Int,Vector{Float64}}())[q+p] =
+                        get!(ATOM_HOLDER_YW, "$df_name/$am", Dict{QuarterlyDate,Vector{Float64}}())[rec_date] =
                             _ATOM_HYW_LAST[]
                         _ATOM_HYW_LAST[] = nothing
                     end
@@ -361,7 +364,7 @@ function data_constructor(obs_data::ObservedData, model_options)
                     copulas[:, q+p] .= temp_cop ./ 5
                     if n_hyw > 0
                         am = intersect(String.(measures), model_options.atom_measures)[1]
-                        get!(ATOM_HOLDER_YW, "$df_name/$am", Dict{Int,Vector{Float64}}())[q+p] =
+                        get!(ATOM_HOLDER_YW, "$df_name/$am", Dict{QuarterlyDate,Vector{Float64}}())[rec_date] =
                             hyw_acc ./ n_hyw
                     end
                 end
@@ -516,25 +519,22 @@ function get_periods(year_data, freq_type_of_data)
 end
 
 # TODO: if some data has missings within the year, then drop those before estimation 
-function get_percentile_functions!(period_data, meas, non_missing_cols, obs_meas, correction, key, estimator)
-
-    is_atom = String(meas) in model_options.atom_measures
+function get_percentile_functions!(period_data, meas, non_missing_cols, obs_meas, correction, key, estimator, rec_date)
 
     # If the measure is always missing ...
     if meas ∉ non_missing_cols
-        # keep the π store time-aligned with the moment matrix
-        is_atom && push!(get!(ATOM_PI, "$key/$meas", Float64[]), NaN)
         return NaN
     end
 
     # If the measure is missing this period
     if meas ∉ obs_meas
-        is_atom && push!(get!(ATOM_PI, "$key/$meas", Float64[]), NaN)
         return NaN
     end
 
-
-    pcf = perform_percentile_corrections!(period_data, meas, key, estimator, true, correction; record_pi = true)
+    # Atom stores are DATE-keyed (absent date = unobserved period), so
+    # reconstruction consumers can look up by calendar quarter without
+    # reproducing the moment-matrix column bookkeeping.
+    pcf = perform_percentile_corrections!(period_data, meas, key, estimator, true, correction; record_pi = rec_date)
 
     return pcf
 
@@ -1562,7 +1562,7 @@ function chebyshev_nodes(n)
 end
 
 
-function perform_percentile_corrections!(df, rv, df_name, estimator, pcf=false, correction=false; record_pi::Bool=false)
+function perform_percentile_corrections!(df, rv, df_name, estimator, pcf=false, correction=false; record_pi::Union{Nothing,QuarterlyDate}=nothing)
     non_missing = filter(rv => !isnan, df)
     non_missing = coalesce.(non_missing, NaN)
     filter!("weight" => !isnan, non_missing)
@@ -1600,7 +1600,8 @@ function perform_percentile_corrections!(df, rv, df_name, estimator, pcf=false, 
             # return treat_quantile_functions(non_missing, rv, grid_pcf, grid_points, correction, estimator)
             out = treat_quantile_functions(non_missing, rv, grid_pcf, grid_points, correction, estimator; atom = is_atom)
             if is_atom
-                record_pi && push!(get!(ATOM_PI, "$df_name/$rv", Float64[]), out.π)
+                record_pi !== nothing &&
+                    (get!(ATOM_PI, "$df_name/$rv", Dict{QuarterlyDate,Float64}())[record_pi] = out.π)
                 return out.coefs
             end
             return out
@@ -1626,8 +1627,8 @@ function perform_percentile_corrections!(df, rv, df_name, estimator, pcf=false, 
             end
         end
         # Record the implicate-averaged participation share
-        is_atom && record_pi &&
-            push!(get!(ATOM_PI, "$df_name/$rv", Float64[]), mean(π_I))
+        is_atom && record_pi !== nothing &&
+            (get!(ATOM_PI, "$df_name/$rv", Dict{QuarterlyDate,Float64}())[record_pi] = mean(π_I))
         # Return the mean of the means
         pcf = mean(pcf_I, dims=2)
 
