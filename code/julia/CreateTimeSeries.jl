@@ -1821,6 +1821,17 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
     select_series = select(gdp_series, correction_names)
     split_pcfs = [data_pcf[I, :] for I in Iterators.partition(axes(data_pcf, 1), grid_pcf)]  # split by measure 
 
+    # ── Atom (semicontinuous) measures: π and holder-YW series on this block's
+    #    time axis (gdp_series is filtered to [tmin, tmax], aligned with the
+    #    T coefficient columns). nothing ⇒ all downstream branches inert.
+    atom_dim = nothing
+    atom_ser = nothing
+    if !isempty(model_options.atom_measures)
+        _am = model_options.atom_measures[1]
+        atom_ser = atom_series_at(gdp_series.date, _am)
+        atom_dim = atom_ser === nothing ? nothing : findfirst(==(_am), sort(measures))
+    end
+
     local data_cop
     if typeof(estimator) <: HistogramEstimator
         if model_step != :forecast
@@ -1838,6 +1849,13 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
             for t in 1:T
                 if all(isnan.(split_pcfs[m][:, t]))
                     new_data_pcf[m][:, t] .= NaN
+                elseif m == atom_dim && atom_ser !== nothing
+                    # mixed quantile function: zero on [0, π_t], conditional inverse above
+                    for i in 1:integral_pcf_grid
+                        new_data_pcf[m][i, t] = atom_bin_mean(
+                            split_pcfs[m][:, t], max_order, atom_ser.π[t],
+                            intervals[i], intervals[i+1], select_series[t, correction_names[m]])
+                    end
                 else
                     for i in 1:integral_pcf_grid
                         # Using coefs, generate pcf function and then integrate pcf function over diff. intervals
@@ -1856,21 +1874,27 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
         share_intervals = vcat([0.0 + 1e-6], cumsum(share_spec)[1:end-1], [1.0 - 1e-6])
         share_data_pcf = [zeros(length(share_spec), T) for _ in 1:D]
         corr_mat = Matrix(select_series[:, correction_names])
-        integrate_quantile_functions!(share_data_pcf, split_pcfs, grid_pcf, share_intervals, corr_mat; max_order = max_order)
+        integrate_quantile_functions!(share_data_pcf, split_pcfs, grid_pcf, share_intervals, corr_mat; max_order = max_order,
+            atom_m = atom_dim, atom_π = atom_ser === nothing ? nothing : atom_ser.π)
 
         data_pcf = vcat([new_data_pcf[m] for m in eachindex(new_data_pcf)]...)
 
         # Save copula coefficients before overwriting with densities
         copulas_coefs = copy(copulas)
 
-        copulas = generate_copula_densities(copulas, measures, integral_cop_grid)
+        copulas = generate_copula_densities(copulas, measures, integral_cop_grid;
+            atom_dim = atom_dim, atom_π = atom_ser === nothing ? nothing : atom_ser.π,
+            atom_hyw = atom_ser === nothing ? nothing : atom_ser.hyw)
 
         # Cross-conditional share means on a finer grid (deciles → 10×10×10 = 1000 cells)
         xcond_grid = 10
-        copulas_xcond = generate_copula_densities(copy(copulas_coefs), measures, xcond_grid)
+        copulas_xcond = generate_copula_densities(copy(copulas_coefs), measures, xcond_grid;
+            atom_dim = atom_dim, atom_π = atom_ser === nothing ? nothing : atom_ser.π,
+            atom_hyw = atom_ser === nothing ? nothing : atom_ser.hyw)
         xcond_intervals = vcat([0.0 + 1e-6], select_grid_points(xcond_grid))
         xcond_pcf = [zeros(xcond_grid, T) for _ in 1:D]
-        integrate_quantile_functions!(xcond_pcf, split_pcfs, grid_pcf, xcond_intervals, corr_mat; max_order = max_order)
+        integrate_quantile_functions!(xcond_pcf, split_pcfs, grid_pcf, xcond_intervals, corr_mat; max_order = max_order,
+            atom_m = atom_dim, atom_π = atom_ser === nothing ? nothing : atom_ser.π)
         cross_cond_data = compute_cross_conditional_means(
             copulas_xcond, xcond_pcf, sort(measures), xcond_grid
         )
