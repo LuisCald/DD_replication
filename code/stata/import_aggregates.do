@@ -15,7 +15,7 @@ format qdate %tq
 drop dateen date 
 rename qdate daten 
 
-save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/headline_inflation.dta", replace
+save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/headline_inflation.dta", replace
 
 /* ============================================================================
    DISABLED FOR NOW — model stationary-aggregates path (sp500/expectations/shiller,
@@ -25,7 +25,7 @@ save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/headline_infla
    Re-enable this block for the full model data build.
    ============================================================================
 * Import sp500_div_yield
-import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/sp500_dividend_yield.csv", clear 
+import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/sp500_dividend_yield.csv", clear 
 
 * Convert the string date to a Stata date
 gen dateen = date(time, "MDY", 2024)
@@ -39,10 +39,10 @@ format qdate %tq
 drop dateen time 
 rename qdate daten 
 
-save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/sp500_dividend_yield.dta", replace
+save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/sp500_dividend_yield.dta", replace
 
 * Import household expectations
-import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/household_expectations.csv", clear 
+import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/household_expectations.csv", clear 
 
 * Convert the string date to a Stata date
 gen dateen = date(time, "YMD")
@@ -56,10 +56,10 @@ format qdate %tq
 drop dateen time 
 rename qdate daten 
 
-save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/household_expectations.dta"
+save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/household_expectations.dta"
 
 * Import Shiller index
-import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/shiller_index_quarterly.csv", clear 
+import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/shiller_index_quarterly.csv", clear 
 drop v*
 
 * Convert the string date to a Stata date
@@ -74,7 +74,7 @@ format qdate %tq
 drop dateen time 
 rename qdate daten 
 
-save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/shiller_index_quarterly.dta"
+save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/shiller_index_quarterly.dta"
 
 
 
@@ -105,26 +105,26 @@ format qdate %tq
 drop daten datestr dateen
 rename qdate daten
 
-merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/headline_inflation.dta"
+merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/headline_inflation.dta"
 drop _merge
-merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/sp500_dividend_yield.dta"
+merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/sp500_dividend_yield.dta"
 drop _merge
-merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/household_expectations.dta"
+merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/household_expectations.dta"
 drop _merge
-merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/shiller_index_quarterly.dta"
+merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/shiller_index_quarterly.dta"
 drop _merge
 
 drop if missing(personalfinanceexpected)
  
 
 * Export the data to python to remove seasonality and generate stationary series 
-export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates_nominal_w_season.csv", replace
+export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/aggregates_nominal_w_season.csv", replace
 
-save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates_nominal_w_season.dta", replace
+save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/aggregates_nominal_w_season.dta", replace
 
 
 * Import the seasonally adjusted data 
-import delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates_deseasoned.csv", clear
+import delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/aggregates_deseasoned.csv", clear
 
 gen time = quarterly(daten, "YQ")
 format time %tq
@@ -184,7 +184,7 @@ foreach var in  $diff_vars {
 drop if missing(d_log_a997rc1q027sbea)
 drop v1
 
-export delimited d_log* d_gs1 d_gs5 d_tb3ms d_aaaffm d_unrate time using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/stationary_aggregates.csv", replace
+export delimited d_log* d_gs1 d_gs5 d_tb3ms d_aaaffm d_unrate time using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/stationary_aggregates.csv", replace
 */
 * ===== end DISABLED model stationary-aggregates block =====
 
@@ -291,24 +291,24 @@ export delimited d_log* d_gs1 d_gs5 d_tb3ms d_aaaffm d_unrate time using "/Users
 
 
 * Import total households from excel sheet
-import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/tot_hhs_data.csv", clear
+import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/tot_hhs_data.csv", clear
 gen qdate = quarterly(date, "YQ")
 format qdate %tq
 
 rename qdate daten 
 drop date 
 
-save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/tot_hhs_data.dta", replace
+save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/tot_hhs_data.dta", replace
 
 * Import rental eq. from excel sheet
-import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/rental_data.csv", clear
+import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/rental_data.csv", clear
 gen qdate = quarterly(date, "YQ")
 format qdate %tq
 
 rename qdate daten 
 drop date 
 
-save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/rental_data.dta", replace
+save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/rental_data.dta", replace
 
 * Import FRED 
 import fred PINCOME TNWBSHNO PCEND PCESV TABSHNO HHMSDODNS ///
@@ -329,11 +329,11 @@ drop daten datestr dateen
 rename qdate daten
 
 * Merge in rental eq.
-merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/rental_data.dta"
+merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/rental_data.dta"
 drop _merge 
 
 * Merge in total HHs 
-merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/tot_hhs_data.dta"
+merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/tot_hhs_data.dta"
 drop _merge
 
 // drop date
@@ -341,11 +341,11 @@ drop _merge
 drop if daten <= tq(1947, 1) // why? because SCF first obs is 1950 and 1947 is when a decent amount of FRED series begin
 
 * Export the data to python to remove seasonality and generate stationary series 
-export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/averages_nominal_w_season.csv", replace
+export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/averages_nominal_w_season.csv", replace
 
 * Fun fact: by deseasoning (so imposing a model), we get estimates for missing periods (of which we do not have many)
 * Import data with seasonality removed // DSERRG3M086SBEA (price level services) DNDGRG3M086SBEA (non-durable)
-import delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/averages_deseasoned.csv", clear
+import delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/averages_deseasoned.csv", clear
 cap drop v1
 
 gen time = quarterly(daten, "YQ")
@@ -354,7 +354,7 @@ tsset time
 drop daten
 rename time daten
 
-save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/averages_deseasoned.dta", replace
+save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/averages_deseasoned.dta", replace
 
 // * Import price indices for consumption 
 // import fred DSERRG3M086SBEA DNDGRG3M086SBEA, clear aggregate(quarterly)
@@ -371,7 +371,7 @@ save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/averages_desea
 // drop daten datestr dateen
 // rename qdate daten
 
-use "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/averages_deseasoned.dta", clear
+use "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/averages_deseasoned.dta", clear
 
 * Put things in similar units, but double check!
 global vars_billions tsdabshno totalsl tnwbshno rental_eq pincome pcesv pcend hhmsdodns cdcabshno tabshno
@@ -398,7 +398,7 @@ foreach var in $vars_thou {
 	replace `var' = `var' * 1000
 }
 
-merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/headline_inflation.dta"
+merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/headline_inflation.dta"
 drop _merge
 
 gen defl = 100 / cpiaucsl_nbd20191001
@@ -445,7 +445,7 @@ export excel income_per_hh wealth_per_hh assets_per_hh mgdebt_per_hh liquid_per_
 **# Importing FRED-QD dataset 
 * Initialize a dataset to append all transformed data
 clear all 
-import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/fred_qd_3.csv", clear varnames(1)
+import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/fred_qd_3.csv", clear varnames(1)
 * Convert the string date to a Stata date
 gen dateen = date(daten, "YMD")
 
@@ -460,10 +460,10 @@ rename qdate daten
 
 tsset daten
 
-save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/master_dataset.dta", replace
+save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/master_dataset.dta", replace
 
 forvalues i=1(1)7 {
-    import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/fred_qd_`i'.csv", clear varnames(1)
+    import delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/fred_qd_`i'.csv", clear varnames(1)
 
 	* Convert the string date to a Stata date
 	gen dateen = date(daten, "YMD")
@@ -564,17 +564,17 @@ forvalues i=1(1)7 {
 		}
 
 		* Append the transformed dataset to the master dataset
-		save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/master_dataset_`i'.dta", replace
+		save "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/master_dataset_`i'.dta", replace
 	}
 }
 * Merge them all together
-use "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/master_dataset.dta", clear
+use "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/master_dataset.dta", clear
 
 forvalues i=1(1)7 {
 	if `i' == 3 | `i' == 4 {
 		continue
 	}
-	merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/master_dataset_`i'.dta"
+	merge 1:1 daten using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/master_dataset_`i'.dta"
 	drop _merge
 }
 
@@ -589,4 +589,4 @@ drop if missing(nonborres )
 
 //awhman aaa aaaffm baa10ym // cumfns   uempmean 
 
-export delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/master_dataset.csv", replace
+export delimited "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/master_dataset.csv", replace

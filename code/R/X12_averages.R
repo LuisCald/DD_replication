@@ -17,8 +17,8 @@
 setwd("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing")
 library(x12)
 
-nom <- read.csv("averages_nominal_w_season.csv", stringsAsFactors = FALSE)
-des <- read.csv("averages_deseasoned.csv",        stringsAsFactors = FALSE)
+nom <- read.csv("aggregates/averages_nominal_w_season.csv", stringsAsFactors = FALSE)
+des <- read.csv("aggregates/averages_deseasoned.csv",        stringsAsFactors = FALSE)
 des$X <- NULL  # drop the leading row-index column read back in (re-added on write)
 
 # New Financial-Accounts component series (header names as written by import_aggregates.do).
@@ -53,4 +53,4 @@ for (col in new_cols) {
 }
 
 # write.csv adds the leading row-index column, matching the existing file format.
-write.csv(des, "averages_deseasoned.csv")
+write.csv(des, "aggregates/averages_deseasoned.csv")
