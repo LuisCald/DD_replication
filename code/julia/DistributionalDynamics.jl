@@ -84,6 +84,7 @@ using BlackBoxOptim
 using KissSmoothing
 using RCall
 using NaNStatistics
+using Statistics   # explicit import (qualified Statistics.* calls valid; also added by Luis on the server)
 using JuMP
 using HiGHS
 using ChebyshevApprox
