@@ -375,10 +375,10 @@ use "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/averages_deseas
 
 * Put things in similar units, but double check!
 global vars_billions tsdabshno totalsl tnwbshno rental_eq pincome pcesv pcend hhmsdodns cdcabshno tabshno
-* Z.1 component series in MILLIONS — DISABLED FOR NOW: absent from the current
-* averages_deseasoned.csv. Re-enable together with the component anchors below after
-* re-deseasoning the new nominal export (which now includes these series).
-* global vars_millions_z1 hnocea hnomfsa hnoremv bogz1lm152090205q hnopfaq027s
+* Z.1 component series in MILLIONS (DFA component anchors) — enabled 2026-07-20.
+* Requires averages_deseasoned.csv regenerated from the new nominal export
+* (X12_averages.R) so these series are present.
+global vars_millions_z1 hnocea hnomfsa hnoremv bogz1lm152090205q hnopfaq027s
 global vars_millions bogz1fl153166100q bogz1lm153061105q
 global vars_thou tot_hhs
       
@@ -387,6 +387,10 @@ foreach var in $vars_billions {
 }
 
 foreach var in $vars_millions {
+	replace `var' = `var' * 1000000
+}
+
+foreach var in $vars_millions_z1 {
 	replace `var' = `var' * 1000000
 }
 
@@ -401,7 +405,8 @@ gen defl = 100 / cpiaucsl_nbd20191001
 
 * Correct for inflation 
 foreach var in tnwbshno tabshno hhmsdodns cdcabshno tsdabshno ///
- bogz1lm153061105q totalsl bogz1fl153166100q rental_eq pincome {
+ bogz1lm153061105q totalsl bogz1fl153166100q rental_eq pincome ///
+ hnocea hnomfsa hnoremv bogz1lm152090205q hnopfaq027s {
  	replace `var' = `var' * defl
  }
  
@@ -418,12 +423,11 @@ gen assets_per_hh = tabshno / tot_hhs
 gen mgdebt_per_hh = hhmsdodns / tot_hhs
 gen ttdebt_per_hh = (bogz1fl153166100q + hhmsdodns) / tot_hhs
 gen liquid_per_hh = (cdcabshno + tsdabshno + bogz1lm153061105q) / tot_hhs
-// Component anchors needing the new FRED series — DISABLED until averages_deseasoned.csv is
-// regenerated to include HNOCEA/HNOMFSA/HNOREMV/BOGZ1LM152090205Q/HNOPFAQ027S:
-// gen stocks_per_hh = (hnocea + hnomfsa) / tot_hhs   // DFA corporate equities + mutual funds
-// gen real_estate_per_hh = hnoremv / tot_hhs         // DFA real estate
-// gen business_per_hh = bogz1lm152090205q / tot_hhs  // DFA unincorporated business
-// gen pension_per_hh = hnopfaq027s / tot_hhs         // DFA pension entitlements (DB+DC)
+// DFA component anchors (enabled 2026-07-20; series deseasoned via X12_averages.R):
+gen stocks_per_hh = (hnocea + hnomfsa) / tot_hhs   // DFA corporate equities + mutual funds
+gen real_estate_per_hh = hnoremv / tot_hhs         // DFA real estate
+gen business_per_hh = bogz1lm152090205q / tot_hhs  // DFA unincorporated business
+gen pension_per_hh = hnopfaq027s / tot_hhs         // DFA pension entitlements (DB+DC)
 gen hdebt_per_hh = hhmsdodns / tot_hhs            // DFA "home mortgages"; matches micro hdebt (= mgdebt_per_hh)
 gen pdebt_per_hh = totalsl / tot_hhs              // DFA "consumer credit"; matches micro pdebt
 // Consumer durables: DFA has no standalone "vehicles" line (durables = autos+furniture+
@@ -434,6 +438,7 @@ drop if missing(pcend) // should just be 1 obs
 rename daten time
 
 export excel income_per_hh wealth_per_hh assets_per_hh mgdebt_per_hh liquid_per_hh consum_per_hh ttdebt_per_hh hdebt_per_hh pdebt_per_hh ///
+ stocks_per_hh real_estate_per_hh business_per_hh pension_per_hh ///
  time tot_hhs using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/inflation_corrected_correction_series.xlsx", sheet("data") firstrow(variables) replace
  
 
