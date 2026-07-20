@@ -845,6 +845,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
             Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$meas" * "_$obj" * "_quantilegroup_" * detrended_or_not * label * ".pdf")
 
             # Log-HP now
+            if false # ── log-HP quantile-group plot disabled (unused in the paper, 2026-07-20)
             cond = data_name != "consensus" ? findall(!isnan, qu_o[1][dist[1][1], :]) : [1] # .!isnan.(all_lv_o[1][:, j])
             s_axis = xaxis[cond[1]:cond[end]] # start at the first observation 
             s_data = log_transformation(vec(sum(qu[dist[1], cond[1]:cond[end]], dims=1)' ./ length(dist[1])))
@@ -879,6 +880,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
             # No data counterpart because you cannot HP data
 
             Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$meas" * "_$obj" * "_loghp_quantilegroup_" * detrended_or_not * label * ".pdf")
+            end # if false (log-HP quantile-group plot disabled)
 
 
             if compare_to_other_est
@@ -1353,7 +1355,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                         #     )
                         # end        
                         # end
-                        Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$meas" * "_$obj" * "_loghp_quantiles_" * esttag * "_" * detrended_or_not * label * ".pdf")
+                        # Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$meas" * "_$obj" * "_loghp_quantiles_" * esttag * "_" * detrended_or_not * label * ".pdf")  # loghp plots unused (2026-07-20); cycle correlations above still computed
 
                         # Do it for all groups at once
                         if obj == "top"
@@ -1459,7 +1461,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                         label=g == 1 ? L"\textrm{Missing\,\, data}" : "",
                                     )
                                 end
-                                Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$(meas)_" * "$(k)_" * "$(esttag)_loghp_" * detrended_or_not * label * ".pdf")
+                                # Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$(meas)_" * "$(k)_" * "$(esttag)_loghp_" * detrended_or_not * label * ".pdf")  # loghp plots unused (2026-07-20); cycle correlations above still computed
 
                                 if occursin("excluding housing cycle", esttag) || occursin("excluding housing cycle short", esttag) || occursin("excluding recent 20 quarters", esttag) || occursin("every 4 years", esttag)
                                     local ids_to_use
