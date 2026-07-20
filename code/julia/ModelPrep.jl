@@ -1627,8 +1627,11 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         elseif occursin("HANK full", tag)
             M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=8, method=:svd) # mean=0
         elseif occursin("HANK", tag)
-            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=5, method=:svd) # mean=0, based on scree
             # M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=5, method=:svd) # mean=0, based on scree
+            # 5 (scree) left ~10% of variation in factors 6-8 (economy-1 spectrum:
+            # cumulative 89.9% at 5 vs 99.6% at 8) - exactly the slow components
+            # where wealth lives. 8 also matches the empirical baseline's count.
+            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=8, method=:svd) # mean=0
             # M = MultivariateStats.fit(PCA, data_matrix; pratio=0.95, method=:svd) # mean=0
         else
             M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
