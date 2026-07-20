@@ -202,12 +202,29 @@ end
 # bootstrap draws refit the conditional marginal but record nothing.
 const ATOM_PI = Dict{String,Vector{Float64}}()
 
+# Holder (Y,W)-copula coefficients κ^{YWS}|_{YW} for atom runs (task 5, route b
+# of doc/stocks_atom_design.md §3): the copula block keeps its baseline layout —
+# the atom-degree-0 slice carries the POPULATION κ^{YW} (what CEX/CPS load on
+# linearly) and the degree ≥ 1 entries carry the HOLDER trivariate κ^{YWS}
+# (conditional ranks for the atom dimension, population ranks for the rest, fit
+# on holders). The holder YW slice — needed at reconstruction for the identity
+# κ^{YW,0} = (κ^{YW} − (1−π)·κ^{YWS}|_{YW}) / π — has no slot in the block, so
+# it lives here, keyed "df_name/measure" → (moment-matrix column → coefficients).
+# Recording is point-data only (record_atom), via the _ATOM_HYW_LAST handshake
+# (get_copulas' return shape is consumed with .=, so it can't change); the
+# bootstrap refits the split copula but records nothing (and never writes the
+# Ref, so threaded draws don't race).
+const ATOM_HOLDER_YW = Dict{String,Dict{Int,Vector{Float64}}}()
+const _ATOM_HYW_LAST = Ref{Union{Nothing,Vector{Float64}}}(nothing)
+
 function data_constructor(obs_data::ObservedData, model_options)
     """Prepares data, of any frequency, for estimation."""
 
     # sigma_invhalf_path=nothing, sigma_sources=nothing, rng=Random.default_rng(), sigma_noise_scale::Real=1.0
 
-    empty!(ATOM_PI)   # fresh π store per data construction
+    empty!(ATOM_PI)          # fresh π store per data construction
+    empty!(ATOM_HOLDER_YW)   # fresh holder-copula store per data construction
+    _ATOM_HYW_LAST[] = nothing
 
     @unpack files, df_vec, gdp_series = obs_data
     @unpack estimator, number_of_dfs, measures, information, equivalized, bottom_coded, blind_to, tag = model_options
@@ -315,17 +332,38 @@ function data_constructor(obs_data::ObservedData, model_options)
                 end
 
                 if df_name != "SCF" #TODO: automate this s.t. any dataset with "impnum" will be treated (in a loop)
-                    copulas[:, q+p] .= get_copulas(period_data, measures, obs_meas, estimator) # TODO: of course, a subcopula is not guaranteed to be observed -> use length of obs_meas
+                    _ATOM_HYW_LAST[] = nothing
+                    copulas[:, q+p] .= get_copulas(period_data, measures, obs_meas, estimator; record_atom = true) # TODO: of course, a subcopula is not guaranteed to be observed -> use length of obs_meas
+                    if _ATOM_HYW_LAST[] !== nothing
+                        am = intersect(String.(measures), model_options.atom_measures)[1]
+                        get!(ATOM_HOLDER_YW, "$df_name/$am", Dict{Int,Vector{Float64}}())[q+p] =
+                            _ATOM_HYW_LAST[]
+                        _ATOM_HYW_LAST[] = nothing
+                    end
                 else
                     temp_cop = zeros(size(copulas[:, q+p]))
+                    hyw_acc = nothing
+                    n_hyw = 0
 
                     for i in 1:5
                         period_dataᵢ = filter(row -> row.impnum == i, period_data)
                         # copulas[:, q + p]   .+= get_copulas(period_dataᵢ, measures, obs_meas, estimator)
-                        temp_cop .+= get_copulas(period_dataᵢ, measures, obs_meas, estimator)
+                        _ATOM_HYW_LAST[] = nothing
+                        temp_cop .+= get_copulas(period_dataᵢ, measures, obs_meas, estimator; record_atom = true)
+                        if _ATOM_HYW_LAST[] !== nothing
+                            hyw_acc = hyw_acc === nothing ? copy(_ATOM_HYW_LAST[]) :
+                                      hyw_acc .+ _ATOM_HYW_LAST[]
+                            n_hyw += 1
+                            _ATOM_HYW_LAST[] = nothing
+                        end
                     end
 
                     copulas[:, q+p] .= temp_cop ./ 5
+                    if n_hyw > 0
+                        am = intersect(String.(measures), model_options.atom_measures)[1]
+                        get!(ATOM_HOLDER_YW, "$df_name/$am", Dict{Int,Vector{Float64}}())[q+p] =
+                            hyw_acc ./ n_hyw
+                    end
                 end
             end
             # Shift the time dimension as we move year by year, period by period
@@ -717,7 +755,7 @@ end
 # cop[cop_ind...] .= dct(cop_dens) ./ scale
 
 
-function get_copulas(period_data, measures, obs_measures, estimator; with_immutable=false)
+function get_copulas(period_data, measures, obs_measures, estimator; with_immutable=false, record_atom::Bool=false)
     """Copulas are created when all dimensions are observed. Sub-copulas are created with partial observability.
     For series estimators, we generate both the copula and the sub-copulas.
     For dim=1, copula does not exist, so returns NaNs."""
@@ -749,10 +787,24 @@ function get_copulas(period_data, measures, obs_measures, estimator; with_immuta
                 return remove_immutable(cop)
             end
 
-        elseif typeof(estimator) <: SeriesEstimator # tracking sub-copulas as well 
-            cop_weights = series_approximate_copula(period_data, obs_measures, estimator)
+        elseif typeof(estimator) <: SeriesEstimator # tracking sub-copulas as well
+            # Participation split for semicontinuous (atom) measures — applies
+            # on every path (point data AND bootstrap, so noise draws use the
+            # same estimator); only the recording is point-data gated.
+            atoms_here = [m for m in obs_measures if String(m) in model_options.atom_measures]
+            length(atoms_here) > 1 &&
+                error("only one atom measure per run is supported (got $(atoms_here))")
 
-            # Fill cop based on case 
+            local cop_weights
+            if isempty(atoms_here)
+                cop_weights = series_approximate_copula(period_data, obs_measures, estimator)
+            else
+                out = series_approximate_copula(period_data, obs_measures, estimator; atom = atoms_here[1])
+                cop_weights = out.coefs
+                record_atom && (_ATOM_HYW_LAST[] = out.holder_yw)
+            end
+
+            # Fill cop based on case
             cop[cop_ind...] = cop_weights
 
             # Return a vector of the copula
@@ -790,7 +842,7 @@ end
 
 # unique(sort.(all_combinations))
 
-function series_approximate_copula(period_data, obs_measures, estimator)
+function series_approximate_copula(period_data, obs_measures, estimator; atom::Union{Nothing,String}=nothing)
 
     @unpack grid_cop = estimator
 
@@ -807,6 +859,9 @@ function series_approximate_copula(period_data, obs_measures, estimator)
     W = Vector{Float64}(X2.weight)
     # select!(X2, obs_measures)
 
+    # Holder mask for the atom measure BEFORE ranking (exact zeros in raw data)
+    hold_mask = atom === nothing ? falses(0) : (Vector{Float64}(X2[!, atom]) .!= 0.0)
+
     # Convert to Matrix for fast BLAS path
     R = Matrix{Float64}(X2[:, obs_measures])
 
@@ -816,11 +871,50 @@ function series_approximate_copula(period_data, obs_measures, estimator)
         R[:, j] .= rankdata(@view(R[:, j])) ./ (n + 1)
     end
 
-    # Series estimate the copula — vectorized BLAS-based version
-    # cop_coefs = get_copula_coefficients(X2, W, grid_cop - 1)
-    cop_coefs = get_copula_coefficients_fast(R, W, grid_cop - 1)
+    if atom === nothing
+        # Series estimate the copula — vectorized BLAS-based version
+        # cop_coefs = get_copula_coefficients(X2, W, grid_cop - 1)
+        cop_coefs = get_copula_coefficients_fast(R, W, grid_cop - 1)
 
-    return cop_coefs[:]
+        return cop_coefs[:]
+    end
+
+    # ── Participation-split copula (route b, doc/stocks_atom_design.md §3) ──
+    # Coefficients are E[∏ P_j(u_d)], so by total expectation the atom-degree-0
+    # slice IS the population κ^{YW}: estimated on the FULL sample (identical to
+    # what an S-blind dataset provides — linear loading preserved). Degree ≥ 1
+    # entries are the HOLDER trivariate κ^{YWS}: fit on holders, population
+    # ranks for the continuous measures, CONDITIONAL (within-holder) rank for
+    # the atom — matching the reconstruction rescaling u′ = (u−π)/(1−π).
+    d = length(obs_measures)
+    K = grid_cop
+    a = findfirst(==(atom), obs_measures)
+    slice = ntuple(i -> i == a ? 1 : Colon(), d)
+
+    A = fill(NaN, ntuple(_ -> K, d))
+    holder_yw = fill(NaN, K^(d - 1))
+
+    nh = count(hold_mask)
+    if nh >= 2
+        Rh = R[hold_mask, :]
+        Rh[:, a] .= rankdata(@view(Rh[:, a])) ./ (nh + 1)   # conditional rank within holders
+        Wh = W[hold_mask]
+        A .= reshape(get_copula_coefficients_fast(Rh, Wh, K - 1), size(A))
+        holder_yw = vec(collect(A[slice...]))               # κ^{YWS}|_{YW}, for the reconstruction identity
+    end
+
+    # Overwrite the atom-degree-0 slice with the population κ^{YW}
+    if d >= 3
+        others = [i for i in 1:d if i != a]
+        A[slice...] = get_copula_coefficients_fast(R[:, others], W, K - 1)
+    else
+        # d == 2: the slice holds only pure-marginal terms of the other
+        # measure — zero by convention, constant normalized to 1
+        A[slice...] .= 0.0
+        A[ntuple(_ -> 1, d)...] = 1.0
+    end
+
+    return (coefs = vec(A), holder_yw = holder_yw)
 end
 
 
