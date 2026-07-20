@@ -35,6 +35,9 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
     decided = haskey(_X13_ROW_MASKS, source)
     mask = decided ? _X13_ROW_MASKS[source] : fill(false, size(df_to_des, 1))
     m7_unavailable = false
+    n_failed = 0
+    n_screened = 0
+    example_err = ""
 
     R"""
     suppressMessages(library(x12))     # x13binary must be installed
@@ -61,6 +64,16 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
                 obs_quarters = unique(col_quarter[setdiff(eachindex(df_row), nan_ids)])
                 if length(obs_quarters) < 3
                     mask[i] = false
+                    continue
+                end
+                # (i-b) degeneracy screen: near-constant / too-few-distinct series
+                # (typical for sparse copula-cell rows) cannot be seasonally
+                # adjusted — X-13 errors on them; skip without calling R.
+                obs_vals = df_row[setdiff(eachindex(df_row), nan_ids)]
+                if length(unique(round.(obs_vals; sigdigits = 8))) < 8 ||
+                   Statistics.std(obs_vals) < 1e-10 * max(abs(Statistics.mean(obs_vals)), 1e-300)
+                    mask[i] = false
+                    n_screened += 1
                     continue
                 end
             end
@@ -106,7 +119,8 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
             @rget m7
             if an_error_occured
                 @rget err_msg
-                @warn "X-13 failed for row $i of $source; keeping original series" err_msg
+                n_failed += 1
+                example_err == "" && (example_err = err_msg)
                 decided || (mask[i] = false)
                 continue
             end
@@ -128,12 +142,15 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
                 df_to_des[i, :] = d
                 df_to_des[i, nan_ids] .= NaN
             else
-                @warn "X-13 returned length $(length(d)) for a $(size(df_to_des, 2))-column row " *
-                      "($source row $i); keeping original series"
+                n_failed += 1
+                example_err == "" && (example_err = "stale/mismatched result length $(length(d)) vs $(size(df_to_des, 2))")
                 decided || (mask[i] = false)
             end
         end
     end
+
+    n_failed > 0 &&
+        @info "X-13 ($source): $(n_failed) series failed to adjust (originals kept; e.g. $(strip(example_err)))"
 
     if !decided
         _X13_ROW_MASKS[source] = mask
@@ -141,7 +158,7 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
             @warn "X-13 ($source): M7 diagnostic unavailable from the x12 object; " *
                   "adjusted all pattern-quarterly series (pre-screen behavior)"
         @info "X-13 ($source): adjusting $(count(mask)) of $(length(condition_axes)) " *
-              "observed series (pattern + M7 screens)"
+              "observed series ($(n_screened) degenerate screened; pattern + M7 screens)"
     end
 
     return df_to_des
