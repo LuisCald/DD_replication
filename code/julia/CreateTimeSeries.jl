@@ -1029,6 +1029,21 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
 
                                 Plots.plot()
 
+                                # Fig. 7 redesign: grey band over the removed-data window
+                                # (rows 2-3 only; the every-4-years CEX row keeps its
+                                # open-marker convention instead of a band)
+                                fig7_shade = occursin("excluding recent 20 quarters", esttag) ?
+                                             (QuarterlyDate(2020, 1), QuarterlyDate(2024, 4)) :
+                                             occursin("excluding housing cycle", esttag) ?
+                                             (QuarterlyDate(2004, 1), QuarterlyDate(2009, 4)) : nothing
+                                fig7_sh_ids = Int[]
+                                if fig7_shade !== nothing
+                                    fig7_sh_ids = findall(d -> fig7_shade[1] <= d <= fig7_shade[2], s_dts)
+                                    !isempty(fig7_sh_ids) && Plots.vspan!(
+                                        [s_axis[fig7_sh_ids[1]], s_axis[fig7_sh_ids[end]]];
+                                        color = RGB(0.92, 0.92, 0.92), alpha = 1.0, label = "")
+                                end
+
                                 Plots.plot!(s_axis,
                                     cex_all_est,
                                     lc=:red,
@@ -1040,7 +1055,8 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
 
                                 Plots.plot!(s_axis,
                                     outside_est,
-                                    ylabel=M == "Consum" ? L"\textrm{Consumption\, \, rel.\,  to\,\,  average}" : L"\textrm{%$(M)\, \, rel.\,  to\,\,  average}",
+                                    ylabel=k != "bottom" ? "" :
+                                           M == "Consum" ? L"\textrm{Consumption\, \, rel.\,  to\,\,  average}" : L"\textrm{%$(M)\, \, rel.\,  to\,\,  average}",
                                     lc=:blue,
                                     xformatter=:latex,
                                     yformatter=:latex,
@@ -1184,6 +1200,28 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                                 # label=g == 1 ? L"\textrm{Missing\,\, data}" : "",
                                             )
                                         end
+                                    end
+                                end
+
+                                # Fig. 7 redesign: bare zoom inset on the removal window
+                                # (no ticks/numbers; top-left unless the curve occupies it)
+                                if !isempty(fig7_sh_ids)
+                                    _i1 = max(fig7_sh_ids[1] - 2, 1)
+                                    _i2 = min(fig7_sh_ids[end] + 2, length(s_axis))
+                                    _seg = filter(!isnan, vcat(cex_all_est[fig7_sh_ids], outside_est[fig7_sh_ids]))
+                                    if !isempty(_seg)
+                                        _pad = 0.35 * (maximum(_seg) - minimum(_seg)) + 1e-12
+                                        _all = filter(!isnan, vcat(cex_all_est, outside_est))
+                                        _early = filter(!isnan, cex_all_est[1:max(1, length(cex_all_est) ÷ 3)])
+                                        _top_free = isempty(_early) ||
+                                                    Statistics.mean(_early) < (minimum(_all) + maximum(_all)) / 2
+                                        _bb = _top_free ? Plots.bbox(0.06, 0.06, 0.34, 0.30) :
+                                                          Plots.bbox(0.06, 0.62, 0.34, 0.30)
+                                        Plots.lens!(
+                                            [s_axis[_i1], s_axis[_i2]],
+                                            [minimum(_seg) - _pad, maximum(_seg) + _pad];
+                                            inset = (1, _bb), subplot = 2, framestyle = :box,
+                                            lc = :gray60, xticks = false, yticks = false)
                                     end
                                 end
 
