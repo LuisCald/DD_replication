@@ -1551,7 +1551,9 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # Create new data matrix with information on the lags 
         r_max = 30 # just some high number 
         MOdim = n_factors(pool', r_max) # pool' is a T x N matrix
-        @info "The maximum number of aggregate factors with other estimator is $MOdim"
+        # @info "The maximum number of aggregate factors with other estimator is $MOdim"
+        @info "Aggregate-factor count by information criteria (diagnostic only): $MOdim — " *
+              "the specification keeps the MDD-selected count (see Mdim below)"
         # println(tag)
 
         M = MultivariateStats.fit(PCA, pool; pratio=0.95, method=:svd, mean=0)  # TODO: unfix this!
@@ -1562,6 +1564,11 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         proj = projection(M) * diagm(λ)
         @info "The size of the projection matrix for the aggs. is $(size(proj))"
         
+        # Aggregate-factor count: FIXED by specification, deliberately NOT taken
+        # from the information criteria above. The baseline 11 is selected by the
+        # marginal-data-density comparison (MDD appendix; probed by the
+        # " less AF"/" more AF"/" all AF" robustness examples) and stays pinned
+        # for replication. HANK replicas use 8.
         Mdim = tag == " less AF" ? 3 : tag == " more AF" ? 15 : tag == " all AF" ? 30 : tag == " less DF and AF" ? 3 : occursin("HANK", tag) ? 8 : 11
 
         # Import jld2
