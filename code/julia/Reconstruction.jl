@@ -888,6 +888,123 @@ function I_m(m, u)
     return integrate_legendre_polynomial(m, u)
 end
 
+# ── Semicontinuous (atom) reconstruction utilities (task 6, route A) ─────────
+# Consumers of the estimation-side split (DataConstructor: ATOM_PI, ATOM_HOLDER_YW):
+# the state's copula tensor carries the population κ^{YW} in its atom-degree-0
+# slice and the holder κ^{YWS} in degrees ≥ 1; π and the holder (Y,W) slice are
+# observed. See doc/stocks_atom_design.md §3–4 and appendix app:atom_copula.
+
+"""
+    atom_nonholder_yw(kappa_yw, holder_yw, π)
+
+Non-holder (Y,W)-copula coefficients from the total-expectation identity
+κ^{YW} = π·κ^{YW,0} + (1−π)·κ^{YWS}|_{YW}. Guards: π ≈ 0 → no non-holders
+(independence coefficients; the slab carries no mass anyway); π ≈ 1 → the
+population IS the non-holders.
+"""
+function atom_nonholder_yw(kappa_yw::AbstractVector, holder_yw::AbstractVector, π::Real)
+    if π <= 1e-10
+        out = zeros(length(kappa_yw))
+        out[1] = 1.0
+        return out
+    elseif π >= 1 - 1e-10
+        return collect(Float64.(kappa_yw))
+    end
+    return (kappa_yw .- (1 - π) .* holder_yw) ./ π
+end
+
+"""
+    atom_copula_cell_masses(A, holder_yw, π, atom_dim, x)
+
+Cell masses of the participation-mixture copula on the grid `x` (D = 3 only;
+`x` are the upper cell edges, first cell starts at 0 — the convention of
+`generate_copula_densities`/`cdf_to_pdf`). `A` is the K^3 coefficient tensor
+from the state; `holder_yw` the observed holder (Y,W) slice (length K²,
+column-major over the two non-atom dims in their original order). The mixture:
+below π the slab (non-holder copula from the identity, uniform in u_S);
+above π the holder copula at the rescaled coordinate u′ = (u_S−π)/(1−π).
+Masses are exact (closed-form Legendre segment integrals), sum to 1.
+"""
+function atom_copula_cell_masses(A::AbstractArray{<:Real,3}, holder_yw::AbstractVector,
+    π::Real, atom_dim::Int, x::AbstractVector)
+
+    K = size(A, 1)
+    G = length(x)
+    πc = clamp(π, 0.0, 1.0)
+
+    # Put the atom dimension last
+    perm = atom_dim == 3 ? (1, 2, 3) : atom_dim == 2 ? (1, 3, 2) : (2, 3, 1)
+    Ap = permutedims(A, perm)
+
+    # Holder tensor: state degrees ≥ 1 + observed holder (Y,W) slice at degree 0
+    Ah = copy(Ap)
+    Ah[:, :, 1] .= reshape(holder_yw, K, K)
+
+    # Non-holder (Y,W) coefficients from the identity
+    κ0 = reshape(atom_nonholder_yw(vec(Ap[:, :, 1]), Vector{Float64}(holder_yw), πc), K, K)
+
+    # Segment integrals ΔI[j, i] = ∫_{lo_i}^{hi_i} Q_{j-1}(u) du on the population grid
+    lo(i) = i == 1 ? 0.0 : x[i-1]
+    ΔI = [I_m(j - 1, x[i]) - I_m(j - 1, lo(i)) for j = 1:K, i = 1:G]
+
+    # Atom-dimension segments: slab overlap below π, rescaled holder integral above
+    slab = zeros(G)
+    ΔĨ = zeros(K, G)
+    for i = 1:G
+        l, h = lo(i), x[i]
+        slab[i] = max(0.0, min(h, πc) - min(l, πc))
+        if h > πc && πc < 1.0
+            a′ = (max(l, πc) - πc) / (1 - πc)
+            b′ = (h - πc) / (1 - πc)
+            for j = 1:K
+                ΔĨ[j, i] = (1 - πc) * (I_m(j - 1, b′) - I_m(j - 1, a′))
+            end
+        end
+    end
+
+    # Contract: holder part Σ_jkl Ah[j,k,l] ΔI[j,i1] ΔI[k,i2] ΔĨ[l,i3]
+    #           + slab part slab[i3] · Σ_jk κ0[j,k] ΔI[j,i1] ΔI[k,i2]
+    M0 = ΔI' * κ0 * ΔI                       # G×G non-holder (Y,W) cell masses
+    out = Array{Float64}(undef, G, G, G)
+    tmp = Array{Float64}(undef, G, G)
+    for i3 = 1:G
+        fill!(tmp, 0.0)
+        for l = 1:K
+            w = @view(ΔĨ[l, i3])[]
+            w == 0.0 && continue
+            tmp .+= w .* (ΔI' * @view(Ah[:, :, l]) * ΔI)
+        end
+        out[:, :, i3] .= tmp .+ slab[i3] .* M0
+    end
+
+    # Undo the permutation
+    return perm == (1, 2, 3) ? out : permutedims(out, invperm(collect(perm)))
+end
+
+"""
+    atom_bin_mean(coefs_cond, use_order, π, lo, hi, corr)
+
+Average of the mixed quantile function over the population-rank interval
+[lo, hi]: zero on the atom segment (u ≤ π), the back-transformed conditional
+Legendre quantile at (u−π)/(1−π) above. Mirrors the per-interval computation
+of `integrate_quantile_functions!` for atom measures.
+"""
+function atom_bin_mean(coefs_cond::AbstractVector, use_order::Int, π::Real,
+    lo::Real, hi::Real, corr::Real)
+
+    πc = clamp(π, 0.0, 1.0)
+    hi <= πc && return 0.0
+    lo_eff = max(lo, πc)
+    integral = gauss_legendre_integrate(
+        u -> reverse_inverse_hyperbolic_sine(
+            eval_quantile_function(coefs_cond, use_order, (u - πc) / (1 - πc)),
+        )[1] * corr,
+        lo_eff,
+        hi,
+    )
+    return integral / (hi - lo)   # the atom segment contributes zero value
+end
+
 # ∫₀ᵘ Q_m(s) ds in closed form (Bonnet's recursion):
 #   I_0(u) = u
 #   I_m(u) = (P_{m+1}(2u−1) − P_{m−1}(2u−1)) / (2·√(2m+1)),  m ≥ 1
