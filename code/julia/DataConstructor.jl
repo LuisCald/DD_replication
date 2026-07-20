@@ -223,6 +223,7 @@ function data_constructor(obs_data::ObservedData, model_options)
     # sigma_invhalf_path=nothing, sigma_sources=nothing, rng=Random.default_rng(), sigma_noise_scale::Real=1.0
 
     empty!(ATOM_PI)          # fresh π store per data construction
+    atom_zero_shares = Dict{String,Dict{String,Float64}}()   # atom detection (see end of function)
     empty!(ATOM_HOLDER_YW)   # fresh holder-copula store per data construction
     _ATOM_HYW_LAST[] = nothing
 
@@ -292,6 +293,21 @@ function data_constructor(obs_data::ObservedData, model_options)
         q = 0
         years = unique(time_vec[j])
         ft = freq_type[j]
+
+        # ── Atom detection: weighted exact-zero share per measure (whole dataset)
+        for meas in measures
+            if meas in names(data)
+                v = data[!, meas]
+                w = data[!, :weight]
+                ok = .!ismissing.(v) .& .!ismissing.(w)
+                vv = Float64.(coalesce.(v[ok], NaN))
+                ww = Float64.(coalesce.(w[ok], NaN))
+                fin = .!isnan.(vv) .& .!isnan.(ww)
+                tot = sum(ww[fin])
+                tot > 0 && (get!(atom_zero_shares, df_name, Dict{String,Float64}())[meas] =
+                    sum(ww[fin][vv[fin] .== 0.0]) / tot)
+            end
+        end
 
         # Per time period ...    
         for yr in years
@@ -390,6 +406,19 @@ function data_constructor(obs_data::ObservedData, model_options)
         #     # perturb coefficients
         #     dfs[j] = perturb_coefficients_sd!(dfs[j], noise_df)
         # end
+    end
+
+    # ── Atom detection verdicts. Detection WARNS; the switch stays ex-ante
+    #    (ModelOptions.atom_measures), so the statistical model never changes
+    #    silently with the data vintage.
+    for (df_name_z, dz) in atom_zero_shares, (meas_z, sh) in dz
+        if sh > 0.05 && !(meas_z in model_options.atom_measures)
+            @warn "measure `\$meas_z` has \$(round(100 * sh; digits = 1))% exact zeros in \$df_name_z " *
+                  "but is not in atom_measures — the point mass will be smeared by the polynomial fit"
+        elseif meas_z in model_options.atom_measures && sh < 0.01
+            @info "atom measure `\$meas_z` has only \$(round(100 * sh; digits = 2))% exact zeros in \$df_name_z " *
+                  "(hurdle treatment degenerates gracefully to the continuous fit)"
+        end
     end
 
     return dfs, un_perturbed_dfs, time_vec, time_dict, freq_type
