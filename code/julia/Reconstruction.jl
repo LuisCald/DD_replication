@@ -1005,6 +1005,66 @@ function atom_bin_mean(coefs_cond::AbstractVector, use_order::Int, π::Real,
     return integral / (hi - lo)   # the atom segment contributes zero value
 end
 
+"""
+    atom_series_at(dates, meas; prefer = "SCF")
+
+π̂ and holder-(Y,W) copula series for atom measure `meas` on the reconstruction
+time axis `dates` (Vector{QuarterlyDate}), from the date-keyed stores recorded
+at estimation (`ATOM_PI` / `ATOM_HOLDER_YW`). Dataset: `prefer` when it
+recorded the measure (SCF authoritative), else the dataset with the most
+observations. Gaps: π interpolated linearly in LOGIT space between observed
+dates (held flat beyond the ends, keeps π ∈ (0,1)); the holder-YW coefficients
+interpolated linearly coefficient-wise. Returns
+`(π = Vector, hyw = Union{Nothing,Matrix})` (hyw columns follow `dates`), or
+`nothing` if no dataset recorded the measure.
+"""
+function atom_series_at(dates::AbstractVector, meas::AbstractString; prefer::AbstractString = "SCF")
+    pick(store) = begin
+        ks = [k for k in keys(store) if endswith(k, "/" * meas)]
+        isempty(ks) && return nothing
+        pref = findfirst(k -> startswith(k, prefer), ks)
+        pref !== nothing ? ks[pref] : ks[argmax([length(store[k]) for k in ks])]
+    end
+    kp = pick(ATOM_PI)
+    kp === nothing && return nothing
+    πd = ATOM_PI[kp]
+    tnum(d) = year(d) + (quarter(d) - 1) / 4
+    obs = sort(collect(keys(πd)); by = tnum)
+    _lgt(x) = log(clamp(x, 1e-6, 1 - 1e-6) / (1 - clamp(x, 1e-6, 1 - 1e-6)))
+    zx = [tnum(d) for d in obs]
+    zy = [_lgt(πd[d]) for d in obs]
+    function _interp(x, gx, gy)
+        x <= gx[1] && return gy[1]
+        x >= gx[end] && return gy[end]
+        i = searchsortedlast(gx, x)
+        gy[i] + (gy[i+1] - gy[i]) * (x - gx[i]) / (gx[i+1] - gx[i])
+    end
+    π_series = [1 / (1 + exp(-_interp(tnum(d), zx, zy))) for d in dates]
+
+    hyw = nothing
+    kh = pick(ATOM_HOLDER_YW)
+    if kh !== nothing && !isempty(ATOM_HOLDER_YW[kh])
+        hd = ATOM_HOLDER_YW[kh]
+        hobs = sort(collect(keys(hd)); by = tnum)
+        hx = [tnum(d) for d in hobs]
+        H = Matrix{Float64}(undef, length(hd[hobs[1]]), length(dates))
+        for (ci, d) in enumerate(dates)
+            x = tnum(d)
+            if x <= hx[1]
+                H[:, ci] = hd[hobs[1]]
+            elseif x >= hx[end]
+                H[:, ci] = hd[hobs[end]]
+            else
+                i = searchsortedlast(hx, x)
+                w = (x - hx[i]) / (hx[i+1] - hx[i])
+                H[:, ci] = (1 - w) .* hd[hobs[i]] .+ w .* hd[hobs[i+1]]
+            end
+        end
+        hyw = H
+    end
+    return (π = π_series, hyw = hyw)
+end
+
 # ∫₀ᵘ Q_m(s) ds in closed form (Bonnet's recursion):
 #   I_0(u) = u
 #   I_m(u) = (P_{m+1}(2u−1) − P_{m−1}(2u−1)) / (2·√(2m+1)),  m ≥ 1
