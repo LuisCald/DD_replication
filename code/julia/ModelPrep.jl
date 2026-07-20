@@ -1562,7 +1562,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         λ = sqrt.(principalvars(M))
         pcs_s = pcs ./ λ
         proj = projection(M) * diagm(λ)
-        @info "The size of the projection matrix for the aggs. is $(size(proj))"
+        # @info "The size of the projection matrix for the aggs. is $(size(proj))"  # (moved below the Mdim slice: this printed the pre-slice pratio fit and read as if 139 columns were kept)
         
         # Aggregate-factor count: FIXED by specification, deliberately NOT taken
         # from the information criteria above. The baseline 11 is selected by the
@@ -1583,6 +1583,8 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             pcs_s = pcs_s[1:Mdim, :]
             proj = proj[:, 1:Mdim]
         end
+
+        @info "Aggregate block: keeping $(size(proj, 2)) factors (projection $(size(proj)))"
 
         return proj, pcs_s, M
 
