@@ -340,6 +340,14 @@ drop _merge
 
 drop if daten <= tq(1947, 1) // why? because SCF first obs is 1950 and 1947 is when a decent amount of FRED series begin
 
+* Z.1 component series: annual (Q4-only) before ~1952 — blank the VALUES so the
+* de-seasoning sees a clean quarterly series from 1952q4. Rows stay: the baseline
+* anchors (consum/income/wealth_per_hh) reach back to 1947 and the early SCF+
+* waves (1950+) need them.
+foreach v in hnocea hnomfsa hnoremv bogz1lm152090205q hnopfaq027s {
+	replace `v' = . if daten < tq(1952q4)
+}
+
 * Export the data to python to remove seasonality and generate stationary series 
 export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/aggregates/averages_nominal_w_season.csv", replace
 
