@@ -149,7 +149,9 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
         end
     end
 
-    n_failed > 0 &&
+    # Summary only on the deciding (point-data) pass — in the bootstrap this
+    # function runs once per draw and a per-draw line is pure spam.
+    !decided && n_failed > 0 &&
         @info "X-13 ($source): $(n_failed) series failed to adjust (originals kept; e.g. $(strip(example_err)))"
 
     if !decided
