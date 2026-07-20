@@ -73,6 +73,7 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
             an_error_occured <- FALSE
             err_msg <- ""
             m7 <- NA_real_
+            adjusted <- NULL               # kill stale state from previous rows/datasets
             d <- $(df_row)                 # fallback: keep original series
             tryCatch({
                 # 1  Build the ts object (this prints nothing, so no need to silence)
@@ -121,8 +122,16 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
             end
             mask[i] || continue             # tested, not identifiably seasonal
 
-            df_to_des[i, :] = d
-            df_to_des[i, nan_ids] .= NaN
+            # Hard guard: the R session is global, so a stale object from an
+            # earlier (shorter) dataset must never overwrite this row.
+            if length(d) == size(df_to_des, 2)
+                df_to_des[i, :] = d
+                df_to_des[i, nan_ids] .= NaN
+            else
+                @warn "X-13 returned length $(length(d)) for a $(size(df_to_des, 2))-column row " *
+                      "($source row $i); keeping original series"
+                decided || (mask[i] = false)
+            end
         end
     end
 
