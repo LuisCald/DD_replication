@@ -71,7 +71,7 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
                 # adjusted — X-13 errors on them; skip without calling R.
                 obs_vals = df_row[setdiff(eachindex(df_row), nan_ids)]
                 if length(unique(round.(obs_vals; sigdigits = 8))) < 8 ||
-                   Statistics.std(obs_vals) < 1e-10 * max(abs(Statistics.mean(obs_vals)), 1e-300)
+                   std(obs_vals) < 1e-10 * max(abs(mean(obs_vals)), 1e-300)
                     mask[i] = false
                     n_screened += 1
                     continue
