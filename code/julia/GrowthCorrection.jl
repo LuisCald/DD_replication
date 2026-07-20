@@ -99,6 +99,12 @@ gdp_con[!, :quarter] = quarter.(gdp_con[!, :date])
 
 function adjust_to_wealth_date!(df, growth_rates)
     df.year_quarter .= QuarterlyDate(1900, 2)  # Initialize a column to hold QuarterlyDate objects
+    # Experimental higher-frequency dating (income-only rows at the income
+    # reference year, Q4) — an old exploration to get more time variation out
+    # of the PSID interview dates. Kept as a side product (PSID_higher_freq.csv);
+    # the primary export uses the survey-date convention of the published
+    # PSID.csv, under which the distributional factors were identified.
+    df[!, :year_quarter_hf] .= QuarterlyDate(1900, 2)
 
     for row in eachrow(df)
         income = row[:income]
@@ -126,8 +132,11 @@ function adjust_to_wealth_date!(df, growth_rates)
             row[:income] = income
             row[:consum] = consum
             row[:year_quarter] = QuarterlyDate(row[:year], row[:quarter])
+            row[:year_quarter_hf] = QuarterlyDate(row[:year], row[:quarter])
         else
-            row[:year_quarter] = QuarterlyDate(row[:income_year], income_quarter)
+            # row[:year_quarter] = QuarterlyDate(row[:income_year], income_quarter)  # (old experiment → _hf)
+            row[:year_quarter] = QuarterlyDate(row[:year], row[:quarter])            # survey date (published PSID.csv convention)
+            row[:year_quarter_hf] = QuarterlyDate(row[:income_year], income_quarter)
         end
     end
 end
@@ -137,12 +146,33 @@ end
 adjust_to_wealth_date!(PSID, gdp_con)
 grouped_counts = combine(groupby(PSID, [:year_quarter]), nrow => :count)
 
-# Find how many observations there are for wealth 
+# Find how many observations there are for wealth
 select!(PSID, Not([:income_year, :year, :quarter, :count]))
 
-# Create a date column, but first drop income_year, year, quarter 
+# ── Side product: experimental higher-frequency variant ──────────────────────
+# Same growth-corrected values, income-only rows dated at (income year, Q4).
+let hf = copy(PSID)
+    hf[!, :year] = year.(hf[!, :year_quarter_hf])
+    hf[!, :quarter] = quarter.(hf[!, :year_quarter_hf])
+    cnt = combine(groupby(hf, [:year_quarter_hf]), nrow => :count)
+    hf = leftjoin(hf, cnt, on = :year_quarter_hf)
+    filter!(row -> row.count >= 1000, hf)
+    select!(hf, Not([:count, :year_quarter, :year_quarter_hf, :income_quarter]))
+    _p = raw"/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/PSID_higher_freq.csv"
+    isfile(_p) && rm(_p)
+    CSV.write(_p, hf)
+end
+select!(PSID, Not(:year_quarter_hf))
+
+# Create a date column, but first drop income_year, year, quarter
 PSID[!, :year] = year.(PSID[!, :year_quarter])
-PSID[!, :quarter] = quarter.(PSID[!, :year_quarter])
+# PSID[!, :quarter] = quarter.(PSID[!, :year_quarter])
+# Published-PSID convention: ONE cell per wave, everything dated Q2 (the
+# spring-interview date used by PSID.csv, under which the distributional
+# factors were identified). Interview-quarter variation lives in
+# PSID_higher_freq.csv above.
+PSID[!, :quarter] .= 2
+PSID[!, :year_quarter] = QuarterlyDate.(PSID[!, :year], PSID[!, :quarter])
 
 # Remove rows pertaining to dates with less than 500 observations
 grouped_counts = combine(groupby(PSID, [:year_quarter]), nrow => :count)
