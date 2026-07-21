@@ -1678,6 +1678,98 @@ already-integrated marginal levels.
 Returns a `Dict{String, Matrix{Float64}}` where keys are e.g. `"consum_by_income"`
 and values are `(length(share_spec) × T)` matrices of group means.
 """
+"""
+    compute_cross_conditional_means_continuous(cop_coefs, split_pcfs, measures, corr_mat; ...)
+
+Continuous cross-conditional operator: E[out | cond ∈ share-group] computed
+directly from the copula COEFFICIENT tensor and the outcome's Legendre
+quantile function —
+
+    E[V(u_o)·1{u_c ∈ G}] = Σ_{jk} κ_{jk} · (∫₀¹ Q_j(u) V(u) du) · (∫_G Q_k du)
+
+with the conditioning integral in closed form (I_m) and the outcome integral
+by composite Gauss–Legendre. Replaces the 10-cell discretized operator, whose
+top-cell value was the UNCONDITIONAL decile mean — freezing exactly the
+within-top-decile composition variation that drives conditional wealth.
+Atom-aware: for the atom measure the value function is the mixed quantile
+(0 on [0, π_t], conditional inverse above).
+"""
+function compute_cross_conditional_means_continuous(
+    cop_coefs,          # (K,…,K,T) reconstructed copula coefficient tensor
+    split_pcfs,         # D matrices (grid_pcf × T), asinh-scaled Legendre coefficients
+    measures,           # sorted measure names
+    corr_mat;           # T × D per-HH aggregate anchors
+    share_spec = [0.5, 0.4, 0.1],
+    max_order::Int = size(split_pcfs[1], 1) - 1,
+    atom_dim = nothing,
+    atom_π = nothing,
+)
+    D = length(measures)
+    T = size(split_pcfs[1], 2)
+    K = size(cop_coefs, 1)
+    edges = vcat(0.0, cumsum(share_spec))
+    nS = length(share_spec)
+    # conditioning-side closed-form segment integrals B[s][k+1] = ∫_G Q_k du
+    B = [[integrate_legendre_polynomial(k, edges[s+1]) - integrate_legendre_polynomial(k, edges[s]) for k = 0:(K-1)] for s = 1:nS]
+
+    result = Dict{String,Matrix{Float64}}()
+    for oi = 1:D, ci = 1:D
+        oi == ci && continue
+        result["$(measures[oi])_by_$(measures[ci])"] = fill(NaN, nS, T)
+    end
+    colons = ntuple(_ -> Colon(), D)
+
+    for t = 1:T
+        κt = @view cop_coefs[colons..., t]
+        any(isnan, κt) && continue
+        for oi = 1:D, ci = 1:D
+            oi == ci && continue
+            key = "$(measures[oi])_by_$(measures[ci])"
+            any(isnan, @view(split_pcfs[oi][:, t])) && continue
+
+            # marginalize the tensor to the (oi, ci) plane: all other degrees at 0
+            idx = ntuple(d -> (d == oi || d == ci) ? Colon() : 1, D)
+            κslice = κt[idx...]
+            κ2 = oi < ci ? κslice : permutedims(κslice)   # rows = outcome degree, cols = cond degree
+
+            # outcome-side integrals A[j+1] = ∫₀¹ Q_j(u) V_t(u) du
+            coefs_o = split_pcfs[oi][:, t]
+            corr_o = corr_mat[t, oi]
+            Vfun = if oi === atom_dim && atom_π !== nothing
+                πt = atom_π[t]
+                u -> u <= πt ? 0.0 :
+                    reverse_inverse_hyperbolic_sine(
+                        eval_quantile_function(coefs_o, max_order, (u - πt) / (1 - πt)),
+                    )[1] * corr_o
+            else
+                u -> reverse_inverse_hyperbolic_sine(
+                    eval_quantile_function(coefs_o, max_order, u),
+                )[1] * corr_o
+            end
+            A = zeros(K)
+            for j = 0:(K-1)
+                acc = 0.0
+                for b = 0:9   # composite over deciles for tail accuracy
+                    acc += gauss_legendre_integrate(u -> Q_m(j, u) * Vfun(u), b / 10, (b + 1) / 10)
+                end
+                A[j+1] = acc
+            end
+
+            for si = 1:nS
+                num = 0.0
+                for j = 1:K, k = 1:K
+                    num += κ2[j, k] * A[j] * B[si][k]
+                end
+                # conditioning marginal of the copula (defensive; = share width
+                # exactly when the pure-marginal coefficients are zero)
+                den = sum(κ2[1, k] * B[si][k] for k = 1:K)
+                result[key][si, t] = den > 0 ? num / den : NaN
+            end
+        end
+    end
+    return result
+end
+
 function compute_cross_conditional_means(
     copulas,          # D-dim copula density after generate_copula_densities, shape (G,...,G, T)
     new_data_pcf,     # Vector of D matrices, each (G × T) — already-integrated levels
@@ -1886,17 +1978,25 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
             atom_dim = atom_dim, atom_π = atom_ser === nothing ? nothing : atom_ser.π,
             atom_hyw = atom_ser === nothing ? nothing : atom_ser.hyw)
 
-        # Cross-conditional share means on a finer grid (deciles → 10×10×10 = 1000 cells)
-        xcond_grid = 10
-        copulas_xcond = generate_copula_densities(copy(copulas_coefs), measures, xcond_grid;
-            atom_dim = atom_dim, atom_π = atom_ser === nothing ? nothing : atom_ser.π,
-            atom_hyw = atom_ser === nothing ? nothing : atom_ser.hyw)
-        xcond_intervals = vcat([0.0 + 1e-6], select_grid_points(xcond_grid))
-        xcond_pcf = [zeros(xcond_grid, T) for _ in 1:D]
-        integrate_quantile_functions!(xcond_pcf, split_pcfs, grid_pcf, xcond_intervals, corr_mat; max_order = max_order,
-            atom_m = atom_dim, atom_π = atom_ser === nothing ? nothing : atom_ser.π)
-        cross_cond_data = compute_cross_conditional_means(
-            copulas_xcond, xcond_pcf, sort(measures), xcond_grid
+        # # Cross-conditional share means on a finer grid (deciles → 10×10×10 = 1000 cells)
+        # xcond_grid = 10
+        # copulas_xcond = generate_copula_densities(copy(copulas_coefs), measures, xcond_grid;
+        # atom_dim = atom_dim, atom_π = atom_ser === nothing ? nothing : atom_ser.π,
+        # atom_hyw = atom_ser === nothing ? nothing : atom_ser.hyw)
+        # xcond_intervals = vcat([0.0 + 1e-6], select_grid_points(xcond_grid))
+        # xcond_pcf = [zeros(xcond_grid, T) for _ in 1:D]
+        # integrate_quantile_functions!(xcond_pcf, split_pcfs, grid_pcf, xcond_intervals, corr_mat; max_order = max_order,
+        # atom_m = atom_dim, atom_π = atom_ser === nothing ? nothing : atom_ser.π)
+        # cross_cond_data = compute_cross_conditional_means(
+        # copulas_xcond, xcond_pcf, sort(measures), xcond_grid
+        # )
+        # ── Continuous conditional operator (replaces the 10-cell version above:
+        #    its top-cell value was the unconditional decile mean, freezing the
+        #    within-top-decile composition that conditional wealth lives on)
+        cross_cond_data = compute_cross_conditional_means_continuous(
+            copulas_coefs, split_pcfs, sort(measures), corr_mat;
+            max_order = max_order, atom_dim = atom_dim,
+            atom_π = atom_ser === nothing ? nothing : atom_ser.π,
         )
 
         # 'data_cop' is (x, x, x, T). Reshape to (x^d, T)
