@@ -1712,15 +1712,18 @@ function compute_cross_conditional_means_continuous(
 
     for t = 1:T
         κt = @view cop_coefs[colons..., t]
-        any(isnan, κt) && continue
         for oi = 1:D, ci = 1:D
             oi == ci && continue
             key = "$(measures[oi])_by_$(measures[ci])"
             any(isnan, @view(split_pcfs[oi][:, t])) && continue
 
-            # marginalize the tensor to the (oi, ci) plane: all other degrees at 0
+            # marginalize the tensor to the (oi, ci) plane: all other degrees at 0.
+            # NaN check on the SLICE, not the full tensor: partially-observing
+            # datasets (e.g. SIPP: income+wealth) store their observed
+            # sub-copula exactly in this degree-0 slice while the rest is NaN.
             idx = ntuple(d -> (d == oi || d == ci) ? Colon() : 1, D)
             κslice = κt[idx...]
+            any(isnan, κslice) && continue
             κ2 = oi < ci ? κslice : permutedims(κslice)   # rows = outcome degree, cols = cond degree
 
             # outcome-side integrals A[j+1] = ∫₀¹ Q_j(u) V_t(u) du
