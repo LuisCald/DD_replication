@@ -1670,15 +1670,6 @@ end
 
 
 """
-    compute_cross_conditional_means(copulas, new_data_pcf, measures, cop_grid; share_spec)
-
-Compute cross-conditional share-group means from the discretized copula and
-already-integrated marginal levels.
-
-Returns a `Dict{String, Matrix{Float64}}` where keys are e.g. `"consum_by_income"`
-and values are `(length(share_spec) × T)` matrices of group means.
-"""
-"""
     compute_cross_conditional_means_continuous(cop_coefs, split_pcfs, measures, corr_mat; ...)
 
 Continuous cross-conditional operator: E[out | cond ∈ share-group] computed
@@ -1770,6 +1761,15 @@ function compute_cross_conditional_means_continuous(
     return result
 end
 
+"""
+    compute_cross_conditional_means(copulas, new_data_pcf, measures, cop_grid; share_spec)
+
+Compute cross-conditional share-group means from the discretized copula and
+already-integrated marginal levels.
+
+Returns a `Dict{String, Matrix{Float64}}` where keys are e.g. `"consum_by_income"`
+and values are `(length(share_spec) × T)` matrices of group means.
+"""
 function compute_cross_conditional_means(
     copulas,          # D-dim copula density after generate_copula_densities, shape (G,...,G, T)
     new_data_pcf,     # Vector of D matrices, each (G × T) — already-integrated levels
