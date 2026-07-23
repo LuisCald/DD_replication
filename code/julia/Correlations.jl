@@ -47,13 +47,18 @@ function create_micro_df(copula_obj, pcfs, data_tag, k, folder, time_params, met
     end
     # finish!(p)
 
-    # Sort dataframe by time 
-    try
-        sort!(micro_full_df, :time)
-    catch ee
-        @warn "Failed to sort micro data by time" exception = ee
-        # println(ee)
+    # Income-only datasets (CPS, CPS2) have no finite copula slice — no micro
+    # data is constructible from a univariate marginal. Exit before the sort
+    # and the (previously empty) CSV export.
+    if isempty(micro_full_df) || nrow(micro_full_df) == 0
+        @info "$k: no reconstructable micro data (copula unobserved for this dataset); skipping export"
+        return return_df ? micro_full_df : nothing
     end
+
+    # Sort dataframe by time
+    sort!(micro_full_df, :time)
+    # try / catch ee -> @warn "Failed to sort micro data by time"  (obsolete:
+    #     the only failure mode was the empty-frame case handled above)
 
     # Export the data
     m_label = measures_folder(measures)
