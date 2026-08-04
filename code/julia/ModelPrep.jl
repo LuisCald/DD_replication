@@ -279,8 +279,9 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
     # Stochastic-trend spec: surface landed (S1), core wiring pending (S2–S4).
     # Hard error rather than silently estimating the baseline under the wrong label.
     hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic &&
-        error("trend_spec = :stochastic is not wired yet — S2–S4 pending; " *
-              "see doc/stochastic_trend_design.md. Use :hp (default) meanwhile.")
+        @warn("trend_spec = :stochastic: S1–S4 wired (states collapse to the baseline " *
+              "layout at the smoother boundary); S5 validation PENDING — treat results " *
+              "as experimental. See doc/stochastic_trend_design.md.")
 
     # Collects data for all available years 
     dfs, dfs_unaltered, year_vec, time_dict, freq_type = data_constructor(obs_data, model_options) # TODO: correct freq_type s.t. it makes sense 
