@@ -108,6 +108,8 @@ function hyperparameter_optimization(hyperpriors, model_elements, time_p, model_
         end
 
         # Estimate the model
+        hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic &&
+            error("hyperparameter optimization is not wired for trend_spec = :stochastic")
         param_vector, param_sizes, Σ_ids, priors = define_parameter_space(model_elements, model_options, hyperprior)
 
         # Return the objective function

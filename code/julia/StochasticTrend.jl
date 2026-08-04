@@ -85,16 +85,23 @@ function st_perform_detrending(df, time_p, year_vec, freq, freq_type, time_dict)
     @unpack tot_periods = time_p
     t = collect(1:tot_periods)
     trend = fill(NaN, size(df, 1), tot_periods)
-    βs = fill(NaN, 3, size(df, 1))
+    βs = fill(NaN, size(df, 1), 3)      # baseline contract: n×3 (ModelPrep container is (n,3,J))
     correct_indices = generate_correct_indices(year_vec, freq_type, freq,
                                                time_p.tmin, time_dict)
     for i in axes(df, 1)
         mask = findall(!isnan, @view df[i, :])
-        length(mask) < 3 && continue           # too few waves to fit a drift
+        isempty(mask) && continue
         obs_t = Float64.(correct_indices[mask])
-        X = hcat(ones(length(obs_t)), obs_t)
-        β = X \ Vector{Float64}(@view df[i, mask])
-        βs[1:2, i] .= β
+        # 1 obs → constant drift (level); 2 obs → exact line; ≥3 → OLS line.
+        # Rows must never be left un-detrended: an all-NaN trend row would NaN
+        # the reconstruction add-back at every period (review finding 5).
+        β = if length(mask) == 1
+            [Float64(df[i, mask[1]]), 0.0]
+        else
+            X = hcat(ones(length(obs_t)), obs_t)
+            X \ Vector{Float64}(@view df[i, mask])
+        end
+        βs[i, 1:2] .= β
         line = β[1] .+ β[2] .* t
         first_obs = minimum(obs_t)
         trend[i, Int(first_obs):end] .= line[Int(first_obs):end]
@@ -113,6 +120,22 @@ end
 # explicitly here. Note: like the baseline (which evaluates priors on raw
 # coordinates and softplus-transforms afterwards), no transform Jacobian is
 # added — documented choice, consistent with the existing blocks.
+
+# ── review-fix helpers (F1/F2/F4): trend-block-aware slicing ─────────────────
+st_is_stochastic(param_sizes) = length(param_sizes) == 9
+st_ntrend(param_sizes) = st_trend_dim(param_sizes[1][1])
+
+"Hyperprior slice of `priors` (the 6 hyperpriors precede the appended trend block)."
+st_hyperpriors(priors, param_sizes) = st_is_stochastic(param_sizes) ?
+    priors[end-st_ntrend(param_sizes)-5:end-st_ntrend(param_sizes)] : priors[end-5:end]
+
+"Hyperparameter slice of a full parameter vector (F2: DIMESampler init path)."
+st_hyper_params(par, param_sizes) = st_is_stochastic(param_sizes) ?
+    par[end-st_ntrend(param_sizes)-5:end-st_ntrend(param_sizes)] : par[end-5:end]
+
+"Strip hypers (+trend block) for matrisize (F4: run_postestimation call sites)."
+st_core_params(par, param_sizes) = st_is_stochastic(param_sizes) ?
+    par[1:end-6-st_ntrend(param_sizes)] : par[1:end-6]
 
 const ST_LAMBDA_SCALE = 0.1
 st_trend_dim(r::Int) = 2r + 1
@@ -135,6 +158,8 @@ sampler's init/step machinery; the hierarchy itself is evaluated in
 `st_likeli`). Dispatch guard lives in `set_params`.
 """
 function st_set_params(model_elements, time_p, model_options)
+    (hasproperty(model_options, :aggregate_rep) && model_options.aggregate_rep == :as_inputs) &&
+        error("trend_spec = :stochastic is not implemented for aggregate_rep = :as_inputs")
     prior_objects, meas_ind = estimate_prior(model_elements, model_options)
     param_vector, param_sizes, Σ_ids, priors =
         define_parameter_space(model_elements, model_options, prior_objects)

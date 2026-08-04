@@ -53,6 +53,33 @@ State vector (per the existing split in `likeli`/`matrisize`, states =
   uncertainty; interp-share covers τ automatically.
 - Initialization: τ_0 diffuse.
 
+## Review verdict (adversarial agent, 2026-08-04, post-commit 4357529)
+
+Augmentation math CONFIRMED (G layout, lyapd spectrum, st_likeli transform
+chain, step-range strip all verified line-by-line). S3b plumbing REFUTED as
+incomplete — remaining fixes, to land WITH S4 before lifting the gate:
+
+- F1 (HIGH): trend priors are appended AFTER the hyperpriors, but
+  DIMESampler.jl:19, run_estimation.jl:52, run_postestimation.jl:45,
+  export_draws.jl:35 slice `hyperpriors = priors[end-5:end]` → they grab
+  trend priors; positive-truncated dists meet hyper draws ≤ 0 → -Inf, else
+  silently wrong posterior. Fix: st-aware hyper slice (priors[end-n_tr-5:end-n_tr])
+  or insert the trend block BEFORE the hyper block everywhere consistently.
+- F2 (HIGH): DIME init not plumbed — DIMESampler.jl:53 `par_final[end-5:end]`
+  as hypers; SupportingFunctions.jl:280 `draw_from_prior` builds CORE-dim
+  chains; DIMESampler.jl:60 broadcast crashes. Fix: st-aware draw_from_prior
+  appending trend-prior draws + the hyper-slice fix.
+- F4: run_postestimation.jl:160/:230 `matrisize(par_final[1:end-6], …)` —
+  must strip end-(6+n_tr) when length(param_sizes)==9.
+- F6: HyperparameterOptimization.jl:111 calls define_parameter_space directly
+  then likeli → st_likeli strips a trend block that isn't there. Guard it.
+- F8 (accepted modeling choice, documented): hierarchy evaluated on the
+  softplus scale without Jacobian — valid MCMC target, slightly different
+  prior than the stated one; revisit if pile-up behavior looks off at S5.
+- FIXED same day: βs transposed (n×3 contract), thin-row detrending contract
+  (1–2 obs rows now get constant/exact-line drift; no NaN add-back),
+  :as_inputs guard in st_set_params.
+
 ## Status & staged tasks
 
 - **S1 (LANDED): spec surface.** `ModelOptions.trend_spec::Symbol = :hp`

@@ -32,7 +32,7 @@ if !@isdefined(param_sizes)
     _, param_sizes, priors, _, Σ_ids = set_params(model_elements, time_params, model_options)
 end
 if !@isdefined(hyperpriors)
-    hyperpriors = priors[end-5:end]
+    hyperpriors = st_hyperpriors(priors, param_sizes)
 end
 
 n_draws   = parse(Int, get(ENV, "DD_N_DRAWS", "200"))

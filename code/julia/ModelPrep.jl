@@ -1662,7 +1662,8 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             # MC evidence (FactorSelectionSim.jl): at DD-like T≈33 pooled columns,
             # Bai–Ng ICp2 is the most accurate; Freyaldenhoven/eigenvalue-ratio
             # under-select until T ≳ 100.
-            sel = select_n_factors(Matrix(data_matrix'), min(15, size(data_matrix, 2) - 1); verbose=false)
+            nds_pool = col_labels === nothing ? 1 : length(unique(col_labels[keep]))
+            sel = select_n_factors(Matrix(data_matrix'), max(2, min(15, size(data_matrix, 2) - 1 - nds_pool)); verbose=false)
             k_raw = model_options.factor_selection == :freyaldenhoven ? sel.freyaldenhoven : sel.bai_ng_ICp2
             Ndim_auto = clamp(k_raw, 1, 10)
             @info "Distributional factor selection (automatic): using $(Ndim_auto) " *
@@ -1695,7 +1696,8 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             # Factor-count diagnostics (always printed; retention follows
             # model_options.factor_selection). X convention: T×N (rows = pooled
             # columns/periods, cols = coefficients).
-            let selr = select_n_factors(Matrix(data_matrix'), min(15, size(data_matrix, 2) - 1); verbose = false)
+            let nds = col_labels === nothing ? 1 : length(unique(col_labels[keep])),
+                selr = select_n_factors(Matrix(data_matrix'), max(2, min(15, size(data_matrix, 2) - 1 - nds)); verbose = false)
                 @info "  factor-count criteria: Freyaldenhoven ⇒ $(selr.freyaldenhoven), " *
                       "Bai–Ng ICp2 ⇒ $(selr.bai_ng_ICp2), " *
                       "eigenvalue-ratio (AH) ⇒ $(selr.eigenvalue_ratio), " *
@@ -2335,9 +2337,9 @@ function n_factors_bai_ng(X::AbstractMatrix{<:Real}, r_max::Int;
     end
 
     # Economy SVD
-    U, S, Vt = svd(xtr; full=false)
-    Fhat0 = U * Diagonal(S)     # T × min(T,N)
-    Lhat0 = Vt                  # min(T,N) × N
+    F = svd(xtr; full=false)
+    Fhat0 = F.U * Diagonal(F.S)   # T × min(T,N)
+    Lhat0 = F.Vt                  # min(T,N) × N (NB: destructuring svd() yields V, not Vt)
 
     # Penalty constants
     NT = N * T
@@ -2377,7 +2379,9 @@ function n_factors_bai_ng(X::AbstractMatrix{<:Real}, r_max::Int;
         Chat = Fhat0[:, 1:k] * Lhat0[1:k, :]   # T×N
         ehat = xtr - Chat
         VF = mean(ehat .^ 2)
-        IC[k] = log(VF) + kgNT[k]
+        # at k = rank(xtr) the fit is exact and log(VF) ≈ -60 swamps the
+        # penalty, mechanically selecting r_max — exclude degenerate fits
+        IC[k] = VF < 1e-12 ? Inf : log(VF) + kgNT[k]
     end
 
     return argmin(IC)

@@ -49,7 +49,7 @@ opttag = "from_mcmc"
 
 # ── Step 1: Prepare data ─────────────────────────────────────
 @info "Preparing functional data..."
-hyperpriors = priors[end-5:end]
+hyperpriors = st_hyperpriors(priors, param_sizes)
 
 SSM(par) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
 SSM(par, _) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
