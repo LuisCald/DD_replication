@@ -95,15 +95,15 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     end
 
     # Plotting hyperparameter marginals
-    generate_marginals_for_hyperparameters(DIME_chains, m_label, tag)
+    generate_marginals_for_hyperparameters(DIME_chains, m_label, tag; n_trend = st_is_stochastic(param_sizes) ? st_ntrend(param_sizes) : 0)
 
     return par_final
 end
 
 
-function generate_marginals_for_hyperparameters(DIME_chains, m_label, tag)
-    # Subset to hyperparameters
-    DIME_chains = DIME_chains[:, :, end-5:end]
+function generate_marginals_for_hyperparameters(DIME_chains, m_label, tag; n_trend::Int=0)
+    # Subset to hyperparameters (skipping the appended trend block, if any)
+    DIME_chains = DIME_chains[:, :, end-n_trend-5:end-n_trend]
 
     init_path = BASE_PATH
     for i in axes(DIME_chains, 3)
