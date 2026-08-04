@@ -21,8 +21,18 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 const model_options = ModelOptions(
-    trend_spec = :stochastic,
-    tag        = " stochastic trend",
+    trend_spec    = :stochastic,
+    number_of_dfs = 2,
+    tag           = " stochastic trend PSID SCF",
 )
 
-const obs_data = ObservedData()
+# S5 smoke config: PSID + SCF only. Both are annual, so the per-draw X-13
+# deseasoning loop (the 6-9h sigma grind on the quarterly surveys) is skipped
+# almost entirely; consumption is then identified from PSID alone. Restore
+# ObservedData() for the full-survey run once S5 passes.
+const obs_data = ObservedData(
+    files = Dict(
+        "PSID" => joinpath(DATA_PROCESSING, "PSID.csv"),
+        "SCF"  => joinpath(DATA_PROCESSING, "SCF.csv"),
+    ),
+)
