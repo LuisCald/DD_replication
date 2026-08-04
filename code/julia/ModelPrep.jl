@@ -800,12 +800,14 @@ function transform_DCT_boot(DCT_boot, time_p, year_vec, freq, freq_type, time_di
         # Threads.@threads 
         for b in n_bootstraps
             X13_seasonality_adjustment!(DCT_boot[:, :, b], time_dict, source)
-            DCT_boot[:, :, b] = perform_detrending(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
+            DCT_boot[:, :, b] = (hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic ?
+                st_perform_detrending : perform_detrending)(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
             DCT_boot[:, :, b] = perform_standardization([DCT_boot[:, :, b]], estimator, dimension, measures)[1]
         end
     else
         Threads.@threads for b in n_bootstraps
-            DCT_boot[:, :, b] = perform_detrending(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
+            DCT_boot[:, :, b] = (hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic ?
+                st_perform_detrending : perform_detrending)(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
             DCT_boot[:, :, b] = perform_standardization([DCT_boot[:, :, b]], estimator, dimension, measures)[1]
         end
     end

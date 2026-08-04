@@ -81,7 +81,7 @@ reconstruction re-adds — so `Reconstruction.jl`'s add-back works unchanged and
 all remaining low-frequency movement is left for the τ states to absorb.
 Return signature matches `perform_detrending` (βs carry slope/intercept).
 """
-function st_perform_detrending(df, time_p, year_vec, freq, freq_type, time_dict)
+function st_perform_detrending(df, time_p, year_vec, freq, freq_type, time_dict; return_only_data=false)
     @unpack tot_periods = time_p
     t = collect(1:tot_periods)
     trend = fill(NaN, size(df, 1), tot_periods)
@@ -107,7 +107,7 @@ function st_perform_detrending(df, time_p, year_vec, freq, freq_type, time_dict)
         trend[i, Int(first_obs):end] .= line[Int(first_obs):end]
         df[i, mask] .= df[i, mask] .- (β[1] .+ β[2] .* obs_t)
     end
-    return βs, df, trend
+    return return_only_data ? df : (βs, df, trend)
 end
 
 # ── S3b: parameter plumbing ─────────────────────────────────────────────────
