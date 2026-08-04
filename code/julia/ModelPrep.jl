@@ -276,6 +276,12 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
     @info("Extracting observations Tⱼ of the joint distributions, in alphabetical order of datasets' name.")
     @info("Estimation selected: $tag")
 
+    # Stochastic-trend spec: surface landed (S1), core wiring pending (S2–S4).
+    # Hard error rather than silently estimating the baseline under the wrong label.
+    hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic &&
+        error("trend_spec = :stochastic is not wired yet — S2–S4 pending; " *
+              "see doc/stochastic_trend_design.md. Use :hp (default) meanwhile.")
+
     # Collects data for all available years 
     dfs, dfs_unaltered, year_vec, time_dict, freq_type = data_constructor(obs_data, model_options) # TODO: correct freq_type s.t. it makes sense 
 
@@ -319,7 +325,13 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
     trend = Vector{Matrix{Float64}}(undef, length(dfs))
 
     for j in eachindex(dfs)
-        βs[:, :, j], dfs[j], trend[j] = perform_detrending(dfs[j], time_p, year_vec[j], freq, freq_type[j], time_dict[j])
+        # :stochastic → linear alignment drift only (StochasticTrend.jl); the
+        # remaining low-frequency movement stays in the data for the τ states
+        if hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic
+            βs[:, :, j], dfs[j], trend[j] = st_perform_detrending(dfs[j], time_p, year_vec[j], freq, freq_type[j], time_dict[j])
+        else
+            βs[:, :, j], dfs[j], trend[j] = perform_detrending(dfs[j], time_p, year_vec[j], freq, freq_type[j], time_dict[j])
+        end
     end
 
     # Standardization
@@ -342,8 +354,16 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
         additional_data_blocks = find_data_blocks(dfs, pooled_data, ids_of_df)
     end
 
-    # Dimensionality reduction 
-    proj, pcs, _, n_less_than_one = perform_pca(pooled_data, measures, :functional_data, tag; additional_data_blocks)
+    # Dimensionality reduction
+    # Column provenance for the PCA-pool diagnostic (dataset + year per pooled
+    # column); skipped defensively if the bookkeeping doesn't line up.
+    col_labels, col_years = nothing, nothing
+    if sum(size.(dfs, 2)) == size(pooled_data, 2) &&
+       all(size(dfs[j], 2) == length(year_vec[j]) for j in eachindex(dfs))
+        col_labels = vcat([fill(df_vec.df_names[j], size(dfs[j], 2)) for j in eachindex(dfs)]...)
+        col_years = vcat([Float64.(year_vec[j]) for j in eachindex(dfs)]...)
+    end
+    proj, pcs, _, n_less_than_one = perform_pca(pooled_data, measures, :functional_data, tag; additional_data_blocks, col_labels, col_years)
 
     # Equation Objects
     MV = Vector{Matrix{Float64}}(undef, number_of_dfs)         # MV = measurement vector.
@@ -1569,7 +1589,7 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
 end
 
 
-function perform_pca(pool, measures, type, tag; additional_data_blocks=false, best_aggs=false)
+function perform_pca(pool, measures, type, tag; additional_data_blocks=false, best_aggs=false, col_labels=nothing, col_years=nothing)
     local M, proj, pcs
     # if pca_perspective == "bayesian"
     #     M = MultivariateStats.fit(PPCA, data_matrix; maxiter=3000, method=:bayes)  # probabilistic PCA 
@@ -1617,7 +1637,8 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         return proj, pcs_s, M
 
     elseif type == :functional_data
-        data_matrix = pool[:, mapslices(col -> all((!isnan).(col)), pool, dims=1)[:]]  # Only complete data
+        keep = mapslices(col -> all((!isnan).(col)), pool, dims=1)[:]
+        data_matrix = pool[:, keep]  # Only complete data
 
         # Only complete data
         pr = variation_selector(measures, tag)
@@ -1635,6 +1656,18 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             # where wealth lives. 8 also matches the empirical baseline's count.
             M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=8, method=:svd) # mean=0
             # M = MultivariateStats.fit(PCA, data_matrix; pratio=0.95, method=:svd) # mean=0
+        elseif model_options.factor_selection in (:freyaldenhoven, :bai_ng)
+            # Automatic, spec-independent factor count (component economies etc.),
+            # clamped to [1, 10] (design rule: no model beyond 10 factors).
+            # MC evidence (FactorSelectionSim.jl): at DD-like T≈33 pooled columns,
+            # Bai–Ng ICp2 is the most accurate; Freyaldenhoven/eigenvalue-ratio
+            # under-select until T ≳ 100.
+            sel = select_n_factors(Matrix(data_matrix'), min(15, size(data_matrix, 2) - 1); verbose=false)
+            k_raw = model_options.factor_selection == :freyaldenhoven ? sel.freyaldenhoven : sel.bai_ng_ICp2
+            Ndim_auto = clamp(k_raw, 1, 10)
+            @info "Distributional factor selection (automatic): using $(Ndim_auto) " *
+                  "($(model_options.factor_selection) ⇒ $(k_raw), clamped to [1, 10])"
+            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=Ndim_auto, method=:svd) # mean=0
         else
             M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
         end
@@ -1647,6 +1680,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
                 PCA,
                 data_matrix;
                 maxoutdim = minimum(size(data_matrix)),
+                pratio = 1.0,   # default 0.99 silently truncates the "full" spectrum
                 method = :svd,
             )
             sf = principalvars(Mfull) ./ MultivariateStats.tvar(Mfull)
@@ -1657,6 +1691,35 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
                   "\n  full spectrum, per-factor %: $(round.(100 .* sf[1:nshow]; digits = 1))" *
                   (length(sf) > nshow ? " … ($(length(sf)) components total)" : "") *
                   "\n  cumulative at 5 / 8 / 11 factors: $(cum(5))% / $(cum(8))% / $(cum(11))%"
+
+            # Factor-count diagnostics (always printed; retention follows
+            # model_options.factor_selection). X convention: T×N (rows = pooled
+            # columns/periods, cols = coefficients).
+            let selr = select_n_factors(Matrix(data_matrix'), min(15, size(data_matrix, 2) - 1); verbose = false)
+                @info "  factor-count criteria: Freyaldenhoven ⇒ $(selr.freyaldenhoven), " *
+                      "Bai–Ng ICp2 ⇒ $(selr.bai_ng_ICp2), " *
+                      "eigenvalue-ratio (AH) ⇒ $(selr.eigenvalue_ratio), " *
+                      "growth-ratio (AH) ⇒ $(selr.growth_ratio); " *
+                      "consensus (median) ⇒ $(selr.consensus)"
+            end
+
+            # PCA-pool provenance: which dataset/years the complete columns come
+            # from, and whether factor 1 is a dataset contrast or a time trend.
+            if col_labels !== nothing && length(col_labels) == length(keep)
+                kl = col_labels[keep]
+                ky = col_years !== nothing && length(col_years) == length(keep) ?
+                     col_years[keep] : nothing
+                f1 = MultivariateStats.transform(Mfull, data_matrix)[1, :]
+                for d in sort(unique(kl))
+                    idx = findall(kl .== d)
+                    yrs = ky === nothing ? "" : "; years $(sort(Int.(ky[idx])))"
+                    @info "  PCA pool: $(length(idx)) complete cols from $d — " *
+                          "f1 score mean $(round(mean(f1[idx]); digits = 2)), " *
+                          "sd $(round(std(f1[idx]); digits = 2))$yrs"
+                end
+                ky !== nothing && length(unique(ky)) > 1 &&
+                    @info "  PCA pool: corr(f1 score, year) = $(round(cor(f1, Float64.(ky)); digits = 2))"
+            end
         end
 
         # Why do I do this? X = P * F, but if we want F = pcs to have unit variance, we must divide it by the square root of the eigenvalues of the covariance matrix of X.

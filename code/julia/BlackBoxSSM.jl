@@ -13,6 +13,9 @@ end
 
 
 function define_step_ranges(param_sizes, priors, param_vector)
+    # stochastic-trend dispatch (appended 9th block; logic in StochasticTrend.jl)
+    length(param_sizes) == 9 && return st_define_step_ranges(param_sizes, priors, param_vector)
+
     step_ranges = Vector{Tuple{Float64,Float64}}(undef, length(param_vector))
 
     # # For A, B
