@@ -31,14 +31,21 @@
 const model_options = ModelOptions(
     measures      = sort(["income", "wealth", "stocks"]),
     atom_measures = ["stocks"],
+    factor_selection = :bai_ng,   # automatic count via Bai-Ng ICp2, clamped to <= 10 (MC-validated at T~33; see FactorSelectionSim.jl)
     tag           = " stocks economy",
     # blind_to left empty: surveys without a `stocks` column (e.g. CEX, CPS) are
     # detected as not observing it. Add entries here only to *deliberately* mute
     # an item that a dataset does observe.
 )
 
-# Uses the same survey CSVs and aggregate workbook as the baseline. Those CSVs
-# must contain a `stocks` column (added by the data-cleaning stage) and the
-# aggregate workbook a `stocks_per_hh` anchor; otherwise construction errors
+# The component columns live in the regenerated PSID_new/SCF_new files (the
+# canonical PSID.csv/SCF.csv predate the component export), so those two inputs
+# are swapped in exactly as in Structures_new_data.jl. The aggregate workbook
+# must carry the matching `stocks_per_hh` anchor; otherwise construction errors
 # out, which is the intended signal that the data isn't ready yet.
-const obs_data = ObservedData()
+const obs_data = ObservedData(
+    files = merge(retrieve_data_files(), Dict(
+        "PSID" => joinpath(DATA_PROCESSING, "PSID_new.csv"),
+        "SCF"  => joinpath(DATA_PROCESSING, "SCF_new.csv"),
+    )),
+)
