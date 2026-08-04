@@ -250,15 +250,16 @@ function remove_seasonality_from_quarterly_data!(dfs, names, time_dict)
     datasets_that_need_adjustment = ["SIPP1", "SIPP2", "SIPP3", "CEX"]
 
     for j in datasets_that_need_adjustment
-        try
-            df_id = findall(x -> x == j, names)[1]
-            X13_seasonality_adjustment!(dfs[df_id], time_dict[df_id], j)
-        catch ee
-            # println(ee)
-            # println("No dataset $j found.")
-            @warn "No dataset $j found." exception = ee
+        ids = findall(x -> x == j, names)
+        if isempty(ids)
+            @info "X-13: dataset $j not in this run — skipping seasonal adjustment."
+            continue
         end
-        # sipp2_id = findall(x -> x == "SIPP2", names)[1]
+        try
+            X13_seasonality_adjustment!(dfs[ids[1]], time_dict[ids[1]], j)
+        catch ee
+            @warn "X-13 adjustment failed for $j." exception = ee
+        end
     end
 end
 
