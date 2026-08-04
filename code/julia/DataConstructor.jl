@@ -217,6 +217,11 @@ const ATOM_PI = Dict{String,Dict{QuarterlyDate,Float64}}()   # "df/meas" → (da
 const ATOM_HOLDER_YW = Dict{String,Dict{QuarterlyDate,Vector{Float64}}}()
 const _ATOM_HYW_LAST = Ref{Union{Nothing,Vector{Float64}}}(nothing)
 
+# Weighted exact-zero share per dataset/measure, recorded in clean_data! BEFORE
+# the tie-break perturbation (which moves every exact zero off zero and would
+# blind the atom detector). Keyed "df_name" => measure => share.
+const RAW_ZERO_SHARES = Dict{String,Dict{String,Float64}}()
+
 function data_constructor(obs_data::ObservedData, model_options)
     """Prepares data, of any frequency, for estimation."""
 
@@ -224,6 +229,7 @@ function data_constructor(obs_data::ObservedData, model_options)
 
     empty!(ATOM_PI)          # fresh π store per data construction
     atom_zero_shares = Dict{String,Dict{String,Float64}}()   # atom detection (see end of function)
+    empty!(RAW_ZERO_SHARES)  # refilled by clean_data! (pre-perturbation shares)
     empty!(ATOM_HOLDER_YW)   # fresh holder-copula store per data construction
     _ATOM_HYW_LAST[] = nothing
 
@@ -294,19 +300,13 @@ function data_constructor(obs_data::ObservedData, model_options)
         years = unique(time_vec[j])
         ft = freq_type[j]
 
-        # ── Atom detection: weighted exact-zero share per measure (whole dataset)
+        # ── Atom detection: weighted exact-zero share per measure (whole dataset),
+        #    read from the PRE-perturbation record (clean_data! fills
+        #    RAW_ZERO_SHARES before the tie-break perturbation moves zeros).
         for meas in measures
-            if meas in names(data)
-                v = data[!, meas]
-                w = data[!, :weight]
-                ok = .!ismissing.(v) .& .!ismissing.(w)
-                vv = Float64.(coalesce.(v[ok], NaN))
-                ww = Float64.(coalesce.(w[ok], NaN))
-                fin = .!isnan.(vv) .& .!isnan.(ww)
-                tot = sum(ww[fin])
-                tot > 0 && (get!(atom_zero_shares, df_name, Dict{String,Float64}())[meas] =
-                    sum(ww[fin][vv[fin] .== 0.0]) / tot)
-            end
+            sh = get(get(RAW_ZERO_SHARES, df_name, Dict{String,Float64}()), meas, nothing)
+            sh !== nothing &&
+                (get!(atom_zero_shares, df_name, Dict{String,Float64}())[meas] = sh)
         end
 
         # Per time period ...    
@@ -330,15 +330,28 @@ function data_constructor(obs_data::ObservedData, model_options)
                     # Check which measures are observed for each time period 
                     if meas ∈ names(period_data)
                         if any(.!isnan.(period_data[:, meas]))
-                            push!(obs_meas, meas)
-
-                            # For the respective macro series, extract the correction data for the respective quarter 
+                            # For the respective macro series, extract the correction data for the respective quarter
                             local correction_q, correction_agg
                             if ft == "year"
                                 correction_q = filter(row -> row[ft] == Int.(round(actual_period, digits=0)), correction)[:, meas*"_per_hh"][end]
                             else
                                 correction_q = filter(row -> row[ft] == Int.(round(actual_period, digits=0)), correction)[:, meas*"_per_hh"]
                             end
+
+                            # No per-HH anchor for this quarter → the level can't be set,
+                            # so the measure counts as unobserved this period (marginal AND
+                            # copula). Arises for the DFA component anchors (Z1 starts
+                            # 1952Q4) vs the historical SCF waves that already observe the
+                            # components (1950Q3) — outside the estimation window anyway.
+                            anchor_missing = correction_q isa AbstractVector ?
+                                (isempty(correction_q) || any(ismissing, correction_q)) :
+                                ismissing(correction_q)
+                            if anchor_missing
+                                @info "$df_name $yr-$ft $actual_period: no $(meas)_per_hh anchor — treating $meas as unobserved"
+                                pcfs[m][:, q+p] .= NaN
+                                continue
+                            end
+                            push!(obs_meas, meas)
 
                             # Get percentile functions for each period
                             pcfs[m][:, q+p] = get_percentile_functions!(period_data, meas, non_missing_cols, obs_meas, correction_q, df_name, estimator, rec_date)
@@ -413,10 +426,10 @@ function data_constructor(obs_data::ObservedData, model_options)
     #    silently with the data vintage.
     for (df_name_z, dz) in atom_zero_shares, (meas_z, sh) in dz
         if sh > 0.05 && !(meas_z in model_options.atom_measures)
-            @warn "measure `\$meas_z` has \$(round(100 * sh; digits = 1))% exact zeros in \$df_name_z " *
+            @warn "measure `$meas_z` has $(round(100 * sh; digits = 1))% exact zeros in $df_name_z " *
                   "but is not in atom_measures — the point mass will be smeared by the polynomial fit"
         elseif meas_z in model_options.atom_measures && sh < 0.01
-            @info "atom measure `\$meas_z` has only \$(round(100 * sh; digits = 2))% exact zeros in \$df_name_z " *
+            @info "atom measure `$meas_z` has only $(round(100 * sh; digits = 2))% exact zeros in $df_name_z " *
                   "(hurdle treatment degenerates gracefully to the continuous fit)"
         end
     end
@@ -1723,7 +1736,23 @@ function clean_data!(df, measures, equivalized, bottom_coded, blind_to, key)
         non_missing_cols = filter(x -> !(x in meas_to_blind), non_missing_cols)
     end
 
-    # For the random-perturbantions later 
+    # Record weighted exact-zero shares BEFORE the tie-break perturbation below
+    # (afterwards every exact zero is off zero, which would blind the atom
+    # detector — see RAW_ZERO_SHARES / the verdicts at the end of data_constructor).
+    if "weight" in names(df)
+        d0 = get!(RAW_ZERO_SHARES, key, Dict{String,Float64}())
+        for c in non_missing_cols
+            v, w = df[!, c], df[!, "weight"]
+            ok = .!ismissing.(v) .& .!ismissing.(w)
+            vv = Float64.(coalesce.(v[ok], NaN))
+            ww = Float64.(coalesce.(w[ok], NaN))
+            fin = .!isnan.(vv) .& .!isnan.(ww)
+            tot = sum(ww[fin])
+            tot > 0 && (d0[c] = sum(ww[fin][vv[fin] .== 0.0]) / tot)
+        end
+    end
+
+    # For the random-perturbantions later
     Random.seed!(123456789)
 
     # Minor cleaning  
@@ -1737,14 +1766,21 @@ function clean_data!(df, measures, equivalized, bottom_coded, blind_to, key)
 
         scaled_perturbations = rand(length(df[:, c])) .* 0.01
 
-        # Equivalize step 
+        # Atom (semicontinuous) measures: exact zeros ARE the atom — they must
+        # survive to the detector/zero-mask exactly. The tie-break perturbation
+        # would smear the point mass and blind the hurdle machinery (π̂ → 0).
+        # Holders' values remain perturbed as usual.
+        atom_zeros = c in model_options.atom_measures ? (df[!, c] .== 0.0) : falses(0)
+
+        # Equivalize step
         if c != "weight" && c != "hhequiv"
             if equivalized == true
                 df[!, c] = (df[:, c] ./ df[:, "hhequiv"]) .+ scaled_perturbations
             else
-                # Perturb data randomly a bit to avoid ties -> uniform distribution 
+                # Perturb data randomly a bit to avoid ties -> uniform distribution
                 df[!, c] = df[:, c] + scaled_perturbations
             end
+            any(atom_zeros) && (df[atom_zeros, c] .= 0.0)
         end
     end
 

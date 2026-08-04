@@ -344,7 +344,7 @@ drop if daten <= tq(1947, 1) // why? because SCF first obs is 1950 and 1947 is w
 * de-seasoning sees a clean quarterly series from 1952q4. Rows stay: the baseline
 * anchors (consum/income/wealth_per_hh) reach back to 1947 and the early SCF+
 * waves (1950+) need them.
-foreach v in hnocea hnomfsa hnoremv bogz1lm152090205q hnopfaq027s {
+foreach v in HNOCEA HNOMFSA HNOREMV BOGZ1LM152090205Q HNOPFAQ027S {
 	replace `v' = . if daten < tq(1952q4)
 }
 
