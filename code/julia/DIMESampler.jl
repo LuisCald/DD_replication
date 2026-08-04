@@ -16,7 +16,7 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     m_label = measures_folder(measures)
 
     # First run tenative optimization
-    hyperpriors = priors[end-5:end] #TODO: hardcoded
+    hyperpriors = st_hyperpriors(priors, param_sizes) #TODO: hardcoded
     BBO(par) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
     par_final = run_black_box_opt(BBO, param_vector, param_sizes, priors, measures; opttime=bbo_opttime)
 
@@ -50,7 +50,7 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     # Run MCMC using Gregor's paper 
     LogProbParallel(x) = pmap(log_likeli, eachslice(x, dims=2))  # running an ensemble in parallel (ensemble of chains)
     
-    hyper_params = par_final[end-5:end] #TODO: hardcoded
+    hyper_params = st_hyper_params(par_final, param_sizes) #TODO: hardcoded
     nchain = length(param_vector) * 4 # a sane default
     priors = get_priors(model_elements, model_options, hyper_params)
     push!(priors, hyperpriors...) # add hyperpriors to the end of the priors list

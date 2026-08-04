@@ -42,7 +42,7 @@ end
 @info "Preparing functional data..."
 const func_data, time_params, model_elements = estimation_prep(obs_data, model_options)
 const (param_vector, param_sizes, priors, meas_ind, Σ_ids) = set_params(model_elements, time_params, model_options)
-hyperpriors = priors[end-5:end]
+hyperpriors = st_hyperpriors(priors, param_sizes)
 
 SSM(par) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
 SSM(par, _) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
@@ -157,7 +157,7 @@ try
     r_dist = param_sizes[1][1]
     q_agg = param_sizes[2][2]
 
-    A, B_mat, C, D, Ω_var, Ω_corr, Σ = matrisize(par_final[1:end-6], param_sizes)
+    A, B_mat, C, D, Ω_var, Ω_corr, Σ = matrisize(st_core_params(par_final, param_sizes), param_sizes)
     Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)
     mat_Ω_corr = Matrix(Ω_corr)
     global Ω = Ω_var * mat_Ω_corr * Ω_var'
@@ -227,7 +227,7 @@ try
     export_decomposition_csv(dec2, an_dir * "/ow_decomposition.csv"; dates=dts_an)
 
     sm, _, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
-    A2, B2, C2, D2, Ωv2, Ωc2, _ = matrisize(par_final[1:end-6], param_sizes)
+    A2, B2, C2, D2, Ωv2, Ωc2, _ = matrisize(st_core_params(par_final, param_sizes), param_sizes)
     Ωv2[diagind(Ωv2)] = log.(exp.(Ωv2[diagind(Ωv2)]) .+ 1)
     Ω2 = Ωv2 * Matrix(Ωc2) * Ωv2'
     Φ2, Ωbig = build_Phi_Omega(A2, B2, C2, D2, Ω2, 4)

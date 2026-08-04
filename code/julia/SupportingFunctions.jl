@@ -292,7 +292,14 @@ function draw_from_prior(param_sizes, priors, nchain)
     ΩC      = hcat([Lcorr_to_u(L) for L in L_draws]...)
 
     Σ = hcat([rand.(priors[5:4+nΣ])    for _ in 1:nchain]...)
-    H = hcat([rand.(priors[end-5:end]) for _ in 1:nchain]...)
+    # trend-block-aware (StochasticTrend.jl): hypers precede the appended block
+    H = hcat([rand.(st_hyperpriors(priors, param_sizes)) for _ in 1:nchain]...)
+    if st_is_stochastic(param_sizes)
+        # raw softplus coords: tight spread around the st_set_params initials
+        r = param_sizes[1][1]
+        θtr = vcat(fill(-3.0, r), fill(0.54, r), [-2.25]) .+ 0.1 .* randn(2r + 1, nchain)
+        return vcat(A_B_C_D, Ωf, Ωy, ΩC, Σ, H, θtr)
+    end
     return vcat(A_B_C_D, Ωf, Ωy, ΩC, Σ, H)
 end
 

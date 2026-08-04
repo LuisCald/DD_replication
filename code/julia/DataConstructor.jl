@@ -263,7 +263,7 @@ function data_constructor(obs_data::ObservedData, model_options)
             rename!(df, "consumption" => "consum")
         end
 
-        data, non_missing_cols = select_data(df, measures, equivalized, bottom_coded, blind_to, df_name)
+        data, non_missing_cols = select_data(df, measures, equivalized, bottom_coded, blind_to, df_name; atom_measures = model_options.atom_measures)
 
         # Stores years of measurements based on 'information' criteria  
         time_vec[j], freq_type[j] = define_time_of_measures(data)
@@ -343,9 +343,10 @@ function data_constructor(obs_data::ObservedData, model_options)
                             # copula). Arises for the DFA component anchors (Z1 starts
                             # 1952Q4) vs the historical SCF waves that already observe the
                             # components (1950Q3) — outside the estimation window anyway.
+                            bad_anchor(x) = ismissing(x) || (x isa Number && isnan(x))
                             anchor_missing = correction_q isa AbstractVector ?
-                                (isempty(correction_q) || any(ismissing, correction_q)) :
-                                ismissing(correction_q)
+                                (isempty(correction_q) || any(bad_anchor, correction_q)) :
+                                bad_anchor(correction_q)
                             if anchor_missing
                                 @info "$df_name $yr-$ft $actual_period: no $(meas)_per_hh anchor — treating $meas as unobserved"
                                 pcfs[m][:, q+p] .= NaN
@@ -617,10 +618,10 @@ function define_time_of_measures(data)
 end
 
 
-function select_data(df, measures, equivalized, bottom_coded, blind_to, key)
+function select_data(df, measures, equivalized, bottom_coded, blind_to, key; atom_measures = model_options.atom_measures)
 
     # From CSV import
-    non_missing_cols = clean_data!(df, measures, equivalized, bottom_coded, blind_to, key)
+    non_missing_cols = clean_data!(df, measures, equivalized, bottom_coded, blind_to, key, atom_measures)
 
     return df, non_missing_cols
 end
@@ -1715,7 +1716,7 @@ end
 
 
 
-function clean_data!(df, measures, equivalized, bottom_coded, blind_to, key)
+function clean_data!(df, measures, equivalized, bottom_coded, blind_to, key, atom_measures = model_options.atom_measures)
     # First check if data has the measure. Subset to the columns of choice
     local non_missing_cols
     if all([col in names(df) for col in measures])
@@ -1770,7 +1771,11 @@ function clean_data!(df, measures, equivalized, bottom_coded, blind_to, key)
         # survive to the detector/zero-mask exactly. The tie-break perturbation
         # would smear the point mass and blind the hurdle machinery (π̂ → 0).
         # Holders' values remain perturbed as usual.
-        atom_zeros = c in model_options.atom_measures ? (df[!, c] .== 0.0) : falses(0)
+        atom_zeros = c in atom_measures ? (df[!, c] .== 0.0) : falses(0)
+        # never resurrect rows whose equivalization divisor is invalid (review fix)
+        if equivalized == true && any(atom_zeros)
+            atom_zeros .&= isfinite.(coalesce.(df[!, "hhequiv"], NaN)) .& (coalesce.(df[!, "hhequiv"], 0.0) .!= 0.0)
+        end
 
         # Equivalize step
         if c != "weight" && c != "hhequiv"
