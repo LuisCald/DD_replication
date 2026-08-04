@@ -262,7 +262,7 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
 
     if smooth
         smoother_output, log_D, alarm = recurse_kalman_filter_smoother(Ã, B̃, C̃, D, Ω̃_f, Ω_y, Σ, G̃, y)
-        return smoother_output, log_P + log_D, alarm
+        return st_collapse_smoother(smoother_output, size(A, 1), r), log_P + log_D, alarm
     else
         local log_D, alarm2
         try
@@ -273,6 +273,49 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
         end
         return log_P + log_D, alarm2
     end
+end
+
+
+# ── S4: state collapse at the smoother boundary ─────────────────────────────
+# Under :stochastic the states are [f̃(4 lags), a] with f̃ = [f; τ]. Since the
+# measurement loads Λ on (f + τ), collapsing f_lag ← f_lag + τ_lag (variances:
+# var(f)+var(τ)+2cov; cross-covs likewise) returns baseline-shaped
+# SmootherResults — EVERY downstream consumer (reconstruction, anatomy,
+# draws, forecasts) works unchanged. Raw τ levels are stashed in ST_LAST_TAU
+# ("f̃-block τ at lag 0", r × T) for S5 diagnostics.
+const ST_LAST_TAU = Ref{Any}(nothing)
+
+function st_collapse_index(r::Int, rτ::Int, q::Int)
+    r̃ = r + rτ
+    fidx = vcat([lag*r̃ .+ (1:r) for lag in 0:3]...)
+    τidx = vcat([lag*r̃ + r .+ (1:rτ) for lag in 0:3]...)
+    aidx = 4r̃ .+ (1:q)
+    return fidx, τidx, aidx
+end
+
+function st_collapse_smoother(sm, r::Int, rτ::Int)
+    n_aug = size(sm.x_smoothed, 1)
+    q = n_aug - 4 * (r + rτ)
+    fidx, τidx, aidx = st_collapse_index(r, rτ, q)
+    keep = vcat(fidx, aidx)                       # baseline layout order
+    Tn = size(sm.x_smoothed, 2)
+    ST_LAST_TAU[] = sm.x_smoothed[τidx[1:rτ], :]  # τ_t at lag 0
+    coll_x(X) = begin
+        Xc = X[keep, :]
+        Xc[1:4r, :] .+= X[τidx, :]
+        Xc
+    end
+    coll_P(P) = begin
+        M = zeros(eltype(P), 4r + q, n_aug)       # linear map: collapsed = M * states
+        for (i, j) in enumerate(fidx); M[i, j] = 1.0; end
+        for (i, j) in enumerate(τidx); M[i, j] = 1.0; end
+        for (i, j) in enumerate(aidx); M[4r + i, j] = 1.0; end
+        M * P * M'
+    end
+    SmootherResults(coll_x(sm.x_filtered), map(coll_P, sm.sigma_filtered),
+                    coll_x(sm.x_updated), map(coll_P, sm.sigma_updated),
+                    coll_x(sm.x_smoothed), map(coll_P, sm.sigma_smoothed),
+                    map(coll_P, sm.cross_covariances), coll_x(sm.dε_smoothed))
 end
 
 """
