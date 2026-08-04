@@ -719,7 +719,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
             draws = occursin("CPS", source) ? Int(round(max_draws * 0.10, digits=0)) : max_draws # CPS is a large dataset --- tight intervals anyway 
             draws = occursin("SIPP", source) ? Int(round(draws * 0.50, digits=0)) : draws # SIPP is a quarterly dataset
             # draws = occursin("HANK", source) ? Int(round(draws * 0.50, digits=0)) : draws # HANK is a large simulated dataset
-            data, _ = select_data(df, measures, equivalized, bottom_coded, blind_to, source)
+            data, _ = select_data(df, measures, equivalized, bottom_coded, blind_to, source; atom_measures = model_options.atom_measures)
 
             # HANK special case: empirical (data-based) noise is disabled (we don't add noise from data).
             # Keep `hank_noise_draws = nothing` so we don't require/loading noise files.
@@ -2340,6 +2340,7 @@ function n_factors_bai_ng(X::AbstractMatrix{<:Real}, r_max::Int;
     F = svd(xtr; full=false)
     Fhat0 = F.U * Diagonal(F.S)   # T × min(T,N)
     Lhat0 = F.Vt                  # min(T,N) × N (NB: destructuring svd() yields V, not Vt)
+    r_max = min(r_max, length(F.S))   # only criterion without an internal clamp (review)
 
     # Penalty constants
     NT = N * T

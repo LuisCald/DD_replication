@@ -292,8 +292,11 @@ function draw_from_prior(param_sizes, priors, nchain)
     ΩC      = hcat([Lcorr_to_u(L) for L in L_draws]...)
 
     Σ = hcat([rand.(priors[5:4+nΣ])    for _ in 1:nchain]...)
-    # trend-block-aware (StochasticTrend.jl): hypers precede the appended block
-    H = hcat([rand.(st_hyperpriors(priors, param_sizes)) for _ in 1:nchain]...)
+    # NB: the only caller (DIMESampler) passes a REBUILT priors list
+    # (get_priors + push hyperpriors) whose tail IS the 6 hyperpriors — the
+    # trend priors are never re-appended there, so end-5:end is correct under
+    # BOTH specs. Coupled with MDD.jl's identical slice: change together.
+    H = hcat([rand.(priors[end-5:end]) for _ in 1:nchain]...)
     if st_is_stochastic(param_sizes)
         # raw softplus coords: tight spread around the st_set_params initials
         r = param_sizes[1][1]
