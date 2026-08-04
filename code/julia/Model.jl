@@ -1,6 +1,10 @@
 function set_params(model_elements::StateSpaceModel, time_p::TimeParams, model_options::ModelOptions)
     """Generates the initial draw of parameters and defines their prior distributions."""
 
+    # stochastic-trend dispatch (all logic in StochasticTrend.jl)
+    hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic &&
+        return st_set_params(model_elements, time_p, model_options)
+
     prior_objects, meas_ind = estimate_prior(model_elements, model_options)
     param_vector, param_sizes, Σ_ids, priors = define_parameter_space(model_elements, model_options, prior_objects)
 
@@ -623,6 +627,11 @@ function likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, 
 
     Returns smoother estimates if 'smooth'.
     """
+
+    # stochastic-trend dispatch (all logic in StochasticTrend.jl) — single
+    # choke point covering every likeli call site (DIMES, MDD, forecasts, …)
+    hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic &&
+        return st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, model_options; smooth=smooth)
 
     @unpack number_of_dfs = model_options
     @unpack y, G, u, agg_count = model_elements

@@ -234,6 +234,7 @@ prior model variants.
 
     # ─── PCA / projection details ─────────────────────────────────────────
     pca_perspective::S = "frequentist"                    # PCA fit perspective ("frequentist" or "bayesian")
+    factor_selection::Symbol = :pratio                    # distributional factor retention: :pratio = variance threshold (published baseline; pinned tags unaffected); :freyaldenhoven / :bai_ng = automatic count, clamped to [1, 10] (MC in FactorSelectionSim.jl: Bai–Ng ICp2 most accurate at DD-like T≈33; Freyaldenhoven under-selects until T ≳ 100). All criteria are printed as diagnostics either way
     best_aggs::B = false                                  # use the curated "best aggregates" subset
     collapse::B = true                                    # collapse identical aggregates across blocks (memory)
 
@@ -242,6 +243,7 @@ prior model variants.
     bottom_coded::Vector{Any} = []                        # variables to floor at a lower bound
     atom_measures::Vector{String} = String[]              # semicontinuous measures with a point mass at 0 (e.g. ["stocks"]); enables the two-part / hurdle treatment. Empty = baseline behavior. See doc/stocks_atom_design.md
     participation_link::Symbol = :logit                   # link for the participation scalar π_t carried alongside the Legendre coefficients of an atom measure (:logit keeps reconstructed π in [0,1]). Inert unless atom_measures is nonempty
+    trend_spec::Symbol = :hp                              # per-coefficient trend handling: :hp = published baseline (HP-on-interpolated trend removed per dataset, re-added at reconstruction); :stochastic = random-walk trend states inside the state space (filtered, uncertainty-quantified; design in doc/stochastic_trend_design.md — S1 landed, core wiring S2–S4 pending, estimation_prep errors until then)
     rm_seasonality::B = true                              # X-13 seasonal adjust applicable series
     data_cutoffs::DS = Dict("begin" => "", "end" => "")   # restrict the time index (extensive margin)
     data_to_mute = Dict("begin" => "", "end" => "")       # drop specific waves; see kwarg comments above
