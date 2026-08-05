@@ -149,7 +149,10 @@ function estimate_prior(model_elements::StateSpaceModel, model_options::ModelOpt
 
         # Defining initial priors
         priors = [
-            MvNormal(prior_mean, V_prior),   # coefficients of A,B,C,D
+            # Hermitian + tiny ridge: with a rank-saturated factor pool (e.g.
+            # retained factors = complete columns - 1) V_prior comes out
+            # numerically asymmetric/singular and PDMat's cholesky throws
+            MvNormal(prior_mean, Matrix(Hermitian(V_prior)) + 1e-8 * I),   # coefficients of A,B,C,D
             Normal(ϕ_F, σ_ϕ),               # prior for factor persistence
             Normal(ϕ_Y, σ_ϕ_Y),               # prior for aggregate persistence
             LKJCholesky(factor_count + agg_count, corr_Ω_shape),  # prior for factor correlations
