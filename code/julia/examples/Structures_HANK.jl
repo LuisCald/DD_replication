@@ -4,6 +4,11 @@
 # Run with:   DD_EXAMPLE=HANK HANK_ECON=1 julia run_estimation.jl
 #             DD_EXAMPLE=HANK HANK_ECON=1 HANK_TREND=stochastic julia run_estimation.jl
 #             DD_EXAMPLE=HANK HANK_ECON=1 HANK_TREND=stochastic HANK_NDF=5 julia run_estimation.jl
+#             DD_EXAMPLE=HANK HANK_ECON=1 HANK_TREND=stochastic HANK_NDF=5 HANK_PERS=per_factor julia run_estimation.jl
+#
+# HANK_PERS=per_factor estimates one factor-persistence target per factor
+# (H block r+5; smooth default rho~0.9 where the data are silent) and
+# suffixes the tag with " pf". Default: the baseline single shared target.
 #
 # HANK_NDF=k pins the distributional factor count to k (default: the HANK
 # tag pin, 8, matching the empirical baseline) and suffixes the tag with
@@ -38,12 +43,15 @@ const HANK_TREND = Symbol(get(ENV, "HANK_TREND", "hp"))
 HANK_TREND in (:hp, :stochastic) || error("HANK_TREND must be 'hp' or 'stochastic', got $(HANK_TREND)")
 const HANK_NDF = parse(Int, get(ENV, "HANK_NDF", "0"))   # 0 = HANK tag pin (8 factors)
 0 <= HANK_NDF <= 10 || error("HANK_NDF must be in 1:10 (or 0 for the default pin), got $(HANK_NDF)")
-@info "HANK exercise: economy $(HANK_ECON), trend spec $(HANK_TREND), distributional factors $(HANK_NDF == 0 ? "8 (tag pin)" : string(HANK_NDF))"
+const HANK_PERS = Symbol(get(ENV, "HANK_PERS", "common"))
+HANK_PERS in (:common, :per_factor) || error("HANK_PERS must be 'common' or 'per_factor', got $(HANK_PERS)")
+@info "HANK exercise: economy $(HANK_ECON), trend spec $(HANK_TREND), distributional factors $(HANK_NDF == 0 ? "8 (tag pin)" : string(HANK_NDF)), persistence $(HANK_PERS)"
 
 const model_options = ModelOptions(
     tag = " HANK $(HANK_ECON)" * (HANK_TREND == :stochastic ? " stochastic trend" : "") *
-          (HANK_NDF > 0 ? " $(HANK_NDF) factors" : ""),
+          (HANK_NDF > 0 ? " $(HANK_NDF) factors" : "") * (HANK_PERS == :per_factor ? " pf" : ""),
     trend_spec = HANK_TREND,
+    persistence_prior = HANK_PERS,
     factor_selection = HANK_NDF > 0 ? :fixed : :pratio,
     n_dist_factors   = HANK_NDF > 0 ? HANK_NDF : 8,
     # HANK runs use QUINTILE integration grids (the replica moment targets are

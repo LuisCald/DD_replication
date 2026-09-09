@@ -76,9 +76,12 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     if !resume
         hyper_params = st_hyper_params(par_final, param_sizes) #TODO: hardcoded
         nchain = length(param_vector) * 4 # a sane default
-        priors = get_priors(model_elements, model_options, hyper_params)
-        push!(priors, hyperpriors...) # add hyperpriors to the end of the priors list
-        init_chains = draw_from_prior(param_sizes, priors, nchain)
+        # LOCAL list for the init draws only — do NOT rebind `priors`: the
+        # original (trend-tailed under :stochastic) list must reach run_mdd,
+        # whose st_hyperpriors slice assumes it (review 2026-09-10).
+        init_priors = get_priors(model_elements, model_options, hyper_params)
+        push!(init_priors, hyperpriors...) # hyperpriors at the tail (draw_from_prior contract)
+        init_chains = draw_from_prior(param_sizes, init_priors, nchain)
 
         # Replace several chains with the best candidate from the optimization
         init_chains[:, 1:10:end, :] .= par_final
@@ -126,15 +129,17 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     end
 
     # Plotting hyperparameter marginals
-    generate_marginals_for_hyperparameters(DIME_chains, m_label, tag; n_trend = st_is_stochastic(param_sizes) ? st_ntrend(param_sizes) : 0)
+    generate_marginals_for_hyperparameters(DIME_chains, m_label, tag;
+        n_trend = st_is_stochastic(param_sizes) ? st_ntrend(param_sizes) : 0,
+        n_hyper = n_hyper_block(param_sizes))
 
     return par_final
 end
 
 
-function generate_marginals_for_hyperparameters(DIME_chains, m_label, tag; n_trend::Int=0)
+function generate_marginals_for_hyperparameters(DIME_chains, m_label, tag; n_trend::Int=0, n_hyper::Int=6)
     # Subset to hyperparameters (skipping the appended trend block, if any)
-    DIME_chains = DIME_chains[:, :, end-n_trend-5:end-n_trend]
+    DIME_chains = DIME_chains[:, :, end-n_trend-n_hyper+1:end-n_trend]
 
     init_path = BASE_PATH
     for i in axes(DIME_chains, 3)

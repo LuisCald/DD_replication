@@ -167,3 +167,35 @@ incomplete — remaining fixes, to land WITH S4 before lifting the gate:
   `DIMESampler.jl` writes `posterior_draws/<m_label>_<tag>_checkpoint.jld2`
   every 10 iterations, atomic tmp+rename). Relaunch with `DD_RESUME=1` to
   warm-restart from the live ensemble (skips BBO + prior draws). Toy-tested.
+
+## S6: per-factor persistence (persistence_prior = :per_factor, 2026-09-10)
+
+Motivation (HANK truth runs): with ONE shared persistence target the hierarchy
+estimates rho_F ~ 0.25 (quarterly income evidence wins) and the loud fast cycle
+puts quarterly jitter into wealth between its sparse observations. Per-factor
+targets dissolve the tension: income-loaded factors estimate fast, sparse
+wealth-loaded factors revert to the prior default.
+
+Design:
+- H block: [kappa1, rho_F(1..r), rho_Y, sigma_phi, sigma_phiY, nu] — r+5 entries
+  (was 6). Both rho targets and the A own-lag prior means and the Omega_f prior
+  centers (1 - rho_j^2) become per-factor. sigma_phi stays GLOBAL (one shared
+  tightness — global-local, like the trend block).
+- COORDINATE CONVENTION differs from :common on purpose: under :per_factor,
+  get_priors does NOT mutate hyper_params; the hyperpriors are stated on the RAW
+  scale, so prior evaluation, DIME init draws, and BBO step ranges are coherent.
+  (:common evaluates hyperpriors on transformed values — pre-existing, kept
+  bit-identical.) rho_j hyperprior: Normal(3, 1.5) raw => inv_logit center 0.90,
+  rho = 0 at ~2 sigma: smooth default where the data are silent, overridable.
+- priors[2] becomes a Vector{Normal} (one per factor); consumers branch on
+  `priors[2] isa AbstractVector`: prioreval, draw_from_prior, define_step_ranges
+  (BlackBoxSSM), set_shock_priors (SeparationStrategy).
+- H-length plumbing generalized via n_hyper_block(param_sizes) (= param_sizes
+  H entry): st_hyperpriors / st_hyper_params / st_core_params,
+  define_parameter_space tail slice, draw_from_prior H slice, MDD hyper slice,
+  marginals slice (n_hyper kwarg), report_mode_dynamics layout-aware.
+- Guards: :as_inputs errors under :per_factor (both prior builders).
+- HANK switch: HANK_PERS=per_factor (tag suffix " pf").
+- Composes with trend_spec = :stochastic (trend block appended after H as before).
+
+Status: implemented, parse-checked; adversarial review + HANK run pending.
