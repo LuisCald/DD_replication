@@ -268,7 +268,7 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
 
     # Unpack data + necessary options 
     @unpack files, agg_data, df_vec, gdp_series = obs_data
-    @unpack estimator, number_of_dfs, measures, lags, freq, agg_freq, case, plot_proof, pca_perspective, rm_seasonality, equivalized, data_cutoffs, data_to_mute, tag, agg_lags = model_options
+    @unpack estimator, measures, lags, freq, agg_freq, case, plot_proof, pca_perspective, rm_seasonality, equivalized, data_cutoffs, data_to_mute, tag, agg_lags = model_options
 
     # Preliminairies
     init_path = DATA_PROCESSING
@@ -368,7 +368,7 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
     proj, pcs, _, n_less_than_one = perform_pca(pooled_data, measures, :functional_data, tag; additional_data_blocks, col_labels, col_years)
 
     # Equation Objects
-    MV = Vector{Matrix{Float64}}(undef, number_of_dfs)         # MV = measurement vector.
+    MV = Vector{Matrix{Float64}}(undef, length(df_vec.data))   # MV = measurement vector, one block per loaded dataset.
 
     # Fill Equation Objects 
     return func_struct, time_p, set_measurements(MV, pcs, means, stds, agg_data, pooled_data, proj, files, time_p, freq_type, time_dict, model_options, n_less_than_one, βs, trend, Σ̂⁻¹², data_to_mute, agg_lags, df_vec, gdp_series)
@@ -1370,7 +1370,7 @@ end
 
 
 function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, time_p, freq_type, time_dict, model_options, n_less_than_one, βs, trend, Σ̂⁻¹², data_to_mute, agg_lags, df_vec, gdp_series)
-    @unpack freq, agg_freq, number_of_dfs, lags, case, measures, pre_multiply, pca_perspective, tag, plot_proof, best_aggs, estimator = model_options
+    @unpack freq, agg_freq, lags, case, measures, pre_multiply, pca_perspective, tag, plot_proof, best_aggs, estimator = model_options
     @unpack tot_years, year_vec, tmin, tmax, tot_periods = time_p
     @unpack integral_pcf_grid, integral_cop_grid, grid_pcf, grid_cop = estimator
 
@@ -1647,7 +1647,15 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # Only complete data
         pr = variation_selector(measures, tag)
         local M
-        if tag == " 6 factors"
+        if model_options.factor_selection == :fixed
+            # Explicit count from the spec — takes precedence over the tag
+            # pins below (e.g. HANK_NDF=5 for the HANK replica, or when the
+            # automatic criteria over-select on a flat spectrum: the PSID+SCF
+            # pool's Bai–Ng ⇒ 10 on eigen-shares 7.5/7.2/5.8/5.7/5.3/4.9).
+            Ndim_fixed = clamp(Int(model_options.n_dist_factors), 1, 10)
+            @info "Distributional factor selection (fixed): using $(Ndim_fixed) (n_dist_factors = $(model_options.n_dist_factors), clamped to [1, 10]; overrides any tag pin)"
+            M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=Ndim_fixed, method=:svd) # mean=0
+        elseif tag == " 6 factors"
             M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=6, method=:svd) # mean=0
         elseif tag == " 7 factors"
             M = MultivariateStats.fit(PCA, data_matrix; maxoutdim=7, method=:svd) # mean=0

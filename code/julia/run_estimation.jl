@@ -34,6 +34,7 @@ niter = 400
 bbo_opttime = length(param_vector) * 3 # seconds for black-box optimization
 @info "Starting DIME sampler with $niter iterations..."
 par_final = run_DIME_sampler(model_elements, niter, param_vector, param_sizes, priors, meas_ind, Σ_ids, model_options; bbo_opttime=bbo_opttime)
+report_mode_dynamics(par_final, param_sizes, model_options)
 @info "Estimation complete."
 
 @info "═══ Stage 2 finished ═══"

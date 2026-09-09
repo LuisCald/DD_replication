@@ -234,14 +234,15 @@ function data_constructor(obs_data::ObservedData, model_options)
     _ATOM_HYW_LAST[] = nothing
 
     @unpack files, df_vec, gdp_series = obs_data
-    @unpack estimator, number_of_dfs, measures, information, equivalized, bottom_coded, blind_to, tag = model_options
+    @unpack estimator, measures, information, equivalized, bottom_coded, blind_to, tag = model_options
+    n_dfs = length(df_vec.data)   # datasets actually loaded from ObservedData.files
 
     @unpack grid_pcf, grid_cop = estimator
 
     # Pre-allocate
-    dfs = Vector{Matrix{Float64}}(undef, number_of_dfs)
-    time_vec = Vector{Vector}(undef, number_of_dfs)
-    freq_type = Vector{String}(undef, number_of_dfs)
+    dfs = Vector{Matrix{Float64}}(undef, n_dfs)
+    time_vec = Vector{Vector}(undef, n_dfs)
+    freq_type = Vector{String}(undef, n_dfs)
 
     # Extract year and quarter from time variable
     gdp_series[!, "time"] = QuarterlyDate.(gdp_series[!, "time"])
@@ -251,7 +252,7 @@ function data_constructor(obs_data::ObservedData, model_options)
     # Create dictionary that stores the years and quarters of the sample data
     time_dict = Dict()
 
-    un_perturbed_dfs = Vector{Matrix{Float64}}(undef, number_of_dfs)
+    un_perturbed_dfs = Vector{Matrix{Float64}}(undef, n_dfs)
 
     # For each dataset ... 
     for (j, df) in enumerate(df_vec.data)

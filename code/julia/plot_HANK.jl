@@ -34,11 +34,16 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
 
     # Estimation dates
     dts = QuarterlyDate(smin["year"], smin["quarter"]):Quarter(1):QuarterlyDate(smax["year"], smax["quarter"])
+    # a fresh tag has no plots tree yet — savefig/jldsave do not create directories
+    for m in measures
+        mkpath(path * "$m/quantiles_levels/")
+    end
+    mkpath(path * "correlations/")
 
     # Import the confidence intervals from the full HANK model 
 
     # Find the integer from tag 
-    economy_number = split(tag, " ")[end]
+    economy_number = hank_economy(tag)
     # file_name = init_path * "/2_Data_processing/confidence_intervals/ci_draws_illiqd_and_income_and_liquid_quintiles_series_HANK full $(economy_number)_all.jld2"
     # raw_ci = jldopen(file_name, "r")["ci"]
 
@@ -611,6 +616,11 @@ function generate_quantiles_shares_levels_HANK_full(data_dict, ty, func_data, da
     # Estimation dates
     dts = QuarterlyDate(smin["year"], smin["quarter"]):Quarter(1):QuarterlyDate(smax["year"], smax["quarter"])
     println("dates of user: ", dts)
+    # a fresh tag has no plots tree yet — savefig/jldsave do not create directories
+    for m in measures
+        mkpath(path * "$m/quantiles_levels/")
+    end
+    mkpath(path * "correlations/")
 
     # Import the model estimates from the incomplete-HANK model
     estimates_dict = get_estimates_for_comparison_HANK(data_name, ty, time_params, measures, estimator)
@@ -802,7 +812,7 @@ function generate_quantiles_shares_levels_HANK_full(data_dict, ty, func_data, da
     end
 
     # Export correlations to a JLD2 file
-    economy_number = split(tag, " ")[end]
+    economy_number = hank_economy(tag)
     file_name = path * "correlations/correlations_HANK_$(economy_number)"
     jldsave(file_name * ".jld2"; correlations=corr_dict)
 
@@ -828,7 +838,7 @@ function get_estimates_for_comparison_HANK(data_name, ty, time_p, measures, esti
     meas_folder = measures_folder(measures)
 
     # Download estimates from incomplete HANK models 
-    economy_number = split(tag, " ")[end]
+    economy_number = hank_economy(tag)
     data_tag = ty == "normal" ? "" : "_detrended"
 
     # Actual estimates

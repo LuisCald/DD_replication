@@ -158,7 +158,9 @@ function RunDIME(
     aimh_prob::Float64=0.10,
     df_proposal_dist::Int=10,
     delta::Float64=0.999,
-    progress::Bool=true)
+    progress::Bool=true,
+    checkpoint::Union{Nothing,Function}=nothing,   # called as checkpoint(it, x, lprob) every checkpoint_every iterations
+    checkpoint_every::Int=10)
 
     ndim, nchain = size(init)
     I_ndim = Matrix{Float64}(I, ndim, ndim)
@@ -309,6 +311,11 @@ function RunDIME(
         # --------- store trajectory ---------------------------------
         chains[it, :, :] .= permutedims(x, (2, 1))
         lprobs[it, :] .= lprob
+
+        # --------- checkpoint (live ensemble only; enough to warm-restart) --
+        if checkpoint !== nothing && it % checkpoint_every == 0
+            checkpoint(it, x, lprob)
+        end
 
         if progress
             set_description(iter,

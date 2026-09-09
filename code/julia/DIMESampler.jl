@@ -15,10 +15,33 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     label = "3D_A non-diag"
     m_label = measures_folder(measures)
 
-    # First run tenative optimization
     hyperpriors = st_hyperpriors(priors, param_sizes) #TODO: hardcoded
+
+    # ── checkpoint / resume ───────────────────────────────────────────────
+    # RunDIME saves the live ensemble every 10 iterations to
+    # posterior_draws/<m_label>_<tag>_checkpoint.jld2. Relaunching with
+    # DD_RESUME=1 warm-restarts from it (BBO pre-optimization and prior draws
+    # skipped; the AIMH proposal covariance re-accumulates). Motivation: the
+    # HANK 1 stochastic-trend run died at iteration 351/400 after 13 h.
+    init_path = BASE_PATH
+    mkpath(init_path * "/posterior_draws")
+    ckpt_path = init_path * "/posterior_draws/" * m_label * "_$tag" * "_checkpoint.jld2"
+    resume = get(ENV, "DD_RESUME", "0") == "1" && isfile(ckpt_path)
+    done_iters = 0
+    local init_chains
+    if resume
+        ck = JLD2.load(ckpt_path)
+        init_chains = ck["x"]
+        done_iters = ck["it"]
+        @info "DIME: resuming from checkpoint at iteration $(done_iters)/$(niter) ($(ckpt_path))"
+        done_iters >= niter && error("checkpoint already holds $(done_iters) ≥ niter = $(niter) iterations; raise niter or delete the checkpoint")
+    else
+        isfile(ckpt_path) && @warn "DIME: a checkpoint exists for this tag but DD_RESUME=1 was not set — starting fresh and overwriting it: $(ckpt_path)"
+    end
+
+    # First run tenative optimization
     BBO(par) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
-    par_final = run_black_box_opt(BBO, param_vector, param_sizes, priors, measures; opttime=bbo_opttime)
+    par_final = resume ? nothing : run_black_box_opt(BBO, param_vector, param_sizes, priors, measures; opttime=bbo_opttime)
 
     # A_new,B_new,Ω_new,Δ_new,G_new, likeli_vec, Δ_log = run_EM_algorithm(param_vector, param_sizes, meas_ind, Σ_ids, model_elements, model_options)
     # @unpack G = model_elements
@@ -50,26 +73,34 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     # Run MCMC using Gregor's paper 
     LogProbParallel(x) = pmap(log_likeli, eachslice(x, dims=2))  # running an ensemble in parallel (ensemble of chains)
     
-    hyper_params = st_hyper_params(par_final, param_sizes) #TODO: hardcoded
-    nchain = length(param_vector) * 4 # a sane default
-    priors = get_priors(model_elements, model_options, hyper_params)
-    push!(priors, hyperpriors...) # add hyperpriors to the end of the priors list
-    init_chains = draw_from_prior(param_sizes, priors, nchain)
+    if !resume
+        hyper_params = st_hyper_params(par_final, param_sizes) #TODO: hardcoded
+        nchain = length(param_vector) * 4 # a sane default
+        priors = get_priors(model_elements, model_options, hyper_params)
+        push!(priors, hyperpriors...) # add hyperpriors to the end of the priors list
+        init_chains = draw_from_prior(param_sizes, priors, nchain)
 
-    # Replace several chains with the best candidate from the optimization
-    init_chains[:, 1:10:end, :] .= par_final
+        # Replace several chains with the best candidate from the optimization
+        init_chains[:, 1:10:end, :] .= par_final
+    end
+
+    # atomic checkpoint write (tmp + rename) so a kill mid-write can't corrupt it
+    function checkpoint(it, x, lprob)
+        tmp = ckpt_path * ".tmp"
+        jldsave(tmp; x = copy(x), lprob = copy(lprob), it = it + done_iters, niter = niter)
+        mv(tmp, ckpt_path; force = true)
+    end
 
     # off you go sampling
-    DIME_chains, lprobs, propdist = RunDIME(LogProbParallel, init_chains, niter, progress=true, aimh_prob=0.1)
+    DIME_chains, lprobs, propdist = RunDIME(LogProbParallel, init_chains, niter - done_iters, progress=true, aimh_prob=0.1,
+                                            checkpoint=checkpoint, checkpoint_every=10)
 
     # Save just the last 500 iterations  
     last_25p = round(Int, niter * 0.25)
-    to_keep = minimum([500, last_25p])
+    to_keep = minimum([500, last_25p, size(DIME_chains, 1)])
     DIME_chains = DIME_chains[end-to_keep+1:end, :, :] #     chains = Array{Float64,3}(undef, niter, nchain, ndim)
 
     # Save the chains, the log probabilities, and the proposal distribution
-    init_path = BASE_PATH
-    mkpath(init_path * "/posterior_draws")
     jldsave(init_path * "/posterior_draws" * "/" * m_label * "_$tag.jld2"; d_chains=DIME_chains, lprobs=lprobs, propdist=propdist)
     # jldopen(init_path * "/posterior_draws" * "/" * m_label * "_$tag" * ".jld2", "r")
 

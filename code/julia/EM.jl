@@ -77,7 +77,7 @@ end
 
 function run_EM_algorithm(par_final, param_sizes, meas_ind, Σ_ids, model_elements, model_options)
     @unpack y, G, u = model_elements
-    @unpack case, number_of_dfs = model_options
+    @unpack case = model_options
     A, B, Ω, Σ                  = matrisize(par_final, param_sizes, case)
     Σ                           = apply_measurement_criteria(A, Σ, meas_ind, Σ_ids, model_options)
     Σ                          .= log.(exp.(Σ) .+ 1)  # softplus transformation
