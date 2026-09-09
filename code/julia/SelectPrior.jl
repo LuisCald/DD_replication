@@ -35,6 +35,8 @@ function estimate_prior(model_elements::StateSpaceModel, model_options::ModelOpt
     dimension = length(measures)
 
     if aggregate_rep == :as_inputs
+        hasproperty(model_options, :persistence_prior) && model_options.persistence_prior == :per_factor &&
+            error("persistence_prior = :per_factor is not implemented for aggregate_rep = :as_inputs")
         # ─── :as_inputs ─── No C, D; Ω is factor-only; 4 hyperparameters ───
         hyperpriors = [
             Normal(0, 5),   # κ_1  (prior variance scaling)
@@ -102,6 +104,49 @@ function estimate_prior(model_elements::StateSpaceModel, model_options::ModelOpt
         # ─── :as_states (default) ─── Original behavior ───────────────────────
 
         # Define hyperpriors
+        pf = hasproperty(model_options, :persistence_prior) && model_options.persistence_prior == :per_factor
+        local hyperpriors, hyper_params, prior_mean, A_prior, B_prior, C_prior, D_prior, V_prior, σ_ϕ, σ_ϕ_Y, priors
+        if pf
+            # ─── persistence_prior = :per_factor ────────────────────────────
+            # H layout: [κ₁, ρ_F(1..r), ρ_Y, σ_ϕ, σ_ϕY, ν] (r+5 entries).
+            # CONVENTION CHANGE vs :common — everything here is RAW-coordinate:
+            # hyper_params is NOT mutated, the hyperpriors are stated on the raw
+            # scale (so init draws, BBO step ranges and prior evaluation are all
+            # coherent), and locals hold the transformed values. ρ hyperprior
+            # Normal(3, 1.5) raw ⇒ inv_logit center ≈ 0.90 with ρ = 0 at ≈ 2σ:
+            # smooth default where the data are silent (sparse wealth factors),
+            # overridable where they are not (quarterly income factors).
+            hyperpriors = ContinuousDistribution[
+                Normal(0, 5);                                  # κ₁ (raw)
+                [Normal(3.0, 1.5) for _ in 1:factor_count];    # ρ_F,j (raw)
+                Normal(0, 5);                                  # ρ_Y (raw)
+                Normal(0, 1);                                  # σ_ϕ (raw, softplus)
+                Normal(0, 1);                                  # σ_ϕY (raw, softplus)
+                Normal(0, 2)                                   # ν (LKJ shape)
+            ]
+            hyper_params = [0.5; fill(3.0, factor_count); 0.5; 0.5; 0.5; 3.0]  # raw initials
+
+            ρ_F_vec = [inv_logit(hyper_params[1+j], -0.99, 0.99) for j in 1:factor_count]
+            ρ_Y = inv_logit(hyper_params[factor_count+2], -0.99, 0.99)
+            σ_ϕ = log(exp(hyper_params[factor_count+3]) + 1)
+            σ_ϕ_Y = log(exp(hyper_params[factor_count+4]) + 1)
+            corr_Ω_shape = 1 + log(1 + exp(hyper_params[factor_count+5]))
+
+            hyperparameters[1] = 0.05
+            hyperparameters[2] = inv_logit(hyper_params[1], 0.2, 0.99)
+            hyperparameters[6] = ρ_F_vec[1]   # scalar slot kept in-range; A_mean uses own_lag
+            hyperparameters[7] = ρ_Y
+            prior_mean, A_prior, B_prior, C_prior, D_prior, V_prior =
+                minnesota_prior(hyperparameters, pcs, u, lags, estimator; own_lag=ρ_F_vec)
+
+            ϕ_Y = log(exp(1 - ρ_Y^2) - 1)
+            priors = Any[
+                MvNormal(prior_mean, Matrix(Hermitian(V_prior)) + 1e-8 * I),
+                [Normal(log(exp(1 - ρ^2) - 1), σ_ϕ) for ρ in ρ_F_vec],  # per-factor Ω_f prior centers 1-ρ_j²
+                Normal(ϕ_Y, σ_ϕ_Y),
+                LKJCholesky(factor_count + agg_count, corr_Ω_shape),
+            ]
+        else
         hyperpriors = [
             # Minnesota parameters
             # Uniform(0.2, 0.99), # specifying the size of the prior variance of endogenous variables, which do not correspond to own lags
@@ -129,10 +174,6 @@ function estimate_prior(model_elements::StateSpaceModel, model_options::ModelOpt
         # Get initial parameter values
         prior_mean, A_prior, B_prior, C_prior, D_prior, V_prior = minnesota_prior(hyperparameters, pcs, u, lags, estimator)  # TODO: assumes aggs only have 1 lag
 
-        # For measurement error
-        n_objs = (dimension + 1)
-        n_param = n_objs * number_of_dfs + agg_count
-
         # ───  Extract the two persistence hyper-parameters  ─────────────────────────
         ρ_F = hyperparameters[6]        # κ₅  = persistence target for the  r-factor block
         ρ_Y = hyperparameters[7]        # κ₆  = persistence target for the  q-aggregate block
@@ -157,6 +198,11 @@ function estimate_prior(model_elements::StateSpaceModel, model_options::ModelOpt
             Normal(ϕ_Y, σ_ϕ_Y),               # prior for aggregate persistence
             LKJCholesky(factor_count + agg_count, corr_Ω_shape),  # prior for factor correlations
         ]
+        end
+
+        # For measurement error
+        n_objs = (dimension + 1)
+        n_param = n_objs * number_of_dfs + agg_count
 
         # For measurement equation
         ϕₘ = log(exp(1) - 1) # when softplus applied to it, it should be 1, which is our prior mean on the measures
@@ -497,7 +543,7 @@ function add_trends(X)
 end
 
 
-function minnesota_prior(minn_params, pcs, controls, lags, estimator; aggregate_rep=:as_states)
+function minnesota_prior(minn_params, pcs, controls, lags, estimator; aggregate_rep=:as_states, own_lag=nothing)
     """ Returns priors for A and Q. Treatment from https://documentation.sas.com/doc/en/etsug/15.2/etsug_varmax_details30.htm"""
 
     @unpack grid_pcf, grid_cop = estimator
@@ -518,8 +564,11 @@ function minnesota_prior(minn_params, pcs, controls, lags, estimator; aggregate_
     var_Y = VAR_fit(controls', lags)
     var_Ω = vcat(var_F, var_Y)  # variance of the factors and controls (needed for scaling in both modes)
 
-    # Set mean
-    A_mean = diagm([ones(n_factors)..., zeros(n_factors * (lags - 1))...]) .* κ_5
+    # Set mean (own_lag: per-factor persistence targets under
+    # persistence_prior = :per_factor; scalar κ_5 otherwise — identical result
+    # when own_lag == fill(κ_5, n_factors))
+    own = own_lag === nothing ? fill(κ_5, n_factors) : collect(own_lag)
+    A_mean = diagm([own..., zeros(n_factors * (lags - 1))...])
     B_mean = zeros(n_factors, n_aggs)
 
     # Prior variance matrix (Minnesota logic)
@@ -647,7 +696,10 @@ function prioreval(par, priors, param_sizes; aggregate_rep=:as_states)
         σ²_Σ = diag(par[4])
 
         ABCD_cond = all(insupport(priors[1], par[1]))
-        Ωf_cond = all([insupport(priors[2], σ²_Ωf[i]) for i in eachindex(σ²_Ωf)])
+        # priors[2] is a Vector{Normal} (one per factor) under persistence_prior = :per_factor
+        Ωf_cond = priors[2] isa AbstractVector ?
+                  all([insupport(priors[2][i], σ²_Ωf[i]) for i in eachindex(σ²_Ωf)]) :
+                  all([insupport(priors[2], σ²_Ωf[i]) for i in eachindex(σ²_Ωf)])
         Ωy_cond = all([insupport(priors[3], σ²_Ωy[i]) for i in eachindex(σ²_Ωy)])
         Ω_corr_cond = insupport(priors[4], par[3])
         Σ_cond = all([insupport(priors[4+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
@@ -661,7 +713,9 @@ function prioreval(par, priors, param_sizes; aggregate_rep=:as_states)
 
             # Log-prior value
             log_priorval = sum(logpdf(priors[1], par[1]))  # very costly unfortunately
-            log_priorval += sum([logpdf(priors[2], σ²_Ωf[i]) for i in eachindex(σ²_Ωf)])
+            log_priorval += priors[2] isa AbstractVector ?
+                            sum([logpdf(priors[2][i], σ²_Ωf[i]) for i in eachindex(σ²_Ωf)]) :
+                            sum([logpdf(priors[2], σ²_Ωf[i]) for i in eachindex(σ²_Ωf)])
             log_priorval += sum([logpdf(priors[3], σ²_Ωy[i]) for i in eachindex(σ²_Ωy)])
             log_priorval += logpdf(priors[4], par[3])
             log_priorval += sum([logpdf(priors[4+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])

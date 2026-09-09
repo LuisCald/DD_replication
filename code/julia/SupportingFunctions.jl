@@ -283,7 +283,10 @@ function draw_from_prior(param_sizes, priors, nchain)
     nΣ = param_sizes[7][1]
 
     A_B_C_D = rand(priors[1], nchain)
-    Ωf      = hcat([rand(priors[2], nf) for _ in 1:nchain]...)
+    # priors[2] is a Vector{Normal} (one per factor) under persistence_prior = :per_factor
+    Ωf      = priors[2] isa AbstractVector ?
+              hcat([rand.(priors[2]) for _ in 1:nchain]...) :
+              hcat([rand(priors[2], nf) for _ in 1:nchain]...)
     Ωy      = hcat([rand(priors[3], ny) for _ in 1:nchain]...)
 
     # Draw the full Cholesky from the LKJ prior, then map back to the
@@ -293,10 +296,11 @@ function draw_from_prior(param_sizes, priors, nchain)
 
     Σ = hcat([rand.(priors[5:4+nΣ])    for _ in 1:nchain]...)
     # NB: the only caller (DIMESampler) passes a REBUILT priors list
-    # (get_priors + push hyperpriors) whose tail IS the 6 hyperpriors — the
-    # trend priors are never re-appended there, so end-5:end is correct under
-    # BOTH specs. Coupled with MDD.jl's identical slice: change together.
-    H = hcat([rand.(priors[end-5:end]) for _ in 1:nchain]...)
+    # (get_priors + push hyperpriors) whose tail IS the H-block hyperpriors —
+    # the trend priors are never re-appended there, so slicing the last
+    # n_hyper_block entries is correct under BOTH trend specs.
+    n_h = n_hyper_block(param_sizes)
+    H = hcat([rand.(priors[end-n_h+1:end]) for _ in 1:nchain]...)
     if st_is_stochastic(param_sizes)
         # raw softplus coords: tight spread around the st_set_params initials
         r = param_sizes[1][1]
@@ -326,11 +330,20 @@ function report_mode_dynamics(par_final, param_sizes, model_options)
         # from the H block each evaluation) — report the mode's values, not
         # the struct's (which holds whatever draw was evaluated last).
         Hraw = st_hyper_params(par_final, param_sizes)
-        ρ_F = inv_logit(Hraw[2], -0.99, 0.99)
-        ρ_Y = inv_logit(Hraw[3], -0.99, 0.99)
-        σϕ = spd(Hraw[4])
+        local ρtxt, iY, iσ
+        if length(Hraw) == 6
+            ρtxt = "ρ_F = $(round(inv_logit(Hraw[2], -0.99, 0.99); digits = 2))"
+            iY, iσ = 3, 4
+        else  # persistence_prior = :per_factor: [κ₁, ρ_F(1..r), ρ_Y, σ_ϕ, σ_ϕY, ν]
+            rH = length(Hraw) - 5
+            ρv = [inv_logit(Hraw[1+j], -0.99, 0.99) for j in 1:rH]
+            ρtxt = "per-factor ρ_F = $(round.(ρv; digits = 2))"
+            iY, iσ = rH + 2, rH + 3
+        end
+        ρ_Y = inv_logit(Hraw[iY], -0.99, 0.99)
+        σϕ = spd(Hraw[iσ])
         @info "Mode dynamics: dist-factor |eig(A)| = $(round.(ev; digits = 3)) " *
-              "(estimated persistence target ρ_F = $(round(ρ_F; digits = 2)), σ_ϕ = $(round(σϕ; digits = 2)); agg ρ_Y = $(round(ρ_Y; digits = 2)))"
+              "(estimated persistence target $(ρtxt), σ_ϕ = $(round(σϕ; digits = 2)); agg ρ_Y = $(round(ρ_Y; digits = 2)))"
         @info "Mode dynamics: innovation sds — dist $(round.(spd.(Ωd[1:r]); digits = 2)), " *
               "agg $(round.(spd.(Ωd[r+1:end]); digits = 2)); agg AR diag(D) $(round.(D isa AbstractMatrix ? diag(D) : D; digits = 2))"
         if st_is_stochastic(param_sizes)

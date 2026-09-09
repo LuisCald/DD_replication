@@ -57,9 +57,10 @@ function define_step_ranges(param_sizes, priors, param_vector)
         step_ranges[i] = (priors[1].μ[i] - 3 * σ_d, priors[1].μ[i] + 3 * σ_d)
     end
 
-    # For Ωf
-    for i in (l_A+l_B+l_C+l_D+1):(l_A+l_B+l_C+l_D+l_Ωf)
-        step_ranges[i] = (-3 * priors[2].σ + priors[2].μ, 3 * priors[2].σ + priors[2].μ)
+    # For Ωf (priors[2] is a Vector{Normal}, one per factor, under persistence_prior = :per_factor)
+    for (q, i) in enumerate((l_A+l_B+l_C+l_D+1):(l_A+l_B+l_C+l_D+l_Ωf))
+        dΩf = priors[2] isa AbstractVector ? priors[2][q] : priors[2]
+        step_ranges[i] = (-3 * dΩf.σ + dΩf.μ, 3 * dΩf.σ + dΩf.μ)
     end
 
     # For Ωy

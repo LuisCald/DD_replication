@@ -194,7 +194,7 @@ function bridge_sampler(model_mcmc, model_elements, param_sizes, priors, meas_in
     #     push!(q11, likeli(model_elements, gen_samples[i, :], param_sizes, priors, meas_ind, Σ_ids, model_options))
     # end
 
-    hyperpriors = priors[end-5:end]
+    hyperpriors = st_hyperpriors(priors, param_sizes)
 
     Threads.@threads for j in 1:N1
         q21[j] = likeli(model_elements, gen_samples[j, :], param_sizes, hyperpriors, Σ_ids, model_options)[1]

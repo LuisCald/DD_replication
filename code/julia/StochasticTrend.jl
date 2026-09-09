@@ -125,17 +125,20 @@ end
 st_is_stochastic(param_sizes) = length(param_sizes) == 9
 st_ntrend(param_sizes) = st_trend_dim(param_sizes[1][1])
 
-"Hyperprior slice of `priors` (the 6 hyperpriors precede the appended trend block)."
-st_hyperpriors(priors, param_sizes) = st_is_stochastic(param_sizes) ?
-    priors[end-st_ntrend(param_sizes)-5:end-st_ntrend(param_sizes)] : priors[end-5:end]
+"H-block length from param_sizes: 6 (:common) or r+5 (persistence_prior = :per_factor)."
+n_hyper_block(param_sizes) = st_is_stochastic(param_sizes) ? param_sizes[end-1][1] : param_sizes[end][1]
+
+"Hyperprior slice of `priors` (the H-block hyperpriors precede any appended trend block)."
+st_hyperpriors(priors, param_sizes) = (n_h = n_hyper_block(param_sizes); st_is_stochastic(param_sizes) ?
+    priors[end-st_ntrend(param_sizes)-n_h+1:end-st_ntrend(param_sizes)] : priors[end-n_h+1:end])
 
 "Hyperparameter slice of a full parameter vector (F2: DIMESampler init path)."
-st_hyper_params(par, param_sizes) = st_is_stochastic(param_sizes) ?
-    par[end-st_ntrend(param_sizes)-5:end-st_ntrend(param_sizes)] : par[end-5:end]
+st_hyper_params(par, param_sizes) = (n_h = n_hyper_block(param_sizes); st_is_stochastic(param_sizes) ?
+    par[end-st_ntrend(param_sizes)-n_h+1:end-st_ntrend(param_sizes)] : par[end-n_h+1:end])
 
 "Strip hypers (+trend block) for matrisize (F4: run_postestimation call sites)."
-st_core_params(par, param_sizes) = st_is_stochastic(param_sizes) ?
-    par[1:end-6-st_ntrend(param_sizes)] : par[1:end-6]
+st_core_params(par, param_sizes) = (n_h = n_hyper_block(param_sizes); st_is_stochastic(param_sizes) ?
+    par[1:end-n_h-st_ntrend(param_sizes)] : par[1:end-n_h])
 
 const ST_LAMBDA_SCALE = 0.1
 st_trend_dim(r::Int) = 2r + 1
