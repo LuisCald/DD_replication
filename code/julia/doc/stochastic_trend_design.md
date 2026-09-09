@@ -119,3 +119,51 @@ incomplete — remaining fixes, to land WITH S4 before lifting the gate:
   purple case as acceptance test (expect: flat-ish path with honest bands,
   agreeing with raw 2019/2021 waves); HANK replica (truth has no
   operationalization drift → τ should stay near zero).
+
+### S5 log
+
+- **2026-08-28, smoke #1** (PSID+SCF, `:bai_ng` ⇒ 10 factors, 400 DIME
+  iters). Chains plateau by ~200. Level reconstructions hug the raw waves and
+  the DFA-cycle comparisons track — but the mode vector says the fit is
+  carried by the CYCLE, not τ: Ω_f innovation sd 0.59–1.85 (baseline mode
+  0.20–0.91), smoothed factors white-noise-like (AR(1) −0.17–0.45, sd(Δ) up
+  to 2.3 vs ≤0.8 baseline), ±8σ swings at 2020Q2 and around the PSID 2021Q2
+  wave (SCF-only 2020–21 spike in the level plots). Trend block sits on its
+  prior (ω_τ≈0.05, ψ≈1, λ≈0.10): with annual/triennial waves and no quarterly
+  survey, τ-vs-f is unidentified between waves, so the prior decides. Prior
+  scale is sane — the baseline HP trend drifts 7.5–9.5% of a coefficient sd
+  per quarter (median/p90 over 1730 PSID coefficients), i.e. ω≈0.08–0.10 in
+  factor units; C⁺(0,0.1)·C⁺(0,1) covers it.
+- Diagnosis is confounded: spec vs smoke config (10 factors from a
+  rank-11 pool on a flat spectrum 7.5/7.2/5.8/5.7/5.3/4.9 past factor 4; no
+  quarterly pins). Actions: `factor_selection = :fixed, n_dist_factors = 6`
+  (new option) for both smoke examples; `examples/Structures_hp_control.jl`
+  = same config under `:hp` to isolate the spec; `Reconstruction.jl` now
+  persists `from_mcmc/data/smoothed_trends.csv`; `st_posterior_summary.jl`
+  prints ω_τ/ψ/λ (+ chain quantiles from the .jld2) and τ-path diagnostics.
+- Next: rerun stochastic (6 factors) + control; compare Ω_f, factor AR(1),
+  Covid-window |z|. Covid-purple acceptance test only on the full-survey run
+  (2020 is unobserved in the PSID+SCF config by construction).
+- Same day: `ModelOptions.number_of_dfs` REMOVED (it was the max number of
+  datasets, documented as the factor count — the source of the "why 2 / why
+  SIPP warnings" confusion). Dataset count now comes from
+  `length(df_vec.data)` (DataConstructor/ModelPrep) and, inside
+  `apply_measurement_criteria`, from `(length(Σ_ids) − agg_count) ÷ (dim+1)`
+  (unit-tested against the smoke layout). HANK replica under the new spec:
+  `DD_EXAMPLE=HANK HANK_ECON=n HANK_TREND=stochastic` (tag " HANK n stochastic
+  trend"; keeps the HANK pins Ndim=Mdim=8; replicas are never deseasoned, so
+  no sigma grind). Expectation: truth has no operationalization drift ⇒ ω_τ
+  shrink toward zero and truth-vs-estimate fit ≥ HP.
+- **2026-08-29, HANK 1 stochastic (all 5 replicas) died at DIME 351/400
+  after 13 h**: `DomainError` — `Normal(0, λ·ψ_j)` with NaN scale in the
+  hierarchy log-prior. Cause: `sp(x)=log1p(exp(x))` is Inf beyond raw≈709 and
+  exactly 0 below raw≈−745, so a far DIME proposal gave 0·Inf. Fix in
+  `st_likeli`: overflow-safe softplus + reject (−1e12, alarm) any non-finite
+  θ_tr / non-positive scale, mirroring the baseline's out-of-support path.
+  Prep log of that run was clean: 8/8 factors (HANK pins), spectrum
+  55/15.5/12/5/4.2/2.8/1.7/1.5, corr(f1, year)=0 after linear drift removal,
+  381 params (trend block present).
+- Added DIME checkpointing (`DIMES.jl` `checkpoint`/`checkpoint_every` kwargs;
+  `DIMESampler.jl` writes `posterior_draws/<m_label>_<tag>_checkpoint.jld2`
+  every 10 iterations, atomic tmp+rename). Relaunch with `DD_RESUME=1` to
+  warm-restart from the live ensemble (skips BBO + prior draws). Toy-tested.

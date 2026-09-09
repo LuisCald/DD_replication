@@ -182,9 +182,6 @@ edit are:
                 — autoregressive depth of the state and aggregate factors
                   (1 / 4 in the paper). Increasing these makes the state
                   vector and parameter space larger.
-* `number_of_dfs`
-                — number of distributional factors retained from PCA. The
-                  paper uses 8 (explains ~99% of business-cycle variation).
 * `blind_to`    — `Dict("dataset" => ["measure"...])`. Tells the model to
                   ignore a measure in a specific dataset (e.g., useful for
                   counterfactual runs that mute one signal).
@@ -214,7 +211,6 @@ prior model variants.
 
     # ─── What and how to model ────────────────────────────────────────────
     measures::VS = sort(["consum", "wealth", "income"])  # jointly-modeled measures
-    number_of_dfs::I = 8                                  # # distributional factors retained from PCA
     estimation_object::S = "copulas and percentile functions"
     case::S = "A non-diag"                                # state-eq covariance pattern: "diag" / "A non-diag" / "A, Σ non-diag"
     information::S = "partial"                            # observation set: "full" or "partial" (default)
@@ -234,7 +230,8 @@ prior model variants.
 
     # ─── PCA / projection details ─────────────────────────────────────────
     pca_perspective::S = "frequentist"                    # PCA fit perspective ("frequentist" or "bayesian")
-    factor_selection::Symbol = :pratio                    # distributional factor retention: :pratio = variance threshold (published baseline; pinned tags unaffected); :freyaldenhoven / :bai_ng = automatic count, clamped to [1, 10] (MC in FactorSelectionSim.jl: Bai–Ng ICp2 most accurate at DD-like T≈33; Freyaldenhoven under-selects until T ≳ 100). All criteria are printed as diagnostics either way
+    factor_selection::Symbol = :pratio                    # distributional factor retention: :pratio = variance threshold (published baseline; pinned tags unaffected); :freyaldenhoven / :bai_ng = automatic count, clamped to [1, 10] (MC in FactorSelectionSim.jl: Bai–Ng ICp2 most accurate at DD-like T≈33; Freyaldenhoven under-selects until T ≳ 100); :fixed = exactly `n_dist_factors`. All criteria are printed as diagnostics either way
+    n_dist_factors::I = 8                                 # distributional factor count under factor_selection = :fixed (clamped to [1, 10]); ignored otherwise
     best_aggs::B = false                                  # use the curated "best aggregates" subset
     collapse::B = true                                    # collapse identical aggregates across blocks (memory)
 

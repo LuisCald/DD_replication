@@ -6,7 +6,6 @@
 # baseline. Everything else identical to the published baseline.
 # ─────────────────────────────────────────────────────────────────────────────
 const model_options = ModelOptions(
-    number_of_dfs = 7,
     tag           = " 7 factors",
 )
 const obs_data = ObservedData()

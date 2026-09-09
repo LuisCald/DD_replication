@@ -199,7 +199,6 @@ and the UNTOUCHED recursions called on the augmented inputs. Smoother output
 uses the augmented factor block f̃=[f;τ] — S4 consumers must split it.
 """
 function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, model_options; smooth=false)
-    @unpack number_of_dfs = model_options
     @unpack y, G, u, agg_count = model_elements
 
     aggregate_rep = hasproperty(model_options, :aggregate_rep) ? model_options.aggregate_rep : :as_states
@@ -208,11 +207,19 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
 
     r = param_sizes[1][1]
     n_tr = st_trend_dim(r)
-    sp(x) = log1p(exp(x))
+    sp(x) = x > 35 ? x : log1p(exp(x))   # overflow-safe softplus (log1p(exp(x)) is Inf beyond x≈709)
     θtr = @view param_vector[end-n_tr+1:end]
+    # A wandering DIME proposal can put a raw coordinate far outside the
+    # softplus range: λ·ψ then becomes 0·Inf = NaN and Normal() throws, killing
+    # the whole run (HANK 1, 2026-08-28, iteration 351/400). Reject such points
+    # like the baseline rejects out-of-support draws instead of erroring.
+    any(!isfinite, θtr) && return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
     ω_τ = sp.(θtr[1:r])
     ψ = sp.(θtr[r+1:2r])
     λ = sp(θtr[end])
+    if !(isfinite(λ) && λ > 0) || any(x -> !(isfinite(x) && x > 0), ψ) || any(!isfinite, ω_τ)
+        return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
+    end
 
     core = param_vector[1:end-n_tr]
     core_sizes = param_sizes[1:end-1]

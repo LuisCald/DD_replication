@@ -2,6 +2,18 @@
 # Example experiment: HANK VALIDATION EXERCISE (survey replicas a–e)
 #
 # Run with:   DD_EXAMPLE=HANK HANK_ECON=1 julia run_estimation.jl
+#             DD_EXAMPLE=HANK HANK_ECON=1 HANK_TREND=stochastic julia run_estimation.jl
+#             DD_EXAMPLE=HANK HANK_ECON=1 HANK_TREND=stochastic HANK_NDF=5 julia run_estimation.jl
+#
+# HANK_NDF=k pins the distributional factor count to k (default: the HANK
+# tag pin, 8, matching the empirical baseline) and suffixes the tag with
+# " k factors". The aggregate count stays at the HANK pin (8).
+#
+# HANK_TREND=stochastic swaps the baseline HP detrending for the stochastic
+# trend states (doc/stochastic_trend_design.md) and suffixes the tag. The
+# truth has no operationalization drift, so the S5 expectation is that the
+# ω_τ shrink toward zero and the truth-vs-estimate fit is at least as good as
+# under HP — the "can the model represent the truth" test for the new spec.
 #
 # Estimates the DD model on model-generated survey replicas from the
 # BASEtoolbox HANK economy (examples/baseline_micro/generate_HANK_micro.jl),
@@ -22,11 +34,18 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 const HANK_ECON = get(ENV, "HANK_ECON", "1")
-@info "HANK exercise: economy $(HANK_ECON)"
+const HANK_TREND = Symbol(get(ENV, "HANK_TREND", "hp"))
+HANK_TREND in (:hp, :stochastic) || error("HANK_TREND must be 'hp' or 'stochastic', got $(HANK_TREND)")
+const HANK_NDF = parse(Int, get(ENV, "HANK_NDF", "0"))   # 0 = HANK tag pin (8 factors)
+0 <= HANK_NDF <= 10 || error("HANK_NDF must be in 1:10 (or 0 for the default pin), got $(HANK_NDF)")
+@info "HANK exercise: economy $(HANK_ECON), trend spec $(HANK_TREND), distributional factors $(HANK_NDF == 0 ? "8 (tag pin)" : string(HANK_NDF))"
 
 const model_options = ModelOptions(
-    tag = " HANK $(HANK_ECON)",
-    number_of_dfs = 5,   # five replica datasets (a–e)
+    tag = " HANK $(HANK_ECON)" * (HANK_TREND == :stochastic ? " stochastic trend" : "") *
+          (HANK_NDF > 0 ? " $(HANK_NDF) factors" : ""),
+    trend_spec = HANK_TREND,
+    factor_selection = HANK_NDF > 0 ? :fixed : :pratio,
+    n_dist_factors   = HANK_NDF > 0 ? HANK_NDF : 8,
     # HANK runs use QUINTILE integration grids (the replica moment targets are
     # quintile bin means; polynomial orders unchanged from the baseline) —
     # matches the historic HANK config and the grid_choice == 5 branch of the

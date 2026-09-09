@@ -126,7 +126,7 @@ end
 
 
 function generate_specific_plots(data_dict, ty, func_data, data_name, time_params, timeframe, model_options, type, select_series, gdp_series, posterior_bounds=false)
-    @unpack measures, case, number_of_dfs, estimator, equivalized, bottom_coded, compare_to_other_est, tag, freq = model_options
+    @unpack measures, case, estimator, equivalized, bottom_coded, compare_to_other_est, tag, freq = model_options
     if typeof(estimator) <: SeriesEstimator
         @unpack integral_pcf_grid, integral_cop_grid = estimator
     else

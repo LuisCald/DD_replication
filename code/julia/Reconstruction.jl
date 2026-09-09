@@ -99,6 +99,16 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
     factor_df[!, "time"] = collect(dts)
     CSV.write(save_dir * "/smoothed_factors.csv", select(factor_df, "time", :))
 
+    # 1b. Stochastic-trend spec: persist the smoothed trend states τ_t (lag 0),
+    #     stashed by st_collapse_smoother at the smoother boundary. Collapsed
+    #     factors above are f+τ, so f_core = smoothed_factors[1:r] - smoothed_trends.
+    if model_options.trend_spec == :stochastic && ST_LAST_TAU[] !== nothing
+        τ_sm = ST_LAST_TAU[]
+        trend_df = DataFrame(Matrix(τ_sm'), ["tau$i" for i in 1:size(τ_sm, 1)])
+        trend_df[!, "time"] = collect(dts)
+        CSV.write(save_dir * "/smoothed_trends.csv", select(trend_df, "time", :))
+    end
+
     # 2. Reconstructed coefficients per data source
     for (i, ds) in enumerate(data_sources)
         n_coeff = size(X_dict["normal"][i], 1)

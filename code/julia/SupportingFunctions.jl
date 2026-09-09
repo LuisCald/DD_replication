@@ -308,6 +308,54 @@ end
 
 
 # ─────────────────────────────────────────────────────────────────────
+# report_mode_dynamics(par_final, param_sizes, model_options)
+#   Log-only diagnostic (S5): factor-block persistence and innovation
+#   scales at the current mode. A white-noise-like cycle shows up as
+#   |eig(A)| ≪ the Minnesota ρ_F target with large Ω_f sds — the wealth
+#   jitter signature (empirical smoke 2026-08-28; HANK runs 2026-09).
+# ─────────────────────────────────────────────────────────────────────
+function report_mode_dynamics(par_final, param_sizes, model_options)
+    try
+        core = st_core_params(par_final, param_sizes)
+        A, _, _, D, Ω_var, _, _ = matrisize(core, param_sizes)
+        spd(x) = x > 35 ? x : log1p(exp(x))
+        r = param_sizes[1][1]
+        ev = sort(abs.(eigvals(A)); rev = true)
+        Ωd = diag(Ω_var)
+        # κ₅/κ₆/σ_ϕ are ESTIMATED (get_priors overwrites the Minnesota struct
+        # from the H block each evaluation) — report the mode's values, not
+        # the struct's (which holds whatever draw was evaluated last).
+        Hraw = st_hyper_params(par_final, param_sizes)
+        ρ_F = inv_logit(Hraw[2], -0.99, 0.99)
+        ρ_Y = inv_logit(Hraw[3], -0.99, 0.99)
+        σϕ = spd(Hraw[4])
+        @info "Mode dynamics: dist-factor |eig(A)| = $(round.(ev; digits = 3)) " *
+              "(estimated persistence target ρ_F = $(round(ρ_F; digits = 2)), σ_ϕ = $(round(σϕ; digits = 2)); agg ρ_Y = $(round(ρ_Y; digits = 2)))"
+        @info "Mode dynamics: innovation sds — dist $(round.(spd.(Ωd[1:r]); digits = 2)), " *
+              "agg $(round.(spd.(Ωd[r+1:end]); digits = 2)); agg AR diag(D) $(round.(D isa AbstractMatrix ? diag(D) : D; digits = 2))"
+        if st_is_stochastic(param_sizes)
+            θtr = par_final[end-st_ntrend(param_sizes)+1:end]
+            @info "Mode dynamics: trend ω_τ = $(round.(spd.(θtr[1:r]); digits = 3)), " *
+                  "ψ = $(round.(spd.(θtr[r+1:2r]); digits = 2)), λ = $(round(spd(θtr[end]); digits = 3))"
+        end
+    catch e
+        @warn "report_mode_dynamics failed (diagnostic only): $e"
+    end
+end
+
+# ─────────────────────────────────────────────────────────────────────
+# hank_economy(tag) — the economy number ("1", "2", …) from a HANK tag.
+# Tags used to end in the number (" HANK 1"), and call sites took the last
+# token; suffixed tags (" HANK 1 stochastic trend 5 factors") broke that
+# (economy "factors" → CSV.read of HANK_truth_factors.csv, 2026-09-09).
+# ─────────────────────────────────────────────────────────────────────
+function hank_economy(tag::AbstractString)
+    m = match(r"HANK(?:\s+[A-Za-z]+)*?\s+(\d+)", tag)   # first number after "HANK" ("HANK 1 …", "HANK full 3")
+    m === nothing && error("could not extract a HANK economy number from tag $(repr(tag))")
+    return String(m.captures[1])
+end
+
+# ─────────────────────────────────────────────────────────────────────
 # store_optim_estimate(params, label, m_label, data_cutoffs, tag)
 #   Persist the post-optimization parameter vector to a CSV under
 #   7_Results/<m_label><tag>/from_mcmc/parameter_vectors/.

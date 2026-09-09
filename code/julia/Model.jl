@@ -633,7 +633,6 @@ function likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, 
     hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic &&
         return st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, model_options; smooth=smooth)
 
-    @unpack number_of_dfs = model_options
     @unpack y, G, u, agg_count = model_elements
 
     aggregate_rep = hasproperty(model_options, :aggregate_rep) ? model_options.aggregate_rep : :as_states
@@ -1268,11 +1267,16 @@ function apply_measurement_criteria(
     Σ::AbstractMatrix, Σ_ids,
     model_options, agg_count
 )
-    @unpack number_of_dfs, measures,
-    estimator = model_options
+    @unpack measures, estimator = model_options
     @unpack grid_pcf, grid_cop = estimator
 
     dim = length(measures)
+    # Σ_ids carries one id per (dataset × object), dim+1 objects per dataset
+    # (copula + one pcf per measure), followed by agg_count aggregate ids
+    # (SelectPrior: n_param = n_objs * number_of_dfs + agg_count; 0 under
+    # :as_inputs) — the dataset count follows without a ModelOptions field.
+    number_of_dfs = (length(Σ_ids) - agg_count) ÷ (dim + 1)
+    @assert number_of_dfs * (dim + 1) + agg_count == length(Σ_ids) "Σ_ids length $(length(Σ_ids)) ≠ n_dfs·(dim+1) + agg_count with dim+1 = $(dim + 1), agg_count = $(agg_count)"
     cop_part, imm = retrieve_cop_and_imm_part(estimator, dim)
     gp_cop = cop_part - imm           # free copula coeffs / obj
     block_len = gp_cop + dim * grid_pcf  # coeffs per data frame

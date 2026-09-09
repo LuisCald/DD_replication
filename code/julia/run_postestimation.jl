@@ -55,6 +55,7 @@ user_t = (deepcopy(tmin), deepcopy(tmax))
 # ── Step 2: Load estimated parameters ────────────────────────
 @info "Loading estimated parameters..."
 par_final = get_param_vector(measures, kind_of_plots, label, data_cutoffs, tag)
+report_mode_dynamics(par_final, param_sizes, model_options)
 logV, alarm = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options)
 @info "Log-likelihood at loaded parameters: $logV"
 
@@ -116,14 +117,21 @@ end
 # ── Step 5: Correlation tables ────────────────────────────────
 @info "Generating correlation tables..."
 type = "from_mcmc"
-export_table_to_tex_with_strings(measures, :from_mcmc)
-generate_correlations_table_for_external_comparisons("SCF", measures, tag, type, "cycle")
+# Empirical-only tables: they read correlations_dict_cycle_{SCF,CEX}.jld2 and
+# the SCF external comparisons, which only the empirical plotting path writes —
+# a HANK replica run has neither (crash 2026-09-09 on " HANK 1 stochastic trend").
+if occursin("HANK", tag)
+    @info "HANK run: skipping empirical correlation tables (no SCF/CEX comparisons for replicas)."
+else
+    export_table_to_tex_with_strings(measures, :from_mcmc)
+    generate_correlations_table_for_external_comparisons("SCF", measures, tag, type, "cycle")
+end
 
 # Cross-conditional averaged correlation table, averaged over all economies.
 # Generated once, when the LAST economy's post-estimation runs (needs every
 # economy's correlations file to exist).
 if occursin("HANK", tag)
-    economy_number = parse(Int, split(strip(tag), " ")[end])
+    economy_number = parse(Int, hank_economy(tag))
     if economy_number == 10
         # generate_averaged_hank_avg_corr_table(
         #     11:11,  # (stale range from the old single-economy workflow)
@@ -242,23 +250,26 @@ end
 # (The consumption-across-recessions panels are produced in Stata, not here.)
 
 # ── Step 9: Out-of-sample forecasts (fig: recon_missing1) ─────
-@info "Running out-of-sample forecasts (SCF iterative + CEX extensive)..."
-try
-    how_much = 1
-    perform_forecast("SCF", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, how_much,
-        obs_data, model_options, model_elements, time_params, user_t, func_data,
-        kind_of_plots, ["iterative"])
-catch e
-    @warn "SCF iterative forecast failed" exception=(e, catch_backtrace())
-end
-try
-    periods_to_remove = muted_quarters_between(QuarterlyDate(1984, 1), QuarterlyDate(2021, 4))
-    filtering_criteria = Dict("periods_to_remove" => periods_to_remove)
-    perform_forecast("CEX", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
-        filtering_criteria, obs_data, model_options, model_elements, time_params,
-        user_t, func_data, kind_of_plots, ["extensive", "data_only"])
-catch e
-    @warn "CEX extensive forecast failed" exception=(e, catch_backtrace())
+# If HANK do not run
+if !occursin("HANK", tag)
+    @info "Running out-of-sample forecasts (SCF iterative + CEX extensive)..."
+    try
+        how_much = 1
+        perform_forecast("SCF", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, how_much,
+            obs_data, model_options, model_elements, time_params, user_t, func_data,
+            kind_of_plots, ["iterative"])
+    catch e
+        @warn "SCF iterative forecast failed" exception=(e, catch_backtrace())
+    end
+    try
+        periods_to_remove = muted_quarters_between(QuarterlyDate(1984, 1), QuarterlyDate(2021, 4))
+        filtering_criteria = Dict("periods_to_remove" => periods_to_remove)
+        perform_forecast("CEX", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
+            filtering_criteria, obs_data, model_options, model_elements, time_params,
+            user_t, func_data, kind_of_plots, ["extensive", "data_only"])
+    catch e
+        @warn "CEX extensive forecast failed" exception=(e, catch_backtrace())
+    end
 end
 
 end  # run_full

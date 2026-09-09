@@ -22,8 +22,9 @@
 
 const model_options = ModelOptions(
     trend_spec    = :stochastic,
-    factor_selection = :bai_ng,   # pratio saturates the rank-11 pool (12 PSID cols) -> singular priors
-    number_of_dfs = 2,
+    factor_selection = :fixed,    # pratio saturates the rank-11 pool (12 PSID cols) -> singular priors;
+    n_dist_factors   = 6,         # bai_ng ⇒ 10 on a flat spectrum (7.5/7.2/5.8/5.7/5.3/4.9 past factor 4) and
+                                  # gave white-noise factors (see doc/stochastic_trend_design.md, S5)
     tag           = " stochastic trend PSID SCF",
 )
 
