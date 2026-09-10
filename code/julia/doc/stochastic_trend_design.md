@@ -199,3 +199,14 @@ Design:
 - Composes with trend_spec = :stochastic (trend block appended after H as before).
 
 Status: implemented, parse-checked; adversarial review + HANK run pending.
+
+## Trend λ scale option (2026-09-10, follow-up to the 6f pf run)
+
+The 6-factor pf run showed the trade: with the cycle disciplined (|eig(A)| up
+to 0.84, Ω_f sds 0.06-0.69), the trend block inflated (λ = 0.185, ω_τ up to
+0.6) and slow movement migrated into jittery RW trends — a ρ≈0.98 AR factor
+and the ρ=0.999 τ are near-interchangeable, so the likelihood splits slow
+dynamics arbitrarily. `ModelOptions.trend_lambda_scale` (default 0.1 =
+previous ST_LAMBDA_SCALE const; θ0's λ init tracks it) lets a run squeeze the
+trend so slow dynamics settle in the persistent factors. HANK switch:
+HANK_TLS=0.03 (tag suffix " tls0.03"; 0.1 leaves the tag unchanged).

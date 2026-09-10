@@ -45,13 +45,17 @@ const HANK_NDF = parse(Int, get(ENV, "HANK_NDF", "0"))   # 0 = HANK tag pin (8 f
 0 <= HANK_NDF <= 10 || error("HANK_NDF must be in 1:10 (or 0 for the default pin), got $(HANK_NDF)")
 const HANK_PERS = Symbol(get(ENV, "HANK_PERS", "common"))
 HANK_PERS in (:common, :per_factor) || error("HANK_PERS must be 'common' or 'per_factor', got $(HANK_PERS)")
+const HANK_TLS = parse(Float64, get(ENV, "HANK_TLS", "0.1"))   # trend λ prior scale (stochastic spec)
+0 < HANK_TLS <= 1 || error("HANK_TLS must be in (0, 1], got $(HANK_TLS)")
 @info "HANK exercise: economy $(HANK_ECON), trend spec $(HANK_TREND), distributional factors $(HANK_NDF == 0 ? "8 (tag pin)" : string(HANK_NDF)), persistence $(HANK_PERS)"
 
 const model_options = ModelOptions(
     tag = " HANK $(HANK_ECON)" * (HANK_TREND == :stochastic ? " stochastic trend" : "") *
-          (HANK_NDF > 0 ? " $(HANK_NDF) factors" : "") * (HANK_PERS == :per_factor ? " pf" : ""),
+          (HANK_NDF > 0 ? " $(HANK_NDF) factors" : "") * (HANK_PERS == :per_factor ? " pf" : "") *
+          (HANK_TLS == 0.1 ? "" : " tls$(HANK_TLS)"),
     trend_spec = HANK_TREND,
     persistence_prior = HANK_PERS,
+    trend_lambda_scale = HANK_TLS,
     factor_selection = HANK_NDF > 0 ? :fixed : :pratio,
     n_dist_factors   = HANK_NDF > 0 ? HANK_NDF : 8,
     # HANK runs use QUINTILE integration grids (the replica moment targets are
