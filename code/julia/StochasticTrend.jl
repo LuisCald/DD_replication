@@ -252,9 +252,12 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
     # Stationarity guard (stationarity_cap; Inf = off, baseline behavior):
     # explosive A invalidates lyapd initialization, forecasts, FEVD and HD
     # even when the in-sample smoothed fit looks fine (5f pf HANK, 2026-09-10)
-    if hasproperty(model_options, :stationarity_cap) && isfinite(model_options.stationarity_cap) &&
-       maximum(abs, eigvals(A)) > model_options.stationarity_cap
-        return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
+    if hasproperty(model_options, :stationarity_cap) && isfinite(model_options.stationarity_cap)
+        # a draw with non-finite A was always an out-of-support reject downstream;
+        # reject it here too — LAPACK's eigvals throws on Infs/NaNs (crash 2026-09-10)
+        if !all(isfinite, A) || maximum(abs, eigvals(A)) > model_options.stationarity_cap
+            return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
+        end
     end
 
     Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)
