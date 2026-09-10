@@ -83,6 +83,29 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
         push!(init_priors, hyperpriors...) # hyperpriors at the tail (draw_from_prior contract)
         init_chains = draw_from_prior(param_sizes, init_priors, nchain)
 
+        # Sanitize: a chain with any non-finite entry can only random-walk the
+        # -1e12 flatland (and NaN entries crash eigvals/quantile downstream) —
+        # the naf5 run burned all 400 iterations that way (2026-09-10).
+        bad = findall(j -> !all(isfinite, @view init_chains[:, j, :]), 1:size(init_chains, 2))
+        if !isempty(bad)
+            nb = length(bad)
+            # attribute to parameter blocks for the log
+            lens = [prod(param_sizes[1]), prod(param_sizes[2]), prod(param_sizes[3]),
+                    param_sizes[4][1], param_sizes[5][1], param_sizes[6][1],
+                    param_sizes[7][1]]
+            names = ["A", "B", "C", "D", "Ωvar", "Ωcorr", "Σ"]
+            stops = cumsum(lens)
+            hits = String[]
+            for (nm, lo, hi) in zip(names, [1; stops[1:end-1] .+ 1], stops)
+                any(!isfinite, @view init_chains[lo:min(hi, size(init_chains, 1)), bad, :]) && push!(hits, nm)
+            end
+            any(!isfinite, @view init_chains[stops[end]+1:end, bad, :]) && push!(hits, "H/trend tail")
+            @warn "DIME init: $(nb)/$(size(init_chains, 2)) prior draws had non-finite entries (blocks: $(join(hits, ", "))) — replaced by jittered BBO mode"
+            for j in bad
+                init_chains[:, j, :] .= par_final .+ 0.01 .* randn(length(par_final))
+            end
+        end
+
         # Replace several chains with the best candidate from the optimization
         init_chains[:, 1:10:end, :] .= par_final
     end
@@ -144,7 +167,8 @@ function generate_marginals_for_hyperparameters(DIME_chains, m_label, tag; n_tre
     init_path = BASE_PATH
     for i in axes(DIME_chains, 3)
         # Identify the bottom 5% quantile along the dimension 
-        long_chain = vec(DIME_chains[:, :, i])
+        long_chain = filter(isfinite, vec(DIME_chains[:, :, i]))
+        isempty(long_chain) && (@warn "hyperparameter marginal $i: no finite draws — skipping"; continue)
         qb = quantile(long_chain, 0.05)
         qt = quantile(long_chain, 0.95)
         filt_chain = long_chain[(long_chain.>qb).&(long_chain.<qt)]
