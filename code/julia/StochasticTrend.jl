@@ -249,6 +249,14 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
     log_P += sum(logpdf.(Cauchy(0.0, 1.0), ψ)) + r * log(2)
     log_P += logpdf(Cauchy(0.0, model_options.trend_lambda_scale), λ) + log(2)
 
+    # Stationarity guard (stationarity_cap; Inf = off, baseline behavior):
+    # explosive A invalidates lyapd initialization, forecasts, FEVD and HD
+    # even when the in-sample smoothed fit looks fine (5f pf HANK, 2026-09-10)
+    if hasproperty(model_options, :stationarity_cap) && isfinite(model_options.stationarity_cap) &&
+       maximum(abs, eigvals(A)) > model_options.stationarity_cap
+        return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
+    end
+
     Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)
 
     mat_Ω_corr = Matrix(Ω_corr)
