@@ -114,7 +114,8 @@ end
 # Layout under :stochastic — the baseline 8-block vector gets a TREND block
 # appended at the very end: θ_tr = [ω_raw(r); ψ_raw(r); λ_raw], transformed to
 # positives by softplus inside st_likeli. Global–local hierarchy:
-#   ω_τ,j ~ N⁺(0, (λ·ψ_j)²),  ψ_j ~ C⁺(0,1),  λ ~ C⁺(0, ST_LAMBDA_SCALE).
+#   ω_τ,j ~ N⁺(0, (λ·ψ_j)²),  ψ_j ~ C⁺(0,1),  λ ~ C⁺(0, trend_lambda_scale)
+#   (ModelOptions.trend_lambda_scale, default 0.1).
 # The core blocks are priored/evaluated by the UNTOUCHED baseline machinery
 # (get_priors/prioreval on core_sizes); the hierarchy's log-prior is added
 # explicitly here. Note: like the baseline (which evaluates priors on raw
@@ -140,7 +141,6 @@ st_hyper_params(par, param_sizes) = (n_h = n_hyper_block(param_sizes); st_is_sto
 st_core_params(par, param_sizes) = (n_h = n_hyper_block(param_sizes); st_is_stochastic(param_sizes) ?
     par[1:end-n_h-st_ntrend(param_sizes)] : par[1:end-n_h])
 
-const ST_LAMBDA_SCALE = 0.1
 st_trend_dim(r::Int) = 2r + 1
 const _ST_G_CACHE = Ref{Any}(nothing)   # (objectid(G), r, rτ) => G̃, single entry
 
@@ -167,12 +167,13 @@ function st_set_params(model_elements, time_p, model_options)
     param_vector, param_sizes, Σ_ids, priors =
         define_parameter_space(model_elements, model_options, prior_objects)
     r = param_sizes[1][1]
-    # initials in RAW (softplus) coordinates: sp(-3)≈0.05, sp(0.54)≈1.0, sp(-2.25)≈0.1
-    θ0 = [fill(-3.0, r); fill(0.54, r); -2.25]
+    λs = model_options.trend_lambda_scale
+    # initials in RAW (softplus) coordinates: sp(-3)≈0.05, sp(0.54)≈1.0; λ starts at its prior scale
+    θ0 = [fill(-3.0, r); fill(0.54, r); log(exp(λs) - 1)]
     push!(param_sizes, (st_trend_dim(r),))
     append!(priors, vcat(fill(truncated(Normal(0.0, 0.1), 0.0, Inf), r),
                          fill(truncated(Cauchy(0.0, 1.0), 0.0, Inf), r),
-                         [truncated(Cauchy(0.0, ST_LAMBDA_SCALE), 0.0, Inf)]))
+                         [truncated(Cauchy(0.0, λs), 0.0, Inf)]))
     return [param_vector; θ0], param_sizes, priors, meas_ind, Σ_ids
 end
 
@@ -246,7 +247,7 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
     # global–local hierarchy (evaluated on the positive scale, cf. header note)
     log_P += sum(logpdf.(Normal.(0.0, λ .* ψ), ω_τ)) + r * log(2)
     log_P += sum(logpdf.(Cauchy(0.0, 1.0), ψ)) + r * log(2)
-    log_P += logpdf(Cauchy(0.0, ST_LAMBDA_SCALE), λ) + log(2)
+    log_P += logpdf(Cauchy(0.0, model_options.trend_lambda_scale), λ) + log(2)
 
     Ω_var[diagind(Ω_var)] = log.(exp.(Ω_var[diagind(Ω_var)]) .+ 1)
 
