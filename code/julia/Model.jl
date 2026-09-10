@@ -180,11 +180,16 @@ function Lcorr_to_u(L::AbstractMatrix)
             # This is the z = ζ[k] from the u_to_Lcorr function
             z = L[i, j] / c
 
-            # Check for numerical stability/bounds
-            if abs(z) > 1.0 + 1e-10
+            # Check for numerical stability/bounds. Two hazards (2026-09-10,
+            # naf5 init ensemble): c underflows to 0 => z = 0/0 = NaN; and
+            # |z| == 1.0 exactly => atanh(+-1) = +-Inf. Either poisons the
+            # unconstrained ΩC block of every consumer (DIME init chains).
+            if !isfinite(z)
+                z = 0.0                      # degenerate residual: neutral partial corr
+            elseif abs(z) > 1.0 + 1e-10
                 @warn "Partial correlation |z| > 1 found. Matrix L is likely invalid."
-                z = clamp(z, -1.0, 1.0)
             end
+            z = clamp(z, -1.0 + 1e-8, 1.0 - 1e-8)
 
             # 2. Get the unconstrained parameter u = atanh(z)
             u = atanh(z)
