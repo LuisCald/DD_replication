@@ -47,15 +47,18 @@ const HANK_PERS = Symbol(get(ENV, "HANK_PERS", "common"))
 HANK_PERS in (:common, :per_factor) || error("HANK_PERS must be 'common' or 'per_factor', got $(HANK_PERS)")
 const HANK_TLS = parse(Float64, get(ENV, "HANK_TLS", "0.1"))   # trend λ prior scale (stochastic spec)
 0 < HANK_TLS <= 1 || error("HANK_TLS must be in (0, 1], got $(HANK_TLS)")
+const HANK_NAF = parse(Int, get(ENV, "HANK_NAF", "0"))   # 0 = HANK pin (8 aggregate factors)
+0 <= HANK_NAF <= 9 || error("HANK_NAF must be in 1:9 (or 0 for the pin), got $(HANK_NAF)")
 @info "HANK exercise: economy $(HANK_ECON), trend spec $(HANK_TREND), distributional factors $(HANK_NDF == 0 ? "8 (tag pin)" : string(HANK_NDF)), persistence $(HANK_PERS)"
 
 const model_options = ModelOptions(
     tag = " HANK $(HANK_ECON)" * (HANK_TREND == :stochastic ? " stochastic trend" : "") *
           (HANK_NDF > 0 ? " $(HANK_NDF) factors" : "") * (HANK_PERS == :per_factor ? " pf" : "") *
-          (HANK_TLS == 0.1 ? "" : " tls$(HANK_TLS)"),
+          (HANK_TLS == 0.1 ? "" : " tls$(HANK_TLS)") * (HANK_NAF > 0 ? " naf$(HANK_NAF)" : ""),
     trend_spec = HANK_TREND,
     persistence_prior = HANK_PERS,
     trend_lambda_scale = HANK_TLS,
+    n_agg_factors = HANK_NAF,
     # pf's high ρ targets let A go explosive (|eig| 1.38, 5f pf run) — cap it.
     stationarity_cap = HANK_PERS == :per_factor ? 0.995 : Inf,
     factor_selection = HANK_NDF > 0 ? :fixed : :pratio,
