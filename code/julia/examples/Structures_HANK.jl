@@ -56,6 +56,8 @@ const model_options = ModelOptions(
     trend_spec = HANK_TREND,
     persistence_prior = HANK_PERS,
     trend_lambda_scale = HANK_TLS,
+    # pf's high ρ targets let A go explosive (|eig| 1.38, 5f pf run) — cap it.
+    stationarity_cap = HANK_PERS == :per_factor ? 0.995 : Inf,
     factor_selection = HANK_NDF > 0 ? :fixed : :pratio,
     n_dist_factors   = HANK_NDF > 0 ? HANK_NDF : 8,
     # HANK runs use QUINTILE integration grids (the replica moment targets are
