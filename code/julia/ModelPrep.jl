@@ -1622,6 +1622,11 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # " less AF"/" more AF"/" all AF" robustness examples) and stays pinned
         # for replication. HANK replicas use 8.
         Mdim = tag == " less AF" ? 3 : tag == " more AF" ? 15 : tag == " all AF" ? 30 : tag == " less DF and AF" ? 3 : occursin("HANK", tag) ? 8 : 11
+        # Explicit override (mirrors factor_selection = :fixed on the dist side)
+        if hasproperty(model_options, :n_agg_factors) && model_options.n_agg_factors > 0
+            Mdim = clamp(Int(model_options.n_agg_factors), 1, 30)
+            @info "Aggregate factor count (fixed): using $(Mdim) (n_agg_factors; overrides the tag/MDD pin)"
+        end
 
         # Import jld2
         if best_aggs
