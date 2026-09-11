@@ -210,3 +210,26 @@ dynamics arbitrarily. `ModelOptions.trend_lambda_scale` (default 0.1 =
 previous ST_LAMBDA_SCALE const; θ0's λ init tracks it) lets a run squeeze the
 trend so slow dynamics settle in the persistent factors. HANK switch:
 HANK_TLS=0.03 (tag suffix " tls0.03"; 0.1 leaves the tag unchanged).
+
+## S6 close-out (2026-09-11): final HANK spec
+
+Capped tls0.03 run: fully legal dynamics (|eig(A)| <= 0.93, joint radius
+0.925), strongest aggregate coupling of the campaign (cross-corr 0.98,
+agg-first FEVD 44-87%), but the psi locals absorb the global squeeze
+(omega_tau still 0.42-0.57 on three factors at lambda = 0.064) and wealth
+gives back 2-6 R2 points vs the tls-default benchmark. Conclusion: at
+quarterly truth frequency, a rho = 0.999 RW trend and a rho ~ 0.98 AR factor
+are weakly separated; tightening lambda relabels little and costs fit.
+
+FINAL HANK SPEC: HANK_NDF=5, HANK_PERS=per_factor, stationarity_cap = 0.995
+(joint), trend_lambda_scale = 0.1 (default). Benchmark mode: |eig(A)| = 0.97,
+joint 0.957; wealth R2 57/57/63 on the top-share cells, income 93-99.
+Aggregate count stays 8 (naf5 decouples the distribution: PCA keeps
+variance-ranked directions, not gate directions). Remaining known limit:
+joint conditional tail cells (wealth_by_income top10 corr ~ 1-21% across all
+specs) sit at/near the replica-noise ceiling.
+
+Empirical transfer (next): factor_selection = :fixed 6, persistence_prior =
+:per_factor, stationarity_cap = 0.995, trend_spec = :stochastic with
+trend_lambda_scale recalibrated on real data (genuine operationalization
+drift exists there; do NOT squeeze tau by default), aggregate count MDD-11.
