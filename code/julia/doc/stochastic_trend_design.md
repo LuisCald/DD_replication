@@ -233,3 +233,17 @@ Empirical transfer (next): factor_selection = :fixed 6, persistence_prior =
 :per_factor, stationarity_cap = 0.995, trend_spec = :stochastic with
 trend_lambda_scale recalibrated on real data (genuine operationalization
 drift exists there; do NOT squeeze tau by default), aggregate count MDD-11.
+
+### Note: |eig(A)| vs the joint radius (2026-09-11)
+
+The resumed tls0.03 mode has |eig(A)| = 1.078 but joint |eig([A B; C D])| =
+0.855, i.e. the factor block is explosive CONDITIONAL on frozen aggregates
+while the actual state system is comfortably stationary. This is legitimate:
+the active recursions (recurse_kalman_filter_forward / _smoother) initialize
+with lyapd(Lcore, Qcore) on Lcore = [A B; C D]; the lyapd(A, Ω_f) calls exist
+only in the _inputs variants (aggregate_rep = :as_inputs, which
+persistence_prior = :per_factor blocks outright). So the joint cap in
+stationarity_cap matches exactly what the code requires — capping A alone
+would have been both too strict here and too weak for the naf5 failure.
+Caveat for interpretation only: with |eig(A)| > 1 the per-factor ρ targets
+describe own-lag prior means, not realized marginal persistence.
