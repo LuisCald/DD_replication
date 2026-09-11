@@ -27,12 +27,30 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     mkpath(init_path * "/posterior_draws")
     ckpt_path = init_path * "/posterior_draws/" * m_label * "_$tag" * "_checkpoint.jld2"
     resume = get(ENV, "DD_RESUME", "0") == "1" && isfile(ckpt_path)
+    # Joint-stationarity check for ensemble sanitation (both init paths): a
+    # finite draw whose [A B; C D] violates stationarity_cap starts at -1e12
+    # and can stay stuck there all run when its proposals are also illegal
+    # (the -27.6 flatland band, tls0.03 run 2026-09-11).
+    capv = hasproperty(model_options, :stationarity_cap) && isfinite(model_options.stationarity_cap) ?
+           model_options.stationarity_cap : Inf
+    r_cap = param_sizes[1][1]; q_cap = param_sizes[2][2]
+    lA = r_cap * r_cap; lB = r_cap * q_cap; lC = q_cap * r_cap
+    function joint_illegal(col)
+        isfinite(capv) || return false
+        all(isfinite, @view col[1:lA+lB+lC+q_cap]) || return false  # non-finite handled separately
+        Φj = [reshape(col[1:lA], r_cap, r_cap) reshape(col[lA+1:lA+lB], r_cap, q_cap);
+              reshape(col[lA+lB+1:lA+lB+lC], q_cap, r_cap)' Diagonal(col[lA+lB+lC+1:lA+lB+lC+q_cap])]
+        return maximum(abs, eigvals(Matrix(Φj))) > capv
+    end
+
     done_iters = 0
-    local init_chains
+    local init_chains, donor
     if resume
         ck = JLD2.load(ckpt_path)
         init_chains = ck["x"]
         done_iters = ck["it"]
+        # donor for ensemble sanitation: the best checkpointed chain
+        donor = init_chains[:, argmax(vec(ck["lprob"]))]
         @info "DIME: resuming from checkpoint at iteration $(done_iters)/$(niter) ($(ckpt_path))"
         done_iters >= niter && error("checkpoint already holds $(done_iters) ≥ niter = $(niter) iterations; raise niter or delete the checkpoint")
     else
@@ -86,7 +104,10 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
         # Sanitize: a chain with any non-finite entry can only random-walk the
         # -1e12 flatland (and NaN entries crash eigvals/quantile downstream) —
         # the naf5 run burned all 400 iterations that way (2026-09-10).
-        bad = findall(j -> !all(isfinite, @view init_chains[:, j, :]), 1:size(init_chains, 2))
+        donor = par_final
+        nonfin = findall(j -> !all(isfinite, @view init_chains[:, j, :]), 1:size(init_chains, 2))
+        capbad = findall(j -> joint_illegal(vec(init_chains[:, j, :])), 1:size(init_chains, 2))
+        bad = sort(union(nonfin, capbad))
         if !isempty(bad)
             nb = length(bad)
             # attribute to parameter blocks for the log
@@ -100,15 +121,32 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
                 any(!isfinite, @view init_chains[lo:min(hi, size(init_chains, 1)), bad, :]) && push!(hits, nm)
             end
             any(!isfinite, @view init_chains[stops[end]+1:end, bad, :]) && push!(hits, "H/trend tail")
-            @warn "DIME init: $(nb)/$(size(init_chains, 2)) prior draws had non-finite entries (blocks: $(join(hits, ", "))) — replaced by jittered BBO mode"
+            @warn "DIME init: replacing $(nb)/$(size(init_chains, 2)) prior draws with jittered BBO mode " *
+                  "($(length(nonfin)) non-finite$(isempty(hits) ? "" : " [blocks: " * join(hits, ", ") * "]"), " *
+                  "$(length(capbad)) violating stationarity_cap)"
             for j in bad
                 init_chains[:, j, :] .= par_final .+ 0.01 .* randn(length(par_final))
             end
         end
-
-        # Replace several chains with the best candidate from the optimization
-        init_chains[:, 1:10:end, :] .= par_final
     end
+
+    # Resume path: sanitize the checkpointed ensemble the same way (stuck
+    # -1e12 chains persist across restarts otherwise); donor = best chain.
+    if resume
+        bad = findall(j -> !all(isfinite, @view init_chains[:, j, :]) || joint_illegal(vec(init_chains[:, j, :])),
+                      1:size(init_chains, 2))
+        if !isempty(bad)
+            @warn "DIME resume: replacing $(length(bad)) non-finite/cap-violating checkpoint chains with jittered best chain"
+            for j in bad
+                init_chains[:, j, :] .= donor .+ 0.01 .* randn(length(donor))
+            end
+        end
+
+    end
+
+    # Replace several chains with the best candidate from the optimization
+    # (fresh runs only — a resumed ensemble already carries its own best chains)
+    resume || (init_chains[:, 1:10:end, :] .= par_final)
 
     # atomic checkpoint write (tmp + rename) so a kill mid-write can't corrupt it
     function checkpoint(it, x, lprob)
