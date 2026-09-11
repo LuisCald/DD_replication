@@ -253,9 +253,12 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
     # explosive A invalidates lyapd initialization, forecasts, FEVD and HD
     # even when the in-sample smoothed fit looks fine (5f pf HANK, 2026-09-10)
     if hasproperty(model_options, :stationarity_cap) && isfinite(model_options.stationarity_cap)
-        # a draw with non-finite A was always an out-of-support reject downstream;
-        # reject it here too — LAPACK's eigvals throws on Infs/NaNs (crash 2026-09-10)
-        if !all(isfinite, A) || maximum(abs, eigvals(A)) > model_options.stationarity_cap
+        # Check the JOINT transition [A B; C D], not A alone: the naf5 run hid
+        # explosive dynamics in the aggregate feedback loop (|eig(A)| = 0.49
+        # but |eig(Φ)| = 1.08, 2026-09-11). Non-finite draws were always
+        # out-of-support rejects downstream; reject here too (eigvals throws).
+        Φcap = [A B; C D]
+        if !all(isfinite, Φcap) || maximum(abs, eigvals(Φcap)) > model_options.stationarity_cap
             return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
         end
     end
