@@ -38,9 +38,10 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     function joint_illegal(col)
         isfinite(capv) || return false
         all(isfinite, @view col[1:lA+lB+lC+q_cap]) || return false  # non-finite handled separately
+        # C is stored q×r column-major (matrisize param_sizes[3]) — no transpose
         Φj = [reshape(col[1:lA], r_cap, r_cap) reshape(col[lA+1:lA+lB], r_cap, q_cap);
-              reshape(col[lA+lB+1:lA+lB+lC], q_cap, r_cap)' Diagonal(col[lA+lB+lC+1:lA+lB+lC+q_cap])]
-        return maximum(abs, eigvals(Matrix(Φj))) > capv
+              reshape(col[lA+lB+1:lA+lB+lC], q_cap, r_cap) diagm(col[lA+lB+lC+1:lA+lB+lC+q_cap])]
+        return maximum(abs, eigvals(Φj)) > capv
     end
 
     done_iters = 0
