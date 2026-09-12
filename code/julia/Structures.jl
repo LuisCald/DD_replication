@@ -233,6 +233,9 @@ prior model variants.
     factor_selection::Symbol = :pratio                    # distributional factor retention: :pratio = variance threshold (published baseline; pinned tags unaffected); :freyaldenhoven / :bai_ng = automatic count, clamped to [1, 10] (MC in FactorSelectionSim.jl: Bai–Ng ICp2 most accurate at DD-like T≈33; Freyaldenhoven under-selects until T ≳ 100); :fixed = exactly `n_dist_factors`. All criteria are printed as diagnostics either way
     n_dist_factors::I = 8                                 # distributional factor count under factor_selection = :fixed (clamped to [1, 10]); ignored otherwise
     trend_lambda_scale::Float64 = 0.1                     # trend_spec = :stochastic only: scale of the global half-Cauchy on λ (ω_τ,j ~ N⁺(0,(λψ_j)²)). Tighten (e.g. 0.03) to squeeze the trend block when a persistent cycle should carry the slow dynamics (per-factor persistence runs)
+    copula_error::Symbol = :pooled                        # measurement error on the copula block: :pooled = ONE variance broadcast over all ~1700 copula coefficients (published baseline — most are unspanned by r factors, so the single estimate is dominated by residual the filter can never fit and the informative directions are discounted with them); :communality = same single parameter, but scaled per coefficient by (1 - communality) so factor-spanned copula rows are trusted and unspanned ones are not
+    pca_method::Symbol = :complete_cases                  # how the factor LOADINGS are estimated: :complete_cases = PCA on pool columns with no missing coefficient (published baseline; in practice only the all-measure dataset's wave dates, e.g. 12 PSID waves); :em = EM/PPCA completion so every dataset-period informs the loadings of the coefficients it does observe (scores and everything downstream still computed on the complete-case columns)
+    n_copula_factors::I = 0                               # extra factors that ONLY copula coefficients load on (block-triangular loadings; marginal rows get exactly zero). 0 = off (published baseline). Raises the distributional factor count by this amount — see doc/copula_identification.tex
     n_agg_factors::I = 0                                  # aggregate factor count override: 0 = keep the tag/MDD pin (11 baseline, 8 HANK — published behavior); > 0 = use exactly this many (clamped [1, 30]). The aggregate block is ~half the parameter budget (B, C, D, Ω cross-correlations)
     stationarity_cap::Float64 = Inf                       # reject parameter draws with maximum |eigenvalue| of the factor-block A above this (−1e12, like out-of-support). Inf = no check (published baseline — its posteriors are stationary anyway). Set e.g. 0.995 under persistence_prior = :per_factor, whose high ρ targets let the sampler park at explosive modes (5f pf HANK run: |eig| = 1.38 complex pair acting as a disguised local trend)
     persistence_prior::Symbol = :common                   # factor persistence target κ₅: :common = ONE estimated target shared by all factors (published baseline; the likelihood drags it to the fast, data-rich factors and slow measures inherit the jitter); :per_factor = one estimated target ρ_F,j PER factor (H block grows 6 → r+5; raw-coordinate hyperprior Normal(3, 1.5) ⇒ smooth default ρ≈0.9 where the data are silent, data can pull any factor fast). Requires aggregate_rep = :as_states
@@ -393,3 +396,12 @@ end
 @assert (@isdefined model_options) "examples/Structures_$(DD_EXAMPLE).jl must define `const model_options`."
 @assert (@isdefined obs_data) "examples/Structures_$(DD_EXAMPLE).jl must define `const obs_data`."
 
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Per-coefficient weights for the copula measurement-error block
+# (ModelOptions.copula_error = :communality). Filled by perform_pca once the
+# loadings are known; read by apply_copula_error_weights! in the likelihood.
+# Empty = feature off / not yet computed.
+# ─────────────────────────────────────────────────────────────────────
+const COPULA_ROW_WEIGHTS = Ref{Vector{Float64}}(Float64[])

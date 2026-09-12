@@ -1690,6 +1690,27 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
         end
 
+        # pca_method = :em — re-estimate the LOADINGS from every dataset-period
+        # instead of the complete-case columns only (Fix 2). The retained count
+        # is whatever the chain above selected; scores and all downstream
+        # objects stay on the complete-case columns, so only Λ changes.
+        M_load = M
+        if hasproperty(model_options, :pca_method) && model_options.pca_method == :em
+            k_em = size(projection(M), 2)
+            Xem, usable, iters, Δ = em_complete(pool, k_em)
+            if size(Xem, 2) > size(data_matrix, 2)
+                M_load = MultivariateStats.fit(PCA, Xem; maxoutdim = k_em, method = :svd)
+                nds_em = col_labels === nothing ? 1 : length(unique(col_labels[usable]))
+                @info "Distributional PCA: EM completion — loadings from " *
+                      "$(length(usable)) dataset-periods across $(nds_em) dataset(s) " *
+                      "(complete-case columns: $(size(data_matrix, 2))); " *
+                      "$(iters) iterations, final change $(round(Δ; sigdigits = 2)). " *
+                      "Spectrum/criteria below still describe the complete-case pool."
+            else
+                @warn "pca_method = :em requested but the completion added no columns — keeping complete-case loadings"
+            end
+        end
+
         # How much variation do the retained distributional factors capture?
         # The full spectrum comes from a separate full-rank fit of the same
         # matrix (one extra SVD, diagnostics only — retention is unchanged).
@@ -1743,9 +1764,10 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
 
         # Why do I do this? X = P * F, but if we want F = pcs to have unit variance, we must divide it by the square root of the eigenvalues of the covariance matrix of X.
         # But to maintain equality of the two sides, we must multiply P by the square root of the eigenvalues of the covariance matrix of X.
-        pcs = MultivariateStats.transform(M, data_matrix) # predict() produces the same
-        λ = sqrt.(principalvars(M))
-        proj = projection(M) * diagm(λ)
+        # M_load == M unless pca_method = :em replaced the loadings above.
+        pcs = MultivariateStats.transform(M_load, data_matrix) # predict() produces the same
+        λ = sqrt.(principalvars(M_load))
+        proj = projection(M_load) * diagm(λ)
         pcs_s = pcs ./ λ
 
         # Compute difference between observed and predicted values
@@ -1780,13 +1802,103 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # proj  = projection(M) * sqrt.(Diagonal(pcs * pcs'))
         # pcs_s = pcs ./ sqrt.(diag(pcs * pcs')) 
 
+        # ── Fix 3: dedicated copula factors ──────────────────────────────
+        # Extra factors that ONLY the copula coefficients load on. Built from
+        # the copula rows of the residual after the common factors, then
+        # appended with a ZERO block on the marginal rows, so the loading
+        # matrix is block-triangular (doc/copula_identification.tex, eq. 11)
+        # and the new factors cannot contaminate the marginals. Everything
+        # downstream reads the factor count off size(proj, 2).
+        n_cf = hasproperty(model_options, :n_copula_factors) ? Int(model_options.n_copula_factors) : 0
+        if n_cf > 0
+            cop_part_cf, imm_cf = retrieve_cop_and_imm_part(model_options.estimator, length(measures))
+            gp_cop_cf = cop_part_cf - imm_cf
+            if gp_cop_cf > 0 && gp_cop_cf <= size(proj, 1)
+                R = data_matrix .- proj * pcs_s                 # residual after common factors
+                Rc = R[1:gp_cop_cf, :]                          # copula rows only
+                n_cf_use = min(n_cf, minimum(size(Rc)) - 1)
+                if n_cf_use >= 1
+                    CM = MultivariateStats.fit(PCA, Rc; maxoutdim = n_cf_use, method = :svd)
+                    Cλ = sqrt.(principalvars(CM))
+                    Cproj = projection(CM) * diagm(Cλ)          # gp_cop × n_cf_use
+                    aug = zeros(size(proj, 1), n_cf_use)
+                    aug[1:gp_cop_cf, :] .= Cproj                # zeros on the marginal rows
+                    proj = hcat(proj, aug)
+                    pcs_s = vcat(pcs_s, MultivariateStats.transform(CM, Rc) ./ Cλ)
+                    shr = round(100 * sum(principalvars(CM)) / max(sum(abs2, Rc) / size(Rc, 2), eps()); digits = 1)
+                    @info "Copula-specific factors: added $(n_cf_use) (distributional factor count " *
+                          "$(size(proj, 2) - n_cf_use) → $(size(proj, 2))); they explain $(shr)% of the " *
+                          "copula rows' residual variance. Marginal rows load zero on them."
+                else
+                    @warn "n_copula_factors = $(n_cf) requested but the copula residual has too few columns — skipping"
+                end
+            end
+        end
+
+        # ── Fix 1: per-coefficient weights for the copula measurement error ──
+        # communality hᵢ = share of row i's variance the retained factors span.
+        # Weighting the copula block's single variance by (1 - hᵢ) stops the
+        # factor-spanned copula directions from being charged the same error as
+        # the directions the factors can never fit.
+        if hasproperty(model_options, :copula_error) && model_options.copula_error == :communality
+            cop_part_w, imm_w = retrieve_cop_and_imm_part(model_options.estimator, length(measures))
+            gp_cop_w = cop_part_w - imm_w
+            if gp_cop_w > 0 && gp_cop_w <= size(proj, 1)
+                expl = vec(sum(abs2, @view(proj[1:gp_cop_w, :]); dims = 2))
+                tot = vec(var(@view(data_matrix[1:gp_cop_w, :]); dims = 2))
+                h = [t > 1e-12 ? clamp(e / t, 0.0, 1.0) : 1.0 for (e, t) in zip(expl, tot)]
+                w = max.(1 .- h, 0.05)
+                w ./= mean(w)
+                COPULA_ROW_WEIGHTS[] = w
+                @info "Copula measurement error: communality weighting on " *
+                      "(median h = $(round(median(h); digits = 2)), weight range " *
+                      "$(round(minimum(w); digits = 2))–$(round(maximum(w); digits = 2)))"
+            end
+        else
+            COPULA_ROW_WEIGHTS[] = Float64[]
+        end
+
         # Seeing how many factors are less than 1%
-        variance_explained = principalvars(M) ./ tprincipalvar(M)
+        variance_explained = principalvars(M_load) ./ tprincipalvar(M_load)
         n_less_than_one = length(findall(variance_explained .< 0.01))
 
-        return proj, pcs_s, M, n_less_than_one
+        return proj, pcs_s, M_load, n_less_than_one
     end
     # end
+end
+
+# ─────────────────────────────────────────────────────────────────────
+# em_complete(pool, r; ...) — EM/PPCA completion of a coefficient pool with
+# missing entries (pca_method = :em). Columns are (dataset, period)
+# observation vectors; a column is usable if it observes at least
+# `min_frac` of the coefficients. Iterates
+#   E: fill missing entries at their current rank-r reconstruction
+#   M: re-take the rank-r SVD
+# to a stationary point of the Gaussian likelihood. Returns the completed
+# matrix (rows = coefficients, columns = usable dataset-periods).
+# See doc/copula_identification.tex, Fix 2.
+# ─────────────────────────────────────────────────────────────────────
+function em_complete(pool::AbstractMatrix, r::Int; maxiter::Int = 200, tol::Float64 = 1e-7, min_frac::Float64 = 0.05)
+    obs = .!isnan.(pool)
+    usable = findall(j -> count(@view obs[:, j]) >= max(1, ceil(Int, min_frac * size(pool, 1))), axes(pool, 2))
+    X = Matrix{Float64}(pool[:, usable])
+    miss = isnan.(X)
+    X[miss] .= 0.0                       # pool is demeaned, so 0 is the unconditional start
+    all(miss) && return X, usable, 0, NaN
+    prev = Inf
+    Δ = NaN
+    iters = 0
+    for it in 1:maxiter
+        iters = it
+        F = svd(X)
+        k = min(r, length(F.S))
+        X̂ = F.U[:, 1:k] * Diagonal(F.S[1:k]) * F.Vt[1:k, :]
+        Δ = count(miss) == 0 ? 0.0 : sqrt(sum(abs2, X̂[miss] .- X[miss]) / count(miss))
+        X[miss] .= X̂[miss]
+        (Δ < tol || abs(prev - Δ) < tol) && break
+        prev = Δ
+    end
+    return X, usable, iters, Δ
 end
 
 function variation_selector(measures, tag)

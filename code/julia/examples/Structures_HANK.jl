@@ -49,12 +49,24 @@ const HANK_TLS = parse(Float64, get(ENV, "HANK_TLS", "0.1"))   # trend λ prior 
 0 < HANK_TLS <= 1 || error("HANK_TLS must be in (0, 1], got $(HANK_TLS)")
 const HANK_NAF = parse(Int, get(ENV, "HANK_NAF", "0"))   # 0 = HANK pin (8 aggregate factors)
 0 <= HANK_NAF <= 9 || error("HANK_NAF must be in 1:9 (or 0 for the pin), got $(HANK_NAF)")
+# ── copula-identification experiments (doc/copula_identification.tex) ────────
+const HANK_COPERR = Symbol(get(ENV, "HANK_COPERR", "pooled"))   # Fix 1: :pooled | :communality
+HANK_COPERR in (:pooled, :communality) || error("HANK_COPERR must be 'pooled' or 'communality'")
+const HANK_PCA = Symbol(get(ENV, "HANK_PCA", "complete_cases")) # Fix 2: :complete_cases | :em
+HANK_PCA in (:complete_cases, :em) || error("HANK_PCA must be 'complete_cases' or 'em'")
+const HANK_NCF = parse(Int, get(ENV, "HANK_NCF", "0"))          # Fix 3: copula-specific factors
+0 <= HANK_NCF <= 5 || error("HANK_NCF must be in 0:5, got $(HANK_NCF)")
+const HANK_GRID = parse(Int, get(ENV, "HANK_GRID", "5"))        # Fix 4: integration grid (5 = quintile pin, 10 = empirical)
+HANK_GRID in (5, 10) || error("HANK_GRID must be 5 or 10, got $(HANK_GRID)")
 @info "HANK exercise: economy $(HANK_ECON), trend spec $(HANK_TREND), distributional factors $(HANK_NDF == 0 ? "8 (tag pin)" : string(HANK_NDF)), persistence $(HANK_PERS)"
+@info "  copula experiments: error $(HANK_COPERR), pca $(HANK_PCA), copula factors $(HANK_NCF), integration grid $(HANK_GRID)"
 
 const model_options = ModelOptions(
     tag = " HANK $(HANK_ECON)" * (HANK_TREND == :stochastic ? " stochastic trend" : "") *
           (HANK_NDF > 0 ? " $(HANK_NDF) factors" : "") * (HANK_PERS == :per_factor ? " pf" : "") *
-          (HANK_TLS == 0.1 ? "" : " tls$(HANK_TLS)") * (HANK_NAF > 0 ? " naf$(HANK_NAF)" : ""),
+          (HANK_TLS == 0.1 ? "" : " tls$(HANK_TLS)") * (HANK_NAF > 0 ? " naf$(HANK_NAF)" : "") *
+          (HANK_COPERR == :communality ? " cw" : "") * (HANK_PCA == :em ? " em" : "") *
+          (HANK_NCF > 0 ? " ncf$(HANK_NCF)" : "") * (HANK_GRID == 5 ? "" : " g$(HANK_GRID)"),
     trend_spec = HANK_TREND,
     persistence_prior = HANK_PERS,
     trend_lambda_scale = HANK_TLS,
@@ -70,9 +82,12 @@ const model_options = ModelOptions(
     estimator = SeriesEstimator(
         grid_pcf = 11 + 1,
         grid_cop = 11 + 1,
-        integral_pcf_grid = 5,
-        integral_cop_grid = 5,
+        integral_pcf_grid = HANK_GRID,
+        integral_cop_grid = HANK_GRID,
     ),
+    copula_error    = HANK_COPERR,
+    pca_method      = HANK_PCA,
+    n_copula_factors = HANK_NCF,
 )
 
 # ── Aggregate inputs: realized shock-STATE paths, stationarized on load ──────
