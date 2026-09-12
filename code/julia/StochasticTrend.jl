@@ -278,6 +278,7 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
     Σ = apply_measurement_criteria(Σ, Σ_ids, model_options, agg_count)
     cond = Σ .> 10
     Σ[.!cond] .= log.(exp.(Σ[.!cond]) .+ 1)
+    apply_copula_error_weights!(Σ, model_options, agg_count)   # copula_error = :communality
 
     Ω_f = Ω[1:size(A, 1), 1:size(A, 1)]
     Ω_y = Ω[size(A, 1)+1:end, size(A, 1)+1:end]

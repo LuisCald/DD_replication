@@ -767,6 +767,7 @@ function likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, 
     # Transform parameters related to Σ
     cond = Σ .> 10
     Σ[.!cond] .= log.(exp.(Σ[.!cond]) .+ 1) # Basically, for large numbers, it does not matter if we use log(exp(x) + 1) or log(x + 1)
+    apply_copula_error_weights!(Σ, model_options, agg_count)   # copula_error = :communality
 
     # Create the separate Ω_f, Ω_y
     Ω_f = Ω[1:size(A, 1), 1:size(A, 1)]
@@ -1315,6 +1316,34 @@ end
 
 #     return variances
 # end
+
+
+# ─────────────────────────────────────────────────────────────────────
+# apply_copula_error_weights!(Σ, model_options, agg_count)
+#   ModelOptions.copula_error = :communality — scale the (already softplus'd)
+#   measurement variance of each copula coefficient by its weight, so the
+#   factor-spanned copula directions are not charged the same error as the
+#   ~1700-dimensional residual the factors cannot span. No-op under :pooled or
+#   before perform_pca has filled COPULA_ROW_WEIGHTS.
+#   See doc/copula_identification.tex, Fix 1.
+# ─────────────────────────────────────────────────────────────────────
+function apply_copula_error_weights!(Σ::AbstractVector, model_options, agg_count::Int)
+    (hasproperty(model_options, :copula_error) && model_options.copula_error == :communality) || return Σ
+    w = COPULA_ROW_WEIGHTS[]
+    isempty(w) && return Σ
+    dim = length(model_options.measures)
+    cop_part, imm = retrieve_cop_and_imm_part(model_options.estimator, dim)
+    gp_cop = cop_part - imm
+    length(w) == gp_cop || return Σ
+    block_len = gp_cop + dim * model_options.estimator.grid_pcf
+    n_dfs = (length(Σ) - agg_count) ÷ block_len
+    pos = 1
+    for _ in 1:n_dfs
+        @views Σ[pos:pos+gp_cop-1] .*= w
+        pos += block_len
+    end
+    return Σ
+end
 
 function apply_measurement_criteria(
     Σ::AbstractMatrix, Σ_ids,
