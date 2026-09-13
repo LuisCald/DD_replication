@@ -1699,7 +1699,8 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
                   "($((rmax - 2) * nfold) completions of a $(size(pool, 1))×$(size(pool, 2)) matrix) — " *
                   "expect this to take several minutes"
             rr, mm, ss, rhat, rhat1 = em_rank_cv(pool; ranks = 3:rmax, folds = nfold,
-                by_column = get(ENV, "DD_EM_CV_COLS", "0") == "1")
+                by_column = get(ENV, "DD_EM_CV_COLS", "0") == "1",
+                min_frac = parse(Float64, get(ENV, "DD_EM_MIN_FRAC", "0.05")))
             lines = ["  r      CV RMSE       se     improvement"]
             for (i, r) in enumerate(rr)
                 imp = i == 1 ? "      —" : lpad(string(round(100 * (mm[i-1] - mm[i]) / mm[i-1]; digits = 1), "%"), 7)
@@ -1921,11 +1922,11 @@ end
 #   Returns (ranks, mean RMSE, se, r̂, r̂_1se).
 # ─────────────────────────────────────────────────────────────────────
 function em_rank_cv(pool::AbstractMatrix; ranks = 3:12, folds::Int = 3,
-                    holdout::Float64 = 0.1, by_column::Bool = false,
+                    holdout::Float64 = 0.1, by_column::Bool = false, min_frac::Float64 = 0.05,
                     maxiter::Int = 100, tol::Float64 = 1e-6, seed::Int = 20260914)
     rng = MersenneTwister(seed)
     obs = .!isnan.(pool)
-    min_obs = max(1, ceil(Int, 0.05 * size(pool, 1)))
+    min_obs = max(1, ceil(Int, min_frac * size(pool, 1)))
     usable = findall(j -> count(@view obs[:, j]) >= min_obs, axes(pool, 2))
     P = Matrix{Float64}(pool[:, usable])
     O = .!isnan.(P)
@@ -1936,8 +1937,15 @@ function em_rank_cv(pool::AbstractMatrix; ranks = 3:12, folds::Int = 3,
     for b in 1:folds
         # ── split the OBSERVED cells (entries missing in the data stay missing)
         va = if by_column
-            cols = shuffle(rng, axes(P, 2))[1:max(1, round(Int, holdout * size(P, 2)))]
-            filter(ci -> ci[2] in cols, obs_idx)
+            # Hide HALF of each selected dataset-period, not the whole column:
+            # a fully hidden column has no entries left to place its factor
+            # scores, so the prediction collapses to the unconditional mean and
+            # CV(r) is flat in r. Keeping half identifies the scores and asks
+            # the question the model actually faces — given loadings learned
+            # from other periods and part of this period, predict the rest.
+            cols = Set(shuffle(rng, collect(axes(P, 2)))[1:max(1, round(Int, holdout * size(P, 2)))])
+            incol = filter(ci -> ci[2] in cols, obs_idx)
+            shuffle(rng, incol)[1:max(1, round(Int, 0.5 * length(incol)))]
         else
             shuffle(rng, obs_idx)[1:max(1, round(Int, holdout * length(obs_idx)))]
         end
