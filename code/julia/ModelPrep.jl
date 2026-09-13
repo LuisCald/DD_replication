@@ -1698,13 +1698,16 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             @info "EM rank selection: completing the pool at ranks 3:$(rmax) × $(nfold) folds " *
                   "($((rmax - 2) * nfold) completions of a $(size(pool, 1))×$(size(pool, 2)) matrix) — " *
                   "expect this to take several minutes"
-            rr, mm, ss, rhat, rhat1 = em_rank_cv(pool; ranks = 3:rmax, folds = nfold,
+            cp_cv, imm_cv = retrieve_cop_and_imm_part(model_options.estimator, length(measures))
+            rr, mm, ss, rhat, rhat1, mcop, mmar = em_rank_cv(pool; ranks = 3:rmax, folds = nfold,
                 by_column = get(ENV, "DD_EM_CV_COLS", "0") == "1",
-                min_frac = parse(Float64, get(ENV, "DD_EM_MIN_FRAC", "0.05")))
-            lines = ["  r      CV RMSE       se     improvement"]
+                min_frac = parse(Float64, get(ENV, "DD_EM_MIN_FRAC", "0.05")),
+                n_cop = cp_cv - imm_cv)
+            lines = ["  r      CV RMSE       se     improve    copula rows   marginal rows"]
             for (i, r) in enumerate(rr)
                 imp = i == 1 ? "      —" : lpad(string(round(100 * (mm[i-1] - mm[i]) / mm[i-1]; digits = 1), "%"), 7)
-                push!(lines, "  $(lpad(r, 2))   $(lpad(round(mm[i]; sigdigits = 6), 10))  $(lpad(round(ss[i]; sigdigits = 3), 8))  $(imp)")
+                push!(lines, "  $(lpad(r, 2))   $(lpad(round(mm[i]; sigdigits = 6), 10))  $(lpad(round(ss[i]; sigdigits = 3), 8))  $(imp)" *
+                             "   $(lpad(round(mcop[i]; sigdigits = 5), 10))    $(lpad(round(mmar[i]; sigdigits = 5), 10))")
             end
             @info "EM rank selection ($(get(ENV, "DD_EM_CV_COLS", "0") == "1" ? "column" : "cell") hold-out, " *
                   "$(size(pool, 2)) pool columns):\n" * join(lines, "\n") *
@@ -1923,7 +1926,7 @@ end
 # ─────────────────────────────────────────────────────────────────────
 function em_rank_cv(pool::AbstractMatrix; ranks = 3:12, folds::Int = 3,
                     holdout::Float64 = 0.1, by_column::Bool = false, min_frac::Float64 = 0.05,
-                    maxiter::Int = 100, tol::Float64 = 1e-6, seed::Int = 20260914)
+                    n_cop::Int = 0, maxiter::Int = 100, tol::Float64 = 1e-6, seed::Int = 20260914)
     rng = MersenneTwister(seed)
     obs = .!isnan.(pool)
     min_obs = max(1, ceil(Int, min_frac * size(pool, 1)))
@@ -1934,6 +1937,8 @@ function em_rank_cv(pool::AbstractMatrix; ranks = 3:12, folds::Int = 3,
     isempty(obs_idx) && error("em_rank_cv: no observed entries in the pool")
 
     scores = fill(NaN, length(ranks), folds)
+    scores_cop = fill(NaN, length(ranks), folds)   # copula rows only
+    scores_mar = fill(NaN, length(ranks), folds)   # marginal rows only
     for b in 1:folds
         # ── split the OBSERVED cells (entries missing in the data stay missing)
         va = if by_column
@@ -1968,16 +1973,24 @@ function em_rank_cv(pool::AbstractMatrix; ranks = 3:12, folds::Int = 3,
             end
             pred = [X[ci] for ci in va]
             scores[ri, b] = sqrt(sum(abs2, pred .- truth) / length(truth))
+            if n_cop > 0
+                isc = findall(ci -> ci[1] <= n_cop, va)
+                ism = findall(ci -> ci[1] > n_cop, va)
+                !isempty(isc) && (scores_cop[ri, b] = sqrt(sum(abs2, pred[isc] .- truth[isc]) / length(isc)))
+                !isempty(ism) && (scores_mar[ri, b] = sqrt(sum(abs2, pred[ism] .- truth[ism]) / length(ism)))
+            end
         end
     end
     m = [mean(filter(isfinite, @view scores[ri, :])) for ri in eachindex(ranks)]
     se = [(v = filter(isfinite, @view scores[ri, :]); length(v) > 1 ? std(v) / sqrt(length(v)) : NaN)
           for ri in eachindex(ranks)]
+    mc = [(v = filter(isfinite, @view scores_cop[ri, :]); isempty(v) ? NaN : mean(v)) for ri in eachindex(ranks)]
+    mm_ = [(v = filter(isfinite, @view scores_mar[ri, :]); isempty(v) ? NaN : mean(v)) for ri in eachindex(ranks)]
     best = argmin(m)
     r̂ = collect(ranks)[best]
     thr = m[best] + (isnan(se[best]) ? 0.0 : se[best])
     r̂1 = collect(ranks)[findfirst(<=(thr), m)]
-    return collect(ranks), m, se, r̂, r̂1
+    return collect(ranks), m, se, r̂, r̂1, mc, mm_
 end
 
 function em_complete(pool::AbstractMatrix, r::Int; maxiter::Int = 200, tol::Float64 = 1e-7, min_frac::Float64 = 0.05)
