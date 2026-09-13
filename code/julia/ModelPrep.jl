@@ -1695,11 +1695,13 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # is whatever the chain above selected; scores and all downstream
         # objects stay on the complete-case columns, so only Λ changes.
         M_load = M
+        load_matrix = data_matrix          # columns the LOADINGS were estimated on
         if hasproperty(model_options, :pca_method) && model_options.pca_method == :em
             k_em = size(projection(M), 2)
             Xem, usable, iters, Δ = em_complete(pool, k_em)
             if size(Xem, 2) > size(data_matrix, 2)
                 M_load = MultivariateStats.fit(PCA, Xem; maxoutdim = k_em, method = :svd)
+                load_matrix = Xem
                 nds_em = col_labels === nothing ? 1 : length(unique(col_labels[usable]))
                 @info "Distributional PCA: EM completion — loadings from " *
                       "$(length(usable)) dataset-periods across $(nds_em) dataset(s) " *
@@ -1814,8 +1816,13 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             cop_part_cf, imm_cf = retrieve_cop_and_imm_part(model_options.estimator, length(measures))
             gp_cop_cf = cop_part_cf - imm_cf
             if gp_cop_cf > 0 && gp_cop_cf <= size(proj, 1)
-                R = data_matrix .- proj * pcs_s                 # residual after common factors
-                Rc = R[1:gp_cop_cf, :]                          # copula rows only
+                # LOADINGS from every column the common loadings were estimated
+                # on (all dataset-periods under pca_method = :em), SCORES on the
+                # complete-case columns so pcs_s stays conformable — same split
+                # the EM refit uses.
+                Rload = load_matrix .- projection(M_load) * MultivariateStats.transform(M_load, load_matrix)
+                Rcc = data_matrix .- projection(M_load) * MultivariateStats.transform(M_load, data_matrix)
+                Rc = Rload[1:gp_cop_cf, :]                      # copula rows only
                 n_cf_use = min(n_cf, minimum(size(Rc)) - 1)
                 if n_cf_use >= 1
                     CM = MultivariateStats.fit(PCA, Rc; maxoutdim = n_cf_use, method = :svd)
@@ -1824,11 +1831,12 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
                     aug = zeros(size(proj, 1), n_cf_use)
                     aug[1:gp_cop_cf, :] .= Cproj                # zeros on the marginal rows
                     proj = hcat(proj, aug)
-                    pcs_s = vcat(pcs_s, MultivariateStats.transform(CM, Rc) ./ Cλ)
+                    pcs_s = vcat(pcs_s, MultivariateStats.transform(CM, Rcc[1:gp_cop_cf, :]) ./ Cλ)
                     shr = round(100 * sum(principalvars(CM)) / max(sum(abs2, Rc) / size(Rc, 2), eps()); digits = 1)
                     @info "Copula-specific factors: added $(n_cf_use) (distributional factor count " *
-                          "$(size(proj, 2) - n_cf_use) → $(size(proj, 2))); they explain $(shr)% of the " *
-                          "copula rows' residual variance. Marginal rows load zero on them."
+                          "$(size(proj, 2) - n_cf_use) → $(size(proj, 2))); loadings from " *
+                          "$(size(Rc, 2)) columns; they explain $(shr)% of the copula rows' " *
+                          "residual variance. Marginal rows load zero on them."
                 else
                     @warn "n_copula_factors = $(n_cf) requested but the copula residual has too few columns — skipping"
                 end
@@ -1845,7 +1853,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             gp_cop_w = cop_part_w - imm_w
             if gp_cop_w > 0 && gp_cop_w <= size(proj, 1)
                 expl = vec(sum(abs2, @view(proj[1:gp_cop_w, :]); dims = 2))
-                tot = vec(var(@view(data_matrix[1:gp_cop_w, :]); dims = 2))
+                tot = vec(var(@view(load_matrix[1:gp_cop_w, :]); dims = 2))
                 h = [t > 1e-12 ? clamp(e / t, 0.0, 1.0) : 1.0 for (e, t) in zip(expl, tot)]
                 w = max.(1 .- h, 0.05)
                 w ./= mean(w)
