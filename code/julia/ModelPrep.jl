@@ -1690,6 +1690,27 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             M = MultivariateStats.fit(PCA, data_matrix; pratio=pr, method=:svd) # mean=0
         end
 
+        # DD_EM_CV=1 — cross-validated rank selection diagnostic. Prints the
+        # curve and stops the run (the choice is made by inspection).
+        if get(ENV, "DD_EM_CV", "0") == "1"
+            rmax = parse(Int, get(ENV, "DD_EM_CV_RMAX", "12"))
+            nfold = parse(Int, get(ENV, "DD_EM_CV_FOLDS", "3"))
+            @info "EM rank selection: completing the pool at ranks 3:$(rmax) × $(nfold) folds " *
+                  "($((rmax - 2) * nfold) completions of a $(size(pool, 1))×$(size(pool, 2)) matrix) — " *
+                  "expect this to take several minutes"
+            rr, mm, ss, rhat, rhat1 = em_rank_cv(pool; ranks = 3:rmax, folds = nfold,
+                by_column = get(ENV, "DD_EM_CV_COLS", "0") == "1")
+            lines = ["  r      CV RMSE       se     improvement"]
+            for (i, r) in enumerate(rr)
+                imp = i == 1 ? "      —" : lpad(string(round(100 * (mm[i-1] - mm[i]) / mm[i-1]; digits = 1), "%"), 7)
+                push!(lines, "  $(lpad(r, 2))   $(lpad(round(mm[i]; sigdigits = 6), 10))  $(lpad(round(ss[i]; sigdigits = 3), 8))  $(imp)")
+            end
+            @info "EM rank selection ($(get(ENV, "DD_EM_CV_COLS", "0") == "1" ? "column" : "cell") hold-out, " *
+                  "$(size(pool, 2)) pool columns):\n" * join(lines, "\n") *
+                  "\n  argmin r = $(rhat);  1-SE rule r = $(rhat1)"
+            error("DD_EM_CV=1: rank-selection diagnostic complete — rerun without it to estimate")
+        end
+
         # pca_method = :em — re-estimate the LOADINGS from every dataset-period
         # instead of the complete-case columns only (Fix 2). The retained count
         # is whatever the chain above selected; scores and all downstream
@@ -1886,6 +1907,71 @@ end
 # matrix (rows = coefficients, columns = usable dataset-periods).
 # See doc/copula_identification.tex, Fix 2.
 # ─────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────
+# em_rank_cv(pool; ranks, folds, holdout, by_column)
+#   Cross-validated rank selection for the EM-completed pool
+#   (doc/em_rank_selection.tex). Hide a random share of the OBSERVED
+#   entries, complete at each candidate rank with those entries treated as
+#   missing, and score the prediction on the hidden ones. Criteria applied
+#   after completion are circular — the completion is rank-r by
+#   construction — so held-out prediction is the only non-circular signal.
+#   by_column = true hides whole dataset-periods instead of scattered cells
+#   (closer to how the loadings are used; the robustness variant).
+#   Returns (ranks, mean RMSE, se, r̂, r̂_1se).
+# ─────────────────────────────────────────────────────────────────────
+function em_rank_cv(pool::AbstractMatrix; ranks = 3:12, folds::Int = 3,
+                    holdout::Float64 = 0.1, by_column::Bool = false,
+                    maxiter::Int = 100, tol::Float64 = 1e-6, seed::Int = 20260914)
+    rng = MersenneTwister(seed)
+    obs = .!isnan.(pool)
+    min_obs = max(1, ceil(Int, 0.05 * size(pool, 1)))
+    usable = findall(j -> count(@view obs[:, j]) >= min_obs, axes(pool, 2))
+    P = Matrix{Float64}(pool[:, usable])
+    O = .!isnan.(P)
+    obs_idx = findall(O)
+    isempty(obs_idx) && error("em_rank_cv: no observed entries in the pool")
+
+    scores = fill(NaN, length(ranks), folds)
+    for b in 1:folds
+        # ── split the OBSERVED cells (entries missing in the data stay missing)
+        va = if by_column
+            cols = shuffle(rng, axes(P, 2))[1:max(1, round(Int, holdout * size(P, 2)))]
+            filter(ci -> ci[2] in cols, obs_idx)
+        else
+            shuffle(rng, obs_idx)[1:max(1, round(Int, holdout * length(obs_idx)))]
+        end
+        isempty(va) && continue
+        Ptr = copy(P)
+        for ci in va; Ptr[ci] = NaN; end
+        miss = isnan.(Ptr)
+        truth = [P[ci] for ci in va]
+        for (ri, r) in enumerate(ranks)
+            X = copy(Ptr); X[miss] .= 0.0
+            prev = Inf
+            for _ in 1:maxiter
+                F = svd(X)
+                k = min(r, length(F.S))
+                X̂ = F.U[:, 1:k] * Diagonal(F.S[1:k]) * F.Vt[1:k, :]
+                Δ = sqrt(sum(abs2, X̂[miss] .- X[miss]) / max(count(miss), 1))
+                X[miss] .= X̂[miss]
+                (Δ < tol || abs(prev - Δ) < tol) && break
+                prev = Δ
+            end
+            pred = [X[ci] for ci in va]
+            scores[ri, b] = sqrt(sum(abs2, pred .- truth) / length(truth))
+        end
+    end
+    m = [mean(filter(isfinite, @view scores[ri, :])) for ri in eachindex(ranks)]
+    se = [(v = filter(isfinite, @view scores[ri, :]); length(v) > 1 ? std(v) / sqrt(length(v)) : NaN)
+          for ri in eachindex(ranks)]
+    best = argmin(m)
+    r̂ = collect(ranks)[best]
+    thr = m[best] + (isnan(se[best]) ? 0.0 : se[best])
+    r̂1 = collect(ranks)[findfirst(<=(thr), m)]
+    return collect(ranks), m, se, r̂, r̂1
+end
+
 function em_complete(pool::AbstractMatrix, r::Int; maxiter::Int = 200, tol::Float64 = 1e-7, min_frac::Float64 = 0.05)
     obs = .!isnan.(pool)
     usable = findall(j -> count(@view obs[:, j]) >= max(1, ceil(Int, min_frac * size(pool, 1))), axes(pool, 2))
