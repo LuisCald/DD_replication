@@ -1712,6 +1712,29 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
             @info "EM rank selection ($(get(ENV, "DD_EM_CV_COLS", "0") == "1" ? "column" : "cell") hold-out, " *
                   "$(size(pool, 2)) pool columns):\n" * join(lines, "\n") *
                   "\n  argmin r = $(rhat);  1-SE rule r = $(rhat1)"
+
+            # DD_EM_CV_BLOCKS=1 — size each block WITHOUT competition: run the
+            # same CV on the copula rows alone and on the marginal rows alone.
+            # In the joint pool the 36 marginal rows lose directions to the 1694
+            # copula rows (their held-out error rises when factors 9-10 are
+            # added), so the joint curve cannot size a block-diagonal spec.
+            if get(ENV, "DD_EM_CV_BLOCKS", "0") == "1"
+                ncp = cp_cv - imm_cv
+                for (nm, rows) in (("copula", 1:ncp), ("marginal", (ncp+1):size(pool, 1)))
+                    length(rows) < 4 && continue
+                    rmax_b = min(rmax, length(rows) - 1)
+                    br, bm, bs, brh, brh1, _, _ = em_rank_cv(pool[rows, :]; ranks = 3:rmax_b, folds = nfold,
+                        by_column = get(ENV, "DD_EM_CV_COLS", "0") == "1",
+                        min_frac = parse(Float64, get(ENV, "DD_EM_MIN_FRAC", "0.05")))
+                    bl = ["  r      CV RMSE       se     improve"]
+                    for (i, r) in enumerate(br)
+                        imp = i == 1 ? "      —" : lpad(string(round(100 * (bm[i-1] - bm[i]) / bm[i-1]; digits = 1), "%"), 7)
+                        push!(bl, "  $(lpad(r, 2))   $(lpad(round(bm[i]; sigdigits = 6), 10))  $(lpad(round(bs[i]; sigdigits = 3), 8))  $(imp)")
+                    end
+                    @info "EM rank selection — $(nm) block alone ($(length(rows)) rows):\n" *
+                          join(bl, "\n") * "\n  argmin r = $(brh);  1-SE rule r = $(brh1)"
+                end
+            end
             error("DD_EM_CV=1: rank-selection diagnostic complete — rerun without it to estimate")
         end
 
