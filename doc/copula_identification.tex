@@ -32,7 +32,8 @@ The diagnosis below shows that the failure is \emph{not} a data limitation: the
 information is present in the frequently observed series. It is a
 representation failure concentrated in the copula block, with three identifiable
 causes. Sections \ref{sec:notation}--\ref{sec:evidence} state the problem and
-the evidence; Section \ref{sec:fixes} gives the four fixes with their math;
+the evidence; Section \ref{sec:fixes} gives the fixes with their math (the
+fourth is withdrawn on inspection of the code);
 Section \ref{sec:order} gives the order of work.
 
 \section{Notation}\label{sec:notation}
@@ -306,25 +307,56 @@ timing. Fixes 1 and 2 improve \emph{how well we measure} the copula; Fix 3 is
 what gives the copula somewhere to move that is not already spoken for by the
 marginals.
 
-\subsection{Fix 4: match the integration grid to the reported groups}
+\subsection{Fix 4 (withdrawn): the reported cells are already grid-independent}
 
-\paragraph{Plain English.} We report a top-decile group but evaluate the copula
-on a five-point (quintile) grid in the HANK runs, so the top decile is half of
-one grid cell and has to be interpolated. The empirical runs already use ten.
-Make them agree.
+\paragraph{Plain English.} I originally proposed raising the HANK integration
+grid from quintiles to deciles, on the theory that a top-decile group read off a
+five-point grid must be interpolated. Checking the code, that is not what
+happens: both the marginal group series and the cross-conditional cells are
+computed by \emph{exact integration in coefficient space} over the true
+$50/40/10$ boundaries, independently of the evaluation grid. The concern was
+already addressed --- and there is a comment in the source recording that the
+earlier ten-cell version was replaced precisely because its top cell froze the
+within-decile composition that conditional wealth depends on.
 
-\paragraph{Math.} The cell \eqref{eq:cell} integrates the copula density over
-$I_g \times [0,1]$ with $|I_g| = 0.1$, while the evaluation grid has spacing
-$1/G$. With $G = 5 > 1/|I_g|$ the group boundary falls inside a cell and the
-quadrature error is $O(G^{-1})$, concentrated exactly where $q_W$ is steepest
-(the tail). Setting $G = 10$ removes it.
+\paragraph{What the code does.} The share-group series integrate the quantile
+function over the exact boundaries,
+\begin{equation}
+  \texttt{share\_spec} = (0.5,\,0.4,\,0.1),
+  \qquad
+  \texttt{share\_intervals} = (0,\; 0.5,\; 0.9,\; 1),
+\end{equation}
+and the cross-conditional cells use the closed-form Legendre segment integrals
+on the conditioning side together with a composite quadrature on the outcome
+side,
+\begin{equation}
+  B_{s,k} = \int_{p_{s-1}}^{p_s} Q_k(v)\,\mathrm{d}v,
+  \qquad
+  A_j = \int_0^1 Q_j(u)\, V_t(u)\,\mathrm{d}u,
+  \qquad
+  m_s(t) = \frac{\sum_{j,k} \kappa_{jk}(t)\, A_j\, B_{s,k}}{\sum_k \kappa_{1k}(t)\, B_{s,k}},
+\end{equation}
+with $\kappa(t)$ the reconstructed copula coefficient tensor and $V_t$ the
+outcome quantile function. Neither expression involves
+\texttt{integral\_cop\_grid}. This also explains why both the truth cells and
+the model cells satisfy the population-share identity
+$0.5\,\tilde m_{\text{bot}} + 0.4\,\tilde m_{\text{mid}} + 0.1\,\tilde m_{\text{top}} \approx 1$.
 
-\paragraph{Already verified.} The truth cells satisfy the population-share
-identity $0.5\,\tilde m_{\text{bot}} + 0.4\,\tilde m_{\text{mid}} +
-0.1\,\tilde m_{\text{top}} = 1.005$, and the model's cells satisfy the same
-identity ($1.01$--$1.02$). Both sides therefore use genuine $50/40/10$ shares
-computed outright from micro data --- there is no grouping mismatch, only a
-resolution error.
+\paragraph{What the grid does change.} (i) the quantile-level panels, whose
+groups are grid-derived --- bottom40/next40/top20 at $G=5$, bottom50/next40/top10
+at $G=10$; (ii) the exported functional-data grid ($G^D$ copula cells); and
+(iii) the granularity of the interval/noise caches in the data layer
+(\texttt{\_quintiles} vs \texttt{\_deciles}), which changes the
+measurement-error calibration and therefore the estimates themselves. Because of
+(iii), \textbf{likelihoods are not comparable across grids}, and raising the
+grid introduces a confound into the experiment ladder without touching the
+statistic under investigation. The HANK truth file also carries quintile
+marginal series only, so the quantile-level panels cannot be validated at
+$G=10$ without regenerating the truth.
+
+\paragraph{Recommendation.} Keep $G=5$ for the copula experiments. Treat the
+grid as a separate robustness question for the empirical model, where $G=10$ is
+already the default.
 
 \section{Order of work}\label{sec:order}
 
@@ -333,8 +365,9 @@ resolution error.
         Cheap, and it immediately quantifies how much informative copula
         variance was being discarded: compare $\hat\sigma_\parallel$ with the
         current pooled $37.4$.
-  \item \textbf{Fix 4} (one line in the HANK example). Removes a known
-        tail-specific quadrature error before we measure anything else.
+  \item \textbf{Fix 4 is withdrawn} --- the reported cells are computed by
+        exact integration and do not depend on the grid; raising it would only
+        change the data layer's noise calibration and confound the ladder.
   \item \textbf{Fix 2} (contained: the pool/PCA step in \code{ModelPrep.jl}).
         Biggest gain per unit of work, and it improves the empirical estimates
         for the same reason it improves the replica ones.
