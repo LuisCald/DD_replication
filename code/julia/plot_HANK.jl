@@ -199,6 +199,15 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                 # Find the variable from truth_df, and then scale it
                 q_tag = integral_pcf_grid == 5 ? "q" : integral_pcf_grid == 10 ? "" : integral_pcf_grid == 20 ? "v" : "unknown"
                 truth_var_name = Symbol(meas * "$(j)" * q_tag)
+                # The HANK truth file carries QUINTILE marginal series only
+                # (consum1q…consum5q). At integral_pcf_grid = 10 the decile
+                # columns do not exist, so the quantile-level truth overlay is
+                # skipped; share-group and cross-conditional panels are
+                # unaffected (their truth columns are 50/40/10 either way).
+                if !hasproperty(truth_data_filtered, truth_var_name)
+                    @info "Truth column $(truth_var_name) absent (grid $(integral_pcf_grid)) — quantile-level truth overlay skipped for $(meas)"
+                    continue
+                end
                 # meas_name = meas == "consum" ? "consumption" : meas
                 avg_name = Symbol(meas * "_per_hh")
                 truth_values = truth_data_filtered[:, truth_var_name] ./ truth_data_filtered[base_jump:end-end_jump, meas*"_per_hh"] #select_series[base_jump:end-end_jump, meas*"_per_hh"] # truth_data_filtered[:, avg_name] #
