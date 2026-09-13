@@ -58,21 +58,38 @@ const HANK_NCF = parse(Int, get(ENV, "HANK_NCF", "0"))          # Fix 3: copula-
 0 <= HANK_NCF <= 5 || error("HANK_NCF must be in 0:5, got $(HANK_NCF)")
 const HANK_GRID = parse(Int, get(ENV, "HANK_GRID", "5"))        # Fix 4: integration grid (5 = quintile pin, 10 = empirical)
 HANK_GRID in (5, 10) || error("HANK_GRID must be 5 or 10, got $(HANK_GRID)")
+# ── aggregate-input transform ────────────────────────────────────────────────
+# :adf (baseline) mirrors the empirical pipeline — difference each shock state
+# until an ADF test rejects a unit root. With T ~ 100 that test has almost no
+# power against the HANK persistences, so Z (rho = 0.998), A/G (~0.97) and mu_w
+# get differenced and enter ~ as their innovations: the aggregate block then
+# carries their shocks but not their LEVELS, and any slow distributional
+# movement has to be manufactured internally (trend states, persistent factors,
+# or an explosive root). :levels feeds the shock states untransformed — the
+# truth's own information — which is the clean test of what that costs.
+# NB a rho = 0.998 input pushes the joint spectral radius above the default
+# 0.995 cap; pass HANK_CAP=0.999 with :levels.
+const HANK_SHOCKS = Symbol(get(ENV, "HANK_SHOCKS", "adf"))
+HANK_SHOCKS in (:adf, :levels) || error("HANK_SHOCKS must be 'adf' or 'levels', got $(HANK_SHOCKS)")
+const HANK_CAP = parse(Float64, get(ENV, "HANK_CAP", "0"))      # 0 = default (0.995 under per-factor persistence, Inf otherwise)
 @info "HANK exercise: economy $(HANK_ECON), trend spec $(HANK_TREND), distributional factors $(HANK_NDF == 0 ? "8 (tag pin)" : string(HANK_NDF)), persistence $(HANK_PERS)"
 @info "  copula experiments: error $(HANK_COPERR), pca $(HANK_PCA), copula factors $(HANK_NCF), integration grid $(HANK_GRID)"
+@info "  aggregate inputs: $(HANK_SHOCKS)$(HANK_SHOCKS == :levels ? " (shock states untransformed)" : " (ADF differencing, empirical-pipeline mirror)")" *
+      (HANK_CAP > 0 ? ", stationarity cap $(HANK_CAP)" : "")
 
 const model_options = ModelOptions(
     tag = " HANK $(HANK_ECON)" * (HANK_TREND == :stochastic ? " stochastic trend" : "") *
           (HANK_NDF > 0 ? " $(HANK_NDF) factors" : "") * (HANK_PERS == :per_factor ? " pf" : "") *
           (HANK_TLS == 0.1 ? "" : " tls$(HANK_TLS)") * (HANK_NAF > 0 ? " naf$(HANK_NAF)" : "") *
           (HANK_COPERR == :communality ? " cw" : "") * (HANK_PCA == :em ? " em" : "") *
-          (HANK_NCF > 0 ? " ncf$(HANK_NCF)" : "") * (HANK_GRID == 5 ? "" : " g$(HANK_GRID)"),
+          (HANK_NCF > 0 ? " ncf$(HANK_NCF)" : "") * (HANK_GRID == 5 ? "" : " g$(HANK_GRID)") *
+          (HANK_SHOCKS == :levels ? " lvl" : ""),
     trend_spec = HANK_TREND,
     persistence_prior = HANK_PERS,
     trend_lambda_scale = HANK_TLS,
     n_agg_factors = HANK_NAF,
     # pf's high ρ targets let A go explosive (|eig| 1.38, 5f pf run) — cap it.
-    stationarity_cap = HANK_PERS == :per_factor ? 0.995 : Inf,
+    stationarity_cap = HANK_CAP > 0 ? HANK_CAP : (HANK_PERS == :per_factor ? 0.995 : Inf),
     factor_selection = HANK_NDF > 0 ? :fixed : :pratio,
     n_dist_factors   = HANK_NDF > 0 ? HANK_NDF : 8,
     # HANK runs use QUINTILE integration grids (the replica moment targets are
@@ -129,7 +146,7 @@ const obs_data = ObservedData(
         "HANK e $(HANK_ECON)" => joinpath(DATA_PROCESSING, "HANK_SIPP_$(HANK_ECON).csv"),
     ),
     # agg_data = CSV.read(joinpath(DATA_PROCESSING, "HANK_shocks_economy_$(HANK_ECON).csv"), DataFrame),
-    agg_data = _stationarize_states(
+    agg_data = (HANK_SHOCKS == :levels ? identity : _stationarize_states)(
         CSV.read(
             joinpath(DATA_PROCESSING, "HANK_shocks_economy_$(HANK_ECON).csv"),
             DataFrame,
