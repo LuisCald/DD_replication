@@ -35,13 +35,27 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
            model_options.stationarity_cap : Inf
     r_cap = param_sizes[1][1]; q_cap = param_sizes[2][2]
     lA = r_cap * r_cap; lB = r_cap * q_cap; lC = q_cap * r_cap
-    function joint_illegal(col)
-        isfinite(capv) || return false
-        all(isfinite, @view col[1:lA+lB+lC+q_cap]) || return false  # non-finite handled separately
+    function joint_radius(col)
+        all(isfinite, @view col[1:lA+lB+lC+q_cap]) || return NaN
         # C is stored q×r column-major (matrisize param_sizes[3]) — no transpose
         Φj = [reshape(col[1:lA], r_cap, r_cap) reshape(col[lA+1:lA+lB], r_cap, q_cap);
               reshape(col[lA+lB+1:lA+lB+lC], q_cap, r_cap) diagm(col[lA+lB+lC+1:lA+lB+lC+q_cap])]
-        return maximum(abs, eigvals(Φj)) > capv
+        return maximum(abs, eigvals(Φj))
+    end
+    joint_illegal(col) = isfinite(capv) && (ρ = joint_radius(col); isfinite(ρ) && ρ > capv)
+    # Shrink an explosive draw back inside the cap instead of discarding it:
+    # eigenvalues scale linearly in Φ, so scaling A, B, C, D by s puts the
+    # radius at s·ρ. Preserves the draw's diversity — replacing every violating
+    # chain with the BBO mode collapses the ensemble (988/988 on the first
+    # per-factor + grid-10 run, 2026-09-13: essentially ALL Minnesota prior
+    # draws are jointly explosive once B and C are drawn).
+    function shrink_to_cap!(col)
+        isfinite(capv) || return col
+        ρ = joint_radius(col)
+        (isfinite(ρ) && ρ > capv) || return col
+        s = 0.98 * capv / ρ
+        @views col[1:lA+lB+lC+q_cap] .*= s
+        return col
     end
 
     done_iters = 0
@@ -107,8 +121,16 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
         # the naf5 run burned all 400 iterations that way (2026-09-10).
         donor = par_final
         nonfin = findall(j -> !all(isfinite, @view init_chains[:, j, :]), 1:size(init_chains, 2))
-        capbad = findall(j -> joint_illegal(vec(init_chains[:, j, :])), 1:size(init_chains, 2))
-        bad = sort(union(nonfin, capbad))
+        capbad = setdiff(findall(j -> joint_illegal(vec(init_chains[:, j, :])), 1:size(init_chains, 2)), nonfin)
+        # cap violations are shrunk (diversity preserved); only non-finite draws
+        # are replaced by the mode
+        for j in capbad
+            col = vec(init_chains[:, j, :]); shrink_to_cap!(col); init_chains[:, j, :] .= col
+        end
+        bad = nonfin
+        if !isempty(capbad)
+            @info "DIME init: shrank $(length(capbad))/$(size(init_chains, 2)) prior draws inside stationarity_cap (A,B,C,D scaled; ensemble diversity kept)"
+        end
         if !isempty(bad)
             nb = length(bad)
             # attribute to parameter blocks for the log
@@ -122,9 +144,8 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
                 any(!isfinite, @view init_chains[lo:min(hi, size(init_chains, 1)), bad, :]) && push!(hits, nm)
             end
             any(!isfinite, @view init_chains[stops[end]+1:end, bad, :]) && push!(hits, "H/trend tail")
-            @warn "DIME init: replacing $(nb)/$(size(init_chains, 2)) prior draws with jittered BBO mode " *
-                  "($(length(nonfin)) non-finite$(isempty(hits) ? "" : " [blocks: " * join(hits, ", ") * "]"), " *
-                  "$(length(capbad)) violating stationarity_cap)"
+            @warn "DIME init: replacing $(nb)/$(size(init_chains, 2)) non-finite prior draws with jittered BBO mode" *
+                  (isempty(hits) ? "" : " [blocks: " * join(hits, ", ") * "]")
             for j in bad
                 init_chains[:, j, :] .= par_final .+ 0.01 .* randn(length(par_final))
             end
@@ -134,10 +155,15 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     # Resume path: sanitize the checkpointed ensemble the same way (stuck
     # -1e12 chains persist across restarts otherwise); donor = best chain.
     if resume
-        bad = findall(j -> !all(isfinite, @view init_chains[:, j, :]) || joint_illegal(vec(init_chains[:, j, :])),
-                      1:size(init_chains, 2))
+        for j in 1:size(init_chains, 2)
+            col = vec(init_chains[:, j, :])
+            if all(isfinite, col) && joint_illegal(col)
+                shrink_to_cap!(col); init_chains[:, j, :] .= col
+            end
+        end
+        bad = findall(j -> !all(isfinite, @view init_chains[:, j, :]), 1:size(init_chains, 2))
         if !isempty(bad)
-            @warn "DIME resume: replacing $(length(bad)) non-finite/cap-violating checkpoint chains with jittered best chain"
+            @warn "DIME resume: replacing $(length(bad)) non-finite checkpoint chains with jittered best chain"
             for j in bad
                 init_chains[:, j, :] .= donor .+ 0.01 .* randn(length(donor))
             end
