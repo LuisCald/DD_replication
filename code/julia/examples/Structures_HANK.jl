@@ -56,6 +56,14 @@ const HANK_PCA = Symbol(get(ENV, "HANK_PCA", "complete_cases")) # Fix 2: :comple
 HANK_PCA in (:complete_cases, :em) || error("HANK_PCA must be 'complete_cases' or 'em'")
 const HANK_NCF = parse(Int, get(ENV, "HANK_NCF", "0"))          # Fix 3: copula-specific factors
 0 <= HANK_NCF <= 5 || error("HANK_NCF must be in 0:5, got $(HANK_NCF)")
+# Block-diagonal loadings: HANK_LOAD=block with HANK_NMF (marginal) + HANK_NCB (copula).
+# The EM rank CV on each block alone puts the marginal rows at 4 (sharp, monotone
+# degradation past it) and the copula rows at >= 17 (still improving at the grid's
+# end), so NMF=4 is data-implied and NCB is a budget choice.
+const HANK_LOAD = Symbol(get(ENV, "HANK_LOAD", "joint"))
+HANK_LOAD in (:joint, :block) || error("HANK_LOAD must be 'joint' or 'block', got $(HANK_LOAD)")
+const HANK_NMF = parse(Int, get(ENV, "HANK_NMF", "4"))
+const HANK_NCB = parse(Int, get(ENV, "HANK_NCB", "4"))
 const HANK_GRID = parse(Int, get(ENV, "HANK_GRID", "5"))        # Fix 4: integration grid (5 = quintile pin, 10 = empirical)
 HANK_GRID in (5, 10) || error("HANK_GRID must be 5 or 10, got $(HANK_GRID)")
 # ── aggregate-input transform ────────────────────────────────────────────────
@@ -77,6 +85,7 @@ HANK_SHOCKS in (:adf, :levels) || error("HANK_SHOCKS must be 'adf' or 'levels', 
 const HANK_CAP = parse(Float64, get(ENV, "HANK_CAP", "0"))      # 0 = default (0.995 under per-factor persistence, Inf otherwise)
 @info "HANK exercise: economy $(HANK_ECON), trend spec $(HANK_TREND), distributional factors $(HANK_NDF == 0 ? "8 (tag pin)" : string(HANK_NDF)), persistence $(HANK_PERS)"
 @info "  copula experiments: error $(HANK_COPERR), pca $(HANK_PCA), copula factors $(HANK_NCF), integration grid $(HANK_GRID)"
+@info "  loading structure: $(HANK_LOAD)$(HANK_LOAD == :block ? " ($(HANK_NMF) marginal + $(HANK_NCB) copula factors)" : "")"
 @info "  aggregate inputs: $(HANK_SHOCKS)$(HANK_SHOCKS == :levels ? " (shock states untransformed)" : " (ADF differencing, empirical-pipeline mirror)")" *
       (HANK_CAP > 0 ? ", stationarity cap $(HANK_CAP)" : "")
 
@@ -86,7 +95,8 @@ const model_options = ModelOptions(
           (HANK_TLS == 0.1 ? "" : " tls$(HANK_TLS)") * (HANK_NAF > 0 ? " naf$(HANK_NAF)" : "") *
           (HANK_COPERR == :communality ? " cw" : "") * (HANK_PCA == :em ? " em" : "") *
           (HANK_NCF > 0 ? " ncf$(HANK_NCF)" : "") * (HANK_GRID == 5 ? "" : " g$(HANK_GRID)") *
-          (HANK_SHOCKS == :levels ? " lvl" : ""),
+          (HANK_SHOCKS == :levels ? " lvl" : "") *
+          (HANK_LOAD == :block ? " blk$(HANK_NMF)x$(HANK_NCB)" : ""),
     trend_spec = HANK_TREND,
     persistence_prior = HANK_PERS,
     trend_lambda_scale = HANK_TLS,
@@ -108,6 +118,9 @@ const model_options = ModelOptions(
     copula_error    = HANK_COPERR,
     pca_method      = HANK_PCA,
     n_copula_factors = HANK_NCF,
+    loading_structure = HANK_LOAD,
+    n_marginal_factors = HANK_NMF,
+    n_copula_block_factors = HANK_NCB,
 )
 
 # ── Aggregate inputs: realized shock-STATE paths, stationarized on load ──────
