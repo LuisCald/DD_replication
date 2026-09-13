@@ -67,8 +67,11 @@ HANK_GRID in (5, 10) || error("HANK_GRID must be 5 or 10, got $(HANK_GRID)")
 # movement has to be manufactured internally (trend states, persistent factors,
 # or an explosive root). :levels feeds the shock states untransformed — the
 # truth's own information — which is the clean test of what that costs.
-# NB a rho = 0.998 input pushes the joint spectral radius above the default
-# 0.995 cap; pass HANK_CAP=0.999 with :levels.
+# NB the realized persistences over this sample are rho-hat 0.86-0.97 (Z 0.968,
+# Gshock 0.949, mu_w 0.910, A 0.862), so the default 0.995 cap should NOT bind
+# under :levels. If it does, it says so: the mode's joint |eig| sits pinned at
+# the cap and the init line reports a large shrink count — then raise it with
+# HANK_CAP (0.998 keeps lyapd well conditioned; 0.999 is the practical ceiling).
 const HANK_SHOCKS = Symbol(get(ENV, "HANK_SHOCKS", "adf"))
 HANK_SHOCKS in (:adf, :levels) || error("HANK_SHOCKS must be 'adf' or 'levels', got $(HANK_SHOCKS)")
 const HANK_CAP = parse(Float64, get(ENV, "HANK_CAP", "0"))      # 0 = default (0.995 under per-factor persistence, Inf otherwise)
