@@ -1852,6 +1852,41 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # proj  = projection(M) * sqrt.(Diagonal(pcs * pcs'))
         # pcs_s = pcs ./ sqrt.(diag(pcs * pcs')) 
 
+        # ── Block-diagonal loadings (loading_structure = :block) ─────────
+        # Separate projections for the copula rows and the marginal rows, so
+        # each block's directions are chosen to explain IT. Under :joint the
+        # 1694 copula rows carry ~98% of the pooled variance and the 36
+        # marginal rows have almost no say; the EM rank CV showed the marginal
+        # block losing directions outright when copula-serving factors enter.
+        if hasproperty(model_options, :loading_structure) && model_options.loading_structure == :block
+            cp_b, imm_b = retrieve_cop_and_imm_part(model_options.estimator, length(measures))
+            gp_b = cp_b - imm_b
+            n_rows = size(load_matrix, 1)
+            if gp_b <= 0 || gp_b >= n_rows
+                @warn "loading_structure = :block: could not locate the copula/marginal split — keeping joint loadings"
+            else
+                rc_b = clamp(Int(model_options.n_copula_block_factors), 1, min(gp_b, size(load_matrix, 2)) - 1)
+                rm_b = clamp(Int(model_options.n_marginal_factors), 1, min(n_rows - gp_b, size(load_matrix, 2)) - 1)
+                Mc_b = MultivariateStats.fit(PCA, load_matrix[1:gp_b, :]; maxoutdim = rc_b, method = :svd)
+                Mm_b = MultivariateStats.fit(PCA, load_matrix[gp_b+1:end, :]; maxoutdim = rm_b, method = :svd)
+                λc_b = sqrt.(principalvars(Mc_b)); λm_b = sqrt.(principalvars(Mm_b))
+                rc_b = length(λc_b); rm_b = length(λm_b)          # fits may retain fewer
+                proj = zeros(n_rows, rc_b + rm_b)
+                proj[1:gp_b, 1:rc_b] .= projection(Mc_b) * diagm(λc_b)
+                proj[gp_b+1:end, rc_b+1:end] .= projection(Mm_b) * diagm(λm_b)
+                pcs_s = vcat(MultivariateStats.transform(Mc_b, data_matrix[1:gp_b, :]) ./ λc_b,
+                             MultivariateStats.transform(Mm_b, data_matrix[gp_b+1:end, :]) ./ λm_b)
+                vc = round(100 * sum(principalvars(Mc_b)) / MultivariateStats.tvar(Mc_b); digits = 1)
+                vm = round(100 * sum(principalvars(Mm_b)) / MultivariateStats.tvar(Mm_b); digits = 1)
+                @info "Block-diagonal loadings: $(rc_b) copula factors ($(gp_b) rows, $(vc)% of their " *
+                      "variance) + $(rm_b) marginal factors ($(n_rows - gp_b) rows, $(vm)%). " *
+                      "Factor order: copula 1:$(rc_b), marginal $(rc_b+1):$(rc_b+rm_b). " *
+                      "Marginal rows load exactly zero on copula factors and vice versa."
+                model_options.n_copula_factors > 0 &&
+                    @warn "n_copula_factors is ignored under loading_structure = :block"
+            end
+        end
+
         # ── Fix 3: dedicated copula factors ──────────────────────────────
         # Extra factors that ONLY the copula coefficients load on. Built from
         # the copula rows of the residual after the common factors, then
@@ -1859,7 +1894,8 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # matrix is block-triangular (doc/copula_identification.tex, eq. 11)
         # and the new factors cannot contaminate the marginals. Everything
         # downstream reads the factor count off size(proj, 2).
-        n_cf = hasproperty(model_options, :n_copula_factors) ? Int(model_options.n_copula_factors) : 0
+        n_cf = (hasproperty(model_options, :loading_structure) && model_options.loading_structure == :block) ? 0 :
+               (hasproperty(model_options, :n_copula_factors) ? Int(model_options.n_copula_factors) : 0)
         if n_cf > 0
             cop_part_cf, imm_cf = retrieve_cop_and_imm_part(model_options.estimator, length(measures))
             gp_cop_cf = cop_part_cf - imm_cf
