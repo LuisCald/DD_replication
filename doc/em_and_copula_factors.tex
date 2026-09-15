@@ -174,7 +174,7 @@ Under \code{:em} these loadings are estimated on the completed columns, the same
 ones the common loadings used; the scores are again taken on the complete-case
 columns so the score matrix stays conformable.
 
-\subsection{The augmented loading matrix}
+\subsection{The augmented loading matrix}\label{sec:blocktri}
 
 Partitioning $\hat\Lambda$ into its marginal and copula rows,
 $\hat\Lambda = \bigl(\Lambda_{qm}^{\top},\, \Lambda_{cm}^{\top}\bigr)^{\top}$,
@@ -242,6 +242,137 @@ scales, in the same form as the trend block's,
 Until that is added, the copula factors use the standard $\Omega_f$ prior, so
 $r_c$ should be chosen conservatively --- there is nothing pushing them to zero
 when they are not needed.
+
+
+\section{Three loading structures, and where information flows}
+\label{sec:structures}
+
+Section \ref{sec:blocktri} added copula-specific factors on top of a shared
+block. The natural-looking alternative is to give each block its own factors
+outright. The two are not close substitutes, and the reason is about
+\emph{information}, not flexibility.
+
+Write the measurement equation for one dataset as $y_t = G x_t + e_t$ with
+$e_t \sim N(0,\Sigma)$, $\Sigma$ diagonal, and split the coefficient rows into
+the copula set $\mathcal{C}$ ($n_c \approx 1694$ rows) and the marginal set
+$\mathcal{M}$ ($n_q = 36$ rows). The three structures are
+\begin{equation}
+  \Lambda_{\text{joint}} = \begin{pmatrix} \Lambda_{qm} \\ \Lambda_{cm} \end{pmatrix},
+  \qquad
+  \Lambda_{\triangle} = \begin{pmatrix} \Lambda_{qm} & 0 \\ \Lambda_{cm} & \Lambda_{cc}\end{pmatrix},
+  \qquad
+  \Lambda_{\mathrm{diag}} = \begin{pmatrix} \Lambda_{qm} & 0 \\ 0 & \Lambda_{cc}\end{pmatrix},
+\end{equation}
+with $f_t = (f^m_t, f^c_t)$ in the latter two.
+
+\subsection{How much each block informs the states}
+
+The filter's update adds to the state precision
+\begin{equation}
+  G^{\top}\Sigma^{-1}G \;=\; \sum_{i} \frac{g_i g_i^{\top}}{\sigma_i^2}
+  \;=\; \underbrace{\sum_{i\in\mathcal{C}} \frac{g_i g_i^{\top}}{\sigma_c^2}}_{\text{copula rows}}
+  \;+\; \underbrace{\sum_{i\in\mathcal{M}} \frac{g_i g_i^{\top}}{\sigma_m^2}}_{\text{marginal rows}},
+  \label{eq:precision}
+\end{equation}
+$g_i$ being row $i$ of $G$ (the loading row, premultiplied). Restrict
+\eqref{eq:precision} to the marginal factors' block:
+\begin{align}
+  \text{joint / triangular:}&\quad
+  \bigl[G^{\top}\Sigma^{-1}G\bigr]_{mm} =
+  \sum_{i\in\mathcal{M}} \frac{\lambda^{qm}_i \lambda^{qm\top}_i}{\sigma_m^2}
+  \;+\; \sum_{i\in\mathcal{C}} \frac{\lambda^{cm}_i \lambda^{cm\top}_i}{\sigma_c^2},
+  \label{eq:info-tri}\\[2pt]
+  \text{block-diagonal:}&\quad
+  \bigl[G^{\top}\Sigma^{-1}G\bigr]_{mm} =
+  \sum_{i\in\mathcal{M}} \frac{\lambda^{qm}_i \lambda^{qm\top}_i}{\sigma_m^2}
+  \qquad\text{only.}
+  \label{eq:info-diag}
+\end{align}
+The second term of \eqref{eq:info-tri} is the whole point: under the joint and
+triangular structures the $1694$ copula rows also pin down the factors the
+marginals load on, because those rows carry $\Lambda_{cm} \neq 0$. Setting that
+block to zero removes it. With the estimated scales at the mode
+($\sigma^2_{a,\cop} \approx 37$, $\sigma^2_{a,\mathrm{inc}} \approx 8.5$) the
+direct information about the marginal factors falls by a factor of roughly
+\begin{equation}
+  \frac{n_c/\sigma_c^2}{n_q/\sigma_m^2}
+  \;\approx\; \frac{1694/37}{36/8.5} \;\approx\; 11 ,
+\end{equation}
+i.e.\ about an order of magnitude. The marginals had been riding on the
+copula's measurement base, and block-diagonal loadings take that away.
+
+\subsection{The only channel that remains, and the prior that closes it}
+
+Under $\Lambda_{\mathrm{diag}}$ the copula data can still reach the marginal
+states, but only \emph{indirectly}, through the prediction step. The update
+\begin{equation}
+  \mathbb{E}\bigl[f^m_t \mid y_{1:t}\bigr]
+  = \hat f^m_{t|t-1}
+  + P_{t|t-1}^{mc}\, G_c^{\top}\bigl(G_c P_{t|t-1} G_c^{\top} + \Sigma_c\bigr)^{-1}
+    \bigl(y^{\cop}_t - \hat y^{\cop}_t\bigr) + \dots
+  \label{eq:transmission}
+\end{equation}
+transmits a copula surprise to $f^m$ in proportion to the cross-block state
+covariance $P^{mc}_{t|t-1}$, which is generated only by the off-diagonal blocks
+of $\Omega$ and of $A$. If $\Omega_{mc} = 0$ and $A$ is block-diagonal, then
+$P^{mc} = 0$ and the transmission is exactly zero.
+
+That channel is therefore load-bearing --- and it is the one the prior shrinks.
+The innovation correlation matrix carries
+$\mathrm{LKJ}(\nu)$ with $\nu = 1 + \log(1+e^{h})$ estimated, and $\nu > 1$
+tilts toward the identity, i.e.\ toward $\Omega_{mc} = 0$. Under joint or
+triangular loadings comovement between the blocks is free, being built into the
+loadings; under block-diagonal it must be bought against a prior that leans the
+other way.
+
+\subsection{What happened when this was run}
+
+\code{loading\_structure = :block} with four marginal and four copula factors,
+on top of EM loadings and untransformed aggregates:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+$R^2$ to truth & baseline & EM + levels & block $4\times4$ \\
+\midrule
+wealth, top quintile (a)      & 57 & 58 & $-28$ \\
+wealth, middle-40 share (a)   &  7 & 28 & $-143$ \\
+wealth, top-10 share (d)      & 57 & 65 & $-47$ \\
+consumption, middle q3 (a)    & 74 & 67 & 19 \\
+income, bottom quintile (e)   & 99 & 87 & 98 \\
+income, top-10 share (a)      & 93 & 84 & 89 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Income --- the measure observed by every dataset, and the one least dependent on
+borrowed information --- returned to its baseline fit, which is what the
+structure was designed to protect. Everything else collapsed. The mode shows the
+mechanism directly: with the factor order (copula $1$--$4$, marginal $5$--$8$),
+the estimated innovation scales were
+\begin{equation}
+  \omega_f = (\,0.02,\; 1.12,\; 2.66,\; 0.42 \;\mid\; 0.69,\; 0.02,\; 0.00,\; 0.01\,),
+\end{equation}
+so three of the four marginal factors were estimated at zero: they could not be
+identified from $36$ rows once \eqref{eq:info-tri}'s second term was removed.
+Their trend states absorbed the movement instead
+($\omega_\tau = 0.069,\,0.274,\,0.142$ on those slots), and random walks of that
+size are what produced the wandering paths and isolated spikes in the panels.
+
+\subsection{Conclusion}
+
+Block-\emph{triangular} dominates block-diagonal for this model. It keeps
+$\Lambda_{cm} \neq 0$, so the copula's $1694$ rows continue to identify the
+factors that reconstruct the marginals, while $\Lambda_{cc}$ gives the copula
+private directions the marginals cannot be distorted by. Block-diagonal buys
+symmetry at the price of the term in \eqref{eq:info-tri} that was doing the
+work.
+
+A caveat on how the two counts were chosen. The cross-validation in
+\code{doc/em\_rank\_selection.tex} put the marginal rows' own rank at four. That
+is a statement about \emph{reconstruction given the whole panel}, not about
+\emph{identification inside the filter from 36 rows}; this run is what the
+difference between those two questions looks like in practice.
 
 \section{Dimensionality}
 
