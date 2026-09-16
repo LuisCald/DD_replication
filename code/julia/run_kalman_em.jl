@@ -29,7 +29,8 @@
 #   kalman_em_trace.csv      iteration, log-likelihood, ‖ΔΛ‖/‖Λ‖
 #   solution<label>_<end>.csv  copied from the source run, so
 #                            run_postestimation.jl on this tag has a mode
-# Then: run_postestimation.jl (same switches) for the cheap look, or
+# Then it hands off to run_postestimation.jl in a fresh process (DD_KEM_POST=0
+#   to skip) for the cheap look, or
 #       run_estimation.jl for the full re-estimation from the new loadings.
 # ─────────────────────────────────────────────────────────────────────────────
 include(joinpath(@__DIR__, "DistributionalDynamics.jl"))
@@ -183,4 +184,16 @@ else
     @info "source mode written to $(joinpath(out_dir, fname))"
 end
 @info "Kalman-EM loadings written: $(joinpath(out_dir, "kalman_em_loadings.csv"))"
-@info "next: run_postestimation.jl with the same switches for the cheap look; run_estimation.jl for the full re-estimation"
+
+# ── chain straight into post-estimation (the cheap look) unless told not to.
+# A fresh process, not include(): run_postestimation.jl declares consts that
+# would clash with this script's. The ENV (all HANK_* / DD_* switches) is
+# inherited, and estimation_prep in that process picks up the loadings file.
+if get(ENV, "DD_KEM_POST", "1") == "1"
+    post = joinpath(@__DIR__, "run_postestimation.jl")
+    cmd  = `$(Base.julia_cmd()) --project=$(Base.active_project()) --threads=$(Threads.nthreads()) $(post)`
+    @info "═══ handing off to post-estimation with the new loadings (DD_KEM_POST=0 to skip) ═══"
+    run(cmd)
+else
+    @info "next: run_postestimation.jl with the same switches for the cheap look; run_estimation.jl for the full re-estimation"
+end
