@@ -45,7 +45,17 @@
 #                      whose precision equals the row's average information per
 #                      observation times DD_KEM_PRIOR_OBS — a row observed 12
 #                      times stays half-way to PCA, a row observed 236 times
-#                      moves almost freely. 0 disables it.
+#                      moves almost freely. 0 disables it. The regression runs
+#                      on ROW-STANDARDISED coefficients so the prior is in each
+#                      row's own units (standardisation is per object, so one
+#                      copula row can have sd 40 and another 0.1).
+#   DD_KEM_MIN_OBS     rows observed fewer times than this are HELD at their
+#                      initial loadings (default: complete-case count + 1). A
+#                      row seen only in the complete-case columns carries no
+#                      information beyond what PCA already used; regressing it
+#                      on five smoothed factors from twelve points is noise
+#                      (R² ≈ 45% under the null) — the first run's 40–56×
+#                      "explosion" was exactly these rows.
 #   DD_KEM_POST        1 (default) = hand off to run_postestimation.jl after
 # Output (under this tag's from_mcmc/parameter_vectors/):
 #   kalman_em_loadings.csv   the new Λ (rows = coefficients, cols = factors)
@@ -67,6 +77,7 @@ src_tag  = get(ENV, "DD_KEM_SOURCE_TAG", replace(tag, " kem" => ""))
 maxit    = parse(Int, get(ENV, "DD_KEM_ITERS", "50"))
 tol      = parse(Float64, get(ENV, "DD_KEM_TOL", "1e-5"))
 n0       = parse(Float64, get(ENV, "DD_KEM_PRIOR_OBS", "12"))
+min_obs_env = get(ENV, "DD_KEM_MIN_OBS", "")
 premult  = hasproperty(model_options, :pre_multiply) ? model_options.pre_multiply : true
 @info "this tag   : $(tag)"
 @info "source mode: $(src_tag)"
@@ -131,6 +142,28 @@ obs_mask = .!isnan.(y_raw)
 n_obs_per_coef = [sum(@view obs_mask[i:n_coef:N_dist, :]) for i in 1:n_coef]
 @info "observations per coefficient row, pooled over datasets: min $(minimum(n_obs_per_coef)), median $(round(Int, median(n_obs_per_coef))), max $(maximum(n_obs_per_coef)) (complete-case PCA used 12)"
 
+# rows to UPDATE: those with observations beyond the complete-case columns
+n_cc    = minimum(n_obs_per_coef)                      # = the complete-case column count
+min_obs = isempty(min_obs_env) ? n_cc + 1 : parse(Int, min_obs_env)
+update  = [n_obs_per_coef[i] >= min_obs for i in 1:n_coef]
+@info "rows updated by the Kalman EM: $(count(update)) of $(n_coef) (observed ≥ $(min_obs) times); " *
+      "$(count(!, update)) rows seen only in the $(n_cc) complete-case columns are held at their initial loadings"
+# per-row scale of the raw coefficients (pooled over datasets and dates)
+row_sd = zeros(n_coef)
+for i in 1:n_coef
+    vals = Float64[]
+    for j in 1:n_dfs
+        ρ = (j - 1) * n_coef + i
+        for t in 1:T
+            obs_mask[ρ, t] && push!(vals, y_raw[ρ, t])
+        end
+    end
+    row_sd[i] = length(vals) > 1 ? std(vals) : 0.0
+end
+@info "per-row sd of the raw coefficients: median $(round(median(filter(>(0), row_sd)); sigdigits = 3)), " *
+      "90th pct $(round(quantile(filter(>(0), row_sd), 0.9); sigdigits = 3)), max $(round(maximum(row_sd); sigdigits = 3)) " *
+      "(standardisation is per object, not per row)"
+
 # support of each row: structural zeros (copula-only factors on marginal rows,
 # block layouts) stay zero — the regression runs on the non-zero columns only
 Λ_init  = copy(proj)
@@ -193,9 +226,10 @@ for it in 1:maxit
         # scale check: y ≈ Λ f, so sd(y) should be of the order ‖Λ col‖ × sd(f).
         # If sd(f) ≪ sd(y)/‖Λ‖ the mode is explaining the data as noise/trend
         # rather than through the cycle factors, and the regression will inflate Λ.
-        @info "scale check — column norms of Λ_init: $(round.([norm(Λ_init[:, k]) for k in 1:r]; sigdigits = 3)); " *
+        typ_load = mean(norm(Λ_init[:, k]) for k in 1:r) / sqrt(n_coef)      # typical |Λ_ik|
+        @info "scale check — column norms of Λ_init: $(round.([norm(Λ_init[:, k]) for k in 1:r]; sigdigits = 3)) (typical |Λ_ik| ≈ $(round(typ_load; sigdigits = 3))); " *
               "sd of observed raw coefficients: $(round(std(y_raw[obs_mask]); sigdigits = 3)); " *
-              "implied sd(f) needed ≈ $(round(std(y_raw[obs_mask]) / mean(norm(Λ_init[:, k]) for k in 1:r) * sqrt(n_coef); sigdigits = 3)) vs smoothed sd above"
+              "with sd(f) ≈ $(round(mean(fsd); sigdigits = 3)) the factors imply sd(y) ≈ $(round(typ_load * mean(fsd) * sqrt(r); sigdigits = 3)) — the rest is noise/trend"
     end
 
     num = [zeros(r) for _ in 1:n_coef]
@@ -224,14 +258,15 @@ for it in 1:maxit
     n_skipped = 0
     for i in 1:n_coef
         s = support[i]
-        if isempty(s) || tr(den[i]) < 1e-12   # never observed with a non-zero loading: keep the row
+        if !update[i] || isempty(s) || tr(den[i]) < 1e-12 || row_sd[i] <= 0
             n_skipped += 1
             continue
         end
-        # MAP: prior N(Λ_init[i,:], κ⁻¹ I) with κ = n0 × (information per observation)
+        # MAP in the row's own units: y/sd_i on z, prior N(Λ_init/sd_i, κ⁻¹ I),
+        # κ = n0 × (information per observation); back-transform by sd_i
         κ = n0 > 0 ? n0 * tr(den[i]) / (length(s) * max(n_obs_per_coef[i], 1)) : 1e-10 * tr(den[i]) / length(s)
         D = Symmetric(den[i][s, s]) + κ * I
-        Λ_new[i, s] = D \ (num[i][s] .+ κ .* Λ_init[i, s])
+        Λ_new[i, s] = row_sd[i] .* (D \ (num[i][s] ./ row_sd[i] .+ κ .* Λ_init[i, s] ./ row_sd[i]))
     end
     rel = norm(Λ_new - Λ_old) / max(norm(Λ_old), eps())
     if rel > 5
@@ -243,7 +278,7 @@ for it in 1:maxit
     push!(dtrace, rel)
     push!(Λ_hist, Λ_new)
     @info "iter $(lpad(it, 3)): loglik $(round(ll; digits = 2))  ‖ΔΛ‖/‖Λ‖ = $(round(rel; sigdigits = 3))" *
-          (n_skipped > 0 ? "  ($(n_skipped) rows held)" : "") *
+          (n_skipped > 0 ? "  ($(n_coef - n_skipped) rows updated)" : "") *
           (it > 1 && ll < trace[end-1] - 1e-6 ? "   (likelihood dipped — allowed for this generalized-EM step, watch that it does not trend down)" : "")
     rebuild_G!(model_elements, Λ_new, W, r, n_coef, n_dfs, N_dist, y_full_raw, Σ̂⁻¹², premult)
     global Λ_old = Λ_new
