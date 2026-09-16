@@ -442,11 +442,19 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                                truth_data_filtered[:, mean_col]
                 model_normed = model_series ./ select_series[base_jump:end-end_jump, string(mean_col)]
 
-                # Correlation
+                # Correlation — cor() is NaN when a series is constant (a flat
+                # reconstructed cell); report it instead of dying on round(Int, NaN)
                 valid = findall(i -> !isnan(model_normed[i]) && !isnan(truth_series[i]),
                                 1:length(truth_series))
-                corr_n = length(valid) > 2 ?
-                    round(Int, cor(model_normed[valid], truth_series[valid]) * 100) : NaN
+                corr_n = NaN
+                if length(valid) > 2
+                    c_raw = cor(model_normed[valid], truth_series[valid])
+                    if isfinite(c_raw)
+                        corr_n = round(Int, c_raw * 100)
+                    else
+                        @warn "cross-conditional $(key) $(sl): correlation undefined — model series sd $(round(std(model_normed[valid]); sigdigits = 3)), truth sd $(round(std(truth_series[valid]); sigdigits = 3)) over $(length(valid)) points (a constant reconstructed cell)"
+                    end
+                end
                 corr_dict[key][group_names[si]] = corr_n
 
                 # R² (detrended): 1 - MSE / Var(truth)
@@ -455,8 +463,8 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                     truth_dm = truth_series[valid] .- mean(truth_series[valid])
                     mse_val = sum((model_dm .- truth_dm).^2) / length(valid)
                     var_truth = var(truth_series[valid])
-                    corr_dict["$(key)_r2"][group_names[si]] = var_truth > 0 ?
-                        round(Int, (1.0 - mse_val / var_truth) * 100) : NaN
+                    r2_raw = var_truth > 0 ? (1.0 - mse_val / var_truth) * 100 : NaN
+                    corr_dict["$(key)_r2"][group_names[si]] = isfinite(r2_raw) ? round(Int, r2_raw) : NaN
                 else
                     corr_dict["$(key)_r2"][group_names[si]] = NaN
                 end
@@ -577,7 +585,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                                      1:length(truth_vals))
                     if length(valid_s) > 2
                         sample_corr_dict[sample_name][key][group_names[si]] =
-                            round(Int, cor(truth_vals[valid_s], sample_vals[valid_s]) * 100)
+                            (c_ = cor(truth_vals[valid_s], sample_vals[valid_s]); isfinite(c_) ? round(Int, c_ * 100) : NaN)
 
                         # R² (detrended)
                         model_dm = sample_vals[valid_s] .- mean(sample_vals[valid_s])
@@ -585,7 +593,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                         mse_val = sum((model_dm .- truth_dm).^2) / length(valid_s)
                         var_truth = var(truth_vals[valid_s])
                         sample_corr_dict[sample_name]["$(key)_r2"][group_names[si]] = var_truth > 0 ?
-                            round(Int, (1.0 - mse_val / var_truth) * 100) : NaN
+                            (isfinite(1.0 - mse_val / var_truth) ? round(Int, (1.0 - mse_val / var_truth) * 100) : NaN) : NaN
                     else
                         sample_corr_dict[sample_name][key][group_names[si]] = "--"
                         sample_corr_dict[sample_name]["$(key)_r2"][group_names[si]] = "--"
