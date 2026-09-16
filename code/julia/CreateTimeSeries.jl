@@ -2071,6 +2071,29 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
                 data_dict[key][sl] = mat[si, :]
             end
         end
+
+        # Export them as DATA, not only as pictures: these are the statistics
+        # the paper reports (wealth by income group and friends), and validating
+        # them against the replicas requires the series, not the panels.
+        if model_step != :forecast
+            try
+                xpath = BASE_PATH * "/7_Results/$m_label" * "$tag" * "/$folder/data"
+                mkpath(xpath)
+                @unpack tmin, tmax = time_params
+                xdts = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
+                X = DataFrame()
+                X[!, "time"] = collect(xdts)
+                for (key, mat) in sort(collect(cross_cond_data); by = first)
+                    for (si, sl) in enumerate(cross_share_labels)
+                        col = mat[si, :]
+                        length(col) == length(xdts) && (X[!, "$(key)_$(sl)"] = col)
+                    end
+                end
+                ncol(X) > 1 && CSV.write(xpath * "/" * data_name * "_cross_conditional" * data_tag * "$label" * ".csv", X)
+            catch e
+                @warn "cross-conditional export failed (diagnostic only): $e"
+            end
+        end
     end
 
     # Everything has been reconstructed now. Creating a new select_series object, which has the averages that correspond to the data estimates 
