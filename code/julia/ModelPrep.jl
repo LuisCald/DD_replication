@@ -1744,7 +1744,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # objects stay on the complete-case columns, so only Λ changes.
         M_load = M
         load_matrix = data_matrix          # columns the LOADINGS were estimated on
-        if hasproperty(model_options, :pca_method) && model_options.pca_method == :em
+        if hasproperty(model_options, :pca_method) && model_options.pca_method in (:em, :kalman_em)
             k_em = size(projection(M), 2)
             Xem, usable, iters, Δ = em_complete(pool, k_em)
             if size(Xem, 2) > size(data_matrix, 2)
@@ -1851,6 +1851,32 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
 
         # proj  = projection(M) * sqrt.(Diagonal(pcs * pcs'))
         # pcs_s = pcs ./ sqrt.(diag(pcs * pcs')) 
+
+        # ── Kalman-EM loadings (pca_method = :kalman_em) ─────────────────
+        # run_kalman_em.jl holds A, Ω, Σ at an estimated mode, smooths the
+        # factors over every quarter from every dataset, and re-estimates Λ
+        # by a pooled regression of the coefficients on that path. If it has
+        # written the result for this tag, use it; otherwise fall through
+        # with the :em initialisation (the driver itself runs in that state).
+        if hasproperty(model_options, :pca_method) && model_options.pca_method == :kalman_em
+            kem_path = BASE_PATH * "/7_Results/$(measures_folder(measures))$tag/from_mcmc/parameter_vectors/kalman_em_loadings.csv"
+            if isfile(kem_path)
+                Λk = Matrix{Float64}(readdlm(kem_path, ','))
+                if size(Λk, 1) == size(proj, 1)
+                    proj = Λk
+                    # least-squares scores on the complete-case columns, same
+                    # role as transform(M)./λ for the PCA loadings
+                    pcs_s = (proj' * proj + 1e-10I) \ (proj' * data_matrix)
+                    @info "Kalman-EM loadings loaded from $(basename(kem_path)): $(size(proj, 2)) factors, " *
+                          "$(size(proj, 1)) rows (replaces the :em initialisation; frame kept as-is)"
+                else
+                    @warn "Kalman-EM loadings at $(kem_path) have $(size(Λk, 1)) rows, pool has $(size(proj, 1)) — ignored"
+                end
+            else
+                @info "pca_method = :kalman_em: no kalman_em_loadings.csv for this tag yet — using the :em initialisation " *
+                      "(run run_kalman_em.jl to produce it)"
+            end
+        end
 
         # ── Block-diagonal loadings (loading_structure = :block) ─────────
         # Separate projections for the copula rows and the marginal rows, so

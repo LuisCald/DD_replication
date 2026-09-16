@@ -52,8 +52,8 @@ const HANK_NAF = parse(Int, get(ENV, "HANK_NAF", "0"))   # 0 = HANK pin (8 aggre
 # ── copula-identification experiments (doc/copula_identification.tex) ────────
 const HANK_COPERR = Symbol(get(ENV, "HANK_COPERR", "pooled"))   # Fix 1: :pooled | :communality
 HANK_COPERR in (:pooled, :communality) || error("HANK_COPERR must be 'pooled' or 'communality'")
-const HANK_PCA = Symbol(get(ENV, "HANK_PCA", "complete_cases")) # Fix 2: :complete_cases | :em
-HANK_PCA in (:complete_cases, :em) || error("HANK_PCA must be 'complete_cases' or 'em'")
+const HANK_PCA = Symbol(get(ENV, "HANK_PCA", "complete_cases")) # Fix 2: :complete_cases | :em | :kalman_em
+HANK_PCA in (:complete_cases, :em, :kalman_em) || error("HANK_PCA must be 'complete_cases', 'em' or 'kalman_em'")
 const HANK_NCF = parse(Int, get(ENV, "HANK_NCF", "0"))          # Fix 3: copula-specific factors
 0 <= HANK_NCF <= 5 || error("HANK_NCF must be in 0:5, got $(HANK_NCF)")
 # Block-diagonal loadings: HANK_LOAD=block with HANK_NMF (marginal) + HANK_NCB (copula).
@@ -93,7 +93,7 @@ const model_options = ModelOptions(
     tag = " HANK $(HANK_ECON)" * (HANK_TREND == :stochastic ? " stochastic trend" : "") *
           (HANK_NDF > 0 ? " $(HANK_NDF) factors" : "") * (HANK_PERS == :per_factor ? " pf" : "") *
           (HANK_TLS == 0.1 ? "" : " tls$(HANK_TLS)") * (HANK_NAF > 0 ? " naf$(HANK_NAF)" : "") *
-          (HANK_COPERR == :communality ? " cw" : "") * (HANK_PCA == :em ? " em" : "") *
+          (HANK_COPERR == :communality ? " cw" : "") * (HANK_PCA == :em ? " em" : HANK_PCA == :kalman_em ? " em kem" : "") *
           (HANK_NCF > 0 ? " ncf$(HANK_NCF)" : "") * (HANK_GRID == 5 ? "" : " g$(HANK_GRID)") *
           (HANK_SHOCKS == :levels ? " lvl" : "") *
           (HANK_LOAD == :block ? " blk$(HANK_NMF)x$(HANK_NCB)" : ""),
