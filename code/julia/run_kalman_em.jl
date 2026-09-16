@@ -35,6 +35,17 @@
 #                      (default: this tag with " kem" removed)
 #   DD_KEM_ITERS       max EM iterations (default 50)
 #   DD_KEM_TOL         relative Frobenius change in Λ to stop (default 1e-5)
+#   DD_KEM_PRIOR_OBS   strength of the pull toward the initial loadings, in
+#                      pseudo-observations (default 12 = the complete-case
+#                      PCA's own evidence). A loadings-only EM with Ω fixed has
+#                      a scale indeterminacy: a factor whose smoothed variance
+#                      is tiny gets an enormous loading to compensate (first
+#                      run: ‖ΔΛ‖/‖Λ‖ = 716 at iteration 1). The M-step is
+#                      therefore MAP with a Gaussian prior centred on Λ_init
+#                      whose precision equals the row's average information per
+#                      observation times DD_KEM_PRIOR_OBS — a row observed 12
+#                      times stays half-way to PCA, a row observed 236 times
+#                      moves almost freely. 0 disables it.
 #   DD_KEM_POST        1 (default) = hand off to run_postestimation.jl after
 # Output (under this tag's from_mcmc/parameter_vectors/):
 #   kalman_em_loadings.csv   the new Λ (rows = coefficients, cols = factors)
@@ -55,6 +66,7 @@ end_year = data_cutoffs["end"] != "" ? data_cutoffs["end"][1:4] : "all"
 src_tag  = get(ENV, "DD_KEM_SOURCE_TAG", replace(tag, " kem" => ""))
 maxit    = parse(Int, get(ENV, "DD_KEM_ITERS", "50"))
 tol      = parse(Float64, get(ENV, "DD_KEM_TOL", "1e-5"))
+n0       = parse(Float64, get(ENV, "DD_KEM_PRIOR_OBS", "12"))
 premult  = hasproperty(model_options, :pre_multiply) ? model_options.pre_multiply : true
 @info "this tag   : $(tag)"
 @info "source mode: $(src_tag)"
@@ -164,12 +176,27 @@ for it in 1:maxit
     sm, ll, alarm = out
     alarm && error("smoother alarm at iteration $(it) — the mode is inconsistent with the updated loadings")
     push!(trace, ll)
+    it == 1 && abs(ll - ll0) > 1e-6 &&
+        @info "note: likeli(smooth=true) at the same parameters gives $(round(ll; digits = 2)) vs $(round(ll0; digits = 2)) from the plain filter (Δ = $(round(ll - ll0; digits = 2))) — pre-existing difference between the forward and smoother recursions; the trace uses the smoother's value throughout"
     X = sm.x_smoothed
     P = sm.sigma_smoothed
     if size(X, 2) == T + 1                      # drop the initial state if present
         X = X[:, 2:end]; P = P[2:end]
     end
     @assert size(X, 2) == T
+    if it == 1
+        fsd  = [std(X[k, :]) for k in 1:r]
+        pvar = [mean(P[t][k, k] for t in 1:T) for k in 1:r]
+        @info "smoothed factor path (lag-0 block, f+τ): sd per factor $(round.(fsd; sigdigits = 3)); mean posterior var $(round.(pvar; sigdigits = 3)). " *
+              "A factor with sd ≪ 1 is the scale-indeterminacy risk the prior guards against."
+        @info "rows observed exactly 12 times (PSID only — the 3D copula): $(count(==(12), n_obs_per_coef)) of $(n_coef)"
+        # scale check: y ≈ Λ f, so sd(y) should be of the order ‖Λ col‖ × sd(f).
+        # If sd(f) ≪ sd(y)/‖Λ‖ the mode is explaining the data as noise/trend
+        # rather than through the cycle factors, and the regression will inflate Λ.
+        @info "scale check — column norms of Λ_init: $(round.([norm(Λ_init[:, k]) for k in 1:r]; sigdigits = 3)); " *
+              "sd of observed raw coefficients: $(round(std(y_raw[obs_mask]); sigdigits = 3)); " *
+              "implied sd(f) needed ≈ $(round(std(y_raw[obs_mask]) / mean(norm(Λ_init[:, k]) for k in 1:r) * sqrt(n_coef); sigdigits = 3)) vs smoothed sd above"
+    end
 
     num = [zeros(r) for _ in 1:n_coef]
     den = [zeros(r, r) for _ in 1:n_coef]
@@ -201,10 +228,18 @@ for it in 1:maxit
             n_skipped += 1
             continue
         end
-        D = Symmetric(den[i][s, s]) + (1e-10 * tr(den[i]) / length(s)) * I
-        Λ_new[i, s] = D \ num[i][s]
+        # MAP: prior N(Λ_init[i,:], κ⁻¹ I) with κ = n0 × (information per observation)
+        κ = n0 > 0 ? n0 * tr(den[i]) / (length(s) * max(n_obs_per_coef[i], 1)) : 1e-10 * tr(den[i]) / length(s)
+        D = Symmetric(den[i][s, s]) + κ * I
+        Λ_new[i, s] = D \ (num[i][s] .+ κ .* Λ_init[i, s])
     end
     rel = norm(Λ_new - Λ_old) / max(norm(Λ_old), eps())
+    if rel > 5
+        big = sortperm(vec(sum(abs2, Λ_new - Λ_old; dims = 2)); rev = true)[1:min(8, n_coef)]
+        @error "loadings exploded at iteration $(it) (‖ΔΛ‖/‖Λ‖ = $(round(rel; sigdigits = 3))). Largest-moving rows (row, n_obs, max|Λ_new|, max|Λ_old|): " *
+               join(["($(i), $(n_obs_per_coef[i]), $(round(maximum(abs, Λ_new[i, :]); sigdigits = 3)), $(round(maximum(abs, Λ_old[i, :]); sigdigits = 3)))" for i in big], " ")
+        error("stopping — raise DD_KEM_PRIOR_OBS or inspect the smoothed-factor sd line above")
+    end
     push!(dtrace, rel)
     push!(Λ_hist, Λ_new)
     @info "iter $(lpad(it, 3)): loglik $(round(ll; digits = 2))  ‖ΔΛ‖/‖Λ‖ = $(round(rel; sigdigits = 3))" *
