@@ -688,7 +688,7 @@ function likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, 
         # When there is a cholesky error, return a very low likelihood and an alarm, so that the sampler can move on to the next draw.
     catch e
         # @warn "Error in get_priors: $e. Returning low likelihood and alarm."
-        return -1.e12, true
+        return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
     end
     push!(priors, hyperpriors...)
 
@@ -721,7 +721,7 @@ function likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, 
     mat_Ω_corr = Matrix(Ω_corr)
 
     if !all(isapprox(diag(mat_Ω_corr), ones(size(mat_Ω_corr, 1))))
-        return -1.e12, true
+        return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
     end
     Ω = Ω_var * mat_Ω_corr * Ω_var'  # reconstructing Ω
 
@@ -729,7 +729,7 @@ function likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, 
         # println("not in support")
         log_D = -1.e12
         tot_log_like = log_P + log_D
-        return tot_log_like, alarm
+        return smooth ? (nothing, tot_log_like, alarm) : (tot_log_like, alarm)
     end
 
     if aggregate_rep == :as_inputs
