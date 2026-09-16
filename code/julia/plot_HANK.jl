@@ -464,7 +464,12 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                     mse_val = sum((model_dm .- truth_dm).^2) / length(valid)
                     var_truth = var(truth_series[valid])
                     r2_raw = var_truth > 0 ? (1.0 - mse_val / var_truth) * 100 : NaN
-                    corr_dict["$(key)_r2"][group_names[si]] = isfinite(r2_raw) ? round(Int, r2_raw) : NaN
+                    if isfinite(r2_raw) && abs(r2_raw) < 1e6
+                        corr_dict["$(key)_r2"][group_names[si]] = round(Int, r2_raw)
+                    else
+                        corr_dict["$(key)_r2"][group_names[si]] = NaN
+                        isfinite(r2_raw) && @warn "cross-conditional $(key) $(sl): R² = $(round(r2_raw; sigdigits = 3)) — reconstructed cell is off-scale (model max |value| $(round(maximum(abs, model_normed[valid]); sigdigits = 3)))"
+                    end
                 else
                     corr_dict["$(key)_r2"][group_names[si]] = NaN
                 end
@@ -585,7 +590,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                                      1:length(truth_vals))
                     if length(valid_s) > 2
                         sample_corr_dict[sample_name][key][group_names[si]] =
-                            (c_ = cor(truth_vals[valid_s], sample_vals[valid_s]); isfinite(c_) ? round(Int, c_ * 100) : NaN)
+                            (c_ = cor(truth_vals[valid_s], sample_vals[valid_s]); isfinite(c_) && abs(c_) <= 1 ? round(Int, c_ * 100) : NaN)
 
                         # R² (detrended)
                         model_dm = sample_vals[valid_s] .- mean(sample_vals[valid_s])
@@ -593,7 +598,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                         mse_val = sum((model_dm .- truth_dm).^2) / length(valid_s)
                         var_truth = var(truth_vals[valid_s])
                         sample_corr_dict[sample_name]["$(key)_r2"][group_names[si]] = var_truth > 0 ?
-                            (isfinite(1.0 - mse_val / var_truth) ? round(Int, (1.0 - mse_val / var_truth) * 100) : NaN) : NaN
+                            (isfinite(1.0 - mse_val / var_truth) && abs(1.0 - mse_val / var_truth) < 1e4 ? round(Int, (1.0 - mse_val / var_truth) * 100) : NaN) : NaN
                     else
                         sample_corr_dict[sample_name][key][group_names[si]] = "--"
                         sample_corr_dict[sample_name]["$(key)_r2"][group_names[si]] = "--"
