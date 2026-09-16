@@ -165,7 +165,9 @@ if run_full
 
 # ── Step 6: FEVD (Decompositions appendix tables) ─────────────
 @info "Computing forecast error variance decomposition..."
-local Φ, Ω, r, q   # shared with Steps 7/9
+# shared with Steps 7/9 — top-level bindings; the `global` assignments inside
+# the try blocks write them (a `local` declaration here conflicts with those)
+Φ = nothing; Ω = nothing; r = 0; q = 0
 try
     r_dist = param_sizes[1][1]
     q_agg = param_sizes[2][2]
