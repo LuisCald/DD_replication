@@ -105,13 +105,18 @@ end
 # writes data/synthetic/smoothed_factor_draws.csv (+ a percentile-band file).
 # Heavy: runs the Kalman smoother once per draw. Set DD_EXPORT_DRAWS=0 to skip,
 # or DD_N_DRAWS to change the number of draws (default 200).
-if get(ENV, "DD_EXPORT_DRAWS", "1") != "0"
+# A tag whose loadings came from run_kalman_em.jl (or any mode-only tag) has no
+# chains: skip with a note rather than abort the rest of post-estimation.
+_draws_file = BASE_PATH * "/posterior_draws/" * m_label * "_" * tag * ".jld2"
+if get(ENV, "DD_EXPORT_DRAWS", "1") != "0" && isfile(_draws_file)
     @info "Exporting posterior factor draws..."
     n_draws = parse(Int, get(ENV, "DD_N_DRAWS", "200"))
     export_factor_draws(param_sizes, hyperpriors, Σ_ids, model_elements,
                         model_options, time_params; n_draws=n_draws)
     summarize_factor_draws()
     @info "Posterior factor draws exported."
+elseif get(ENV, "DD_EXPORT_DRAWS", "1") != "0"
+    @info "No posterior-draws file for this tag ($(basename(_draws_file))) — factor-draw export skipped (mode-only run)"
 end
 
 # ── Step 5: Correlation tables ────────────────────────────────
