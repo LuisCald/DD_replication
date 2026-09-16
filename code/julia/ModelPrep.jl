@@ -1963,6 +1963,26 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
                   "(run run_kalman_em.jl to produce it)"
         end
 
+        # ── Unit-variance scores ─────────────────────────────────────────
+        # X ≈ proj · pcs_s is invariant to a per-factor rescaling; fix the split
+        # so pcs_s has unit variance on the complete-case columns (the baseline
+        # convention). Not applied to Kalman-EM loadings, which must stay in the
+        # frame of the mode they were derived from.
+        unit_scores = hasproperty(model_options, :em_unit_scores) ? model_options.em_unit_scores : true
+        if unit_scores && !kem_present && hasproperty(model_options, :pca_method) && model_options.pca_method != :complete_cases
+            sds = vec(std(pcs_s; dims = 2))
+            ok = isfinite.(sds) .& (sds .> 0)
+            if any(ok)
+                proj[:, ok]  .= proj[:, ok] .* sds[ok]'
+                pcs_s[ok, :] .= pcs_s[ok, :] ./ sds[ok]
+                @info "Factor scores rescaled to unit variance on the complete-case columns (per-factor factors " *
+                      "$(round.(sds; sigdigits = 3))); loadings scaled up by the same amounts so proj·pcs_s is unchanged"
+            end
+        elseif !unit_scores && hasproperty(model_options, :pca_method) && model_options.pca_method != :complete_cases
+            @warn "em_unit_scores = false: factor scores are NOT unit-variance (sd $(round.(vec(std(pcs_s; dims = 2)); sigdigits = 3))) — " *
+                  "reproduces the pre-2026-09-17 :em scaling; the Minnesota aggregate↔factor prior blocks are mis-scaled accordingly"
+        end
+
         # ── Fix 1: per-coefficient weights for the copula measurement error ──
         # communality hᵢ = share of row i's variance the retained factors span.
         # Weighting the copula block's single variance by (1 - hᵢ) stops the
