@@ -1744,7 +1744,17 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # objects stay on the complete-case columns, so only Λ changes.
         M_load = M
         load_matrix = data_matrix          # columns the LOADINGS were estimated on
-        if hasproperty(model_options, :pca_method) && model_options.pca_method in (:em, :kalman_em)
+        # pca_method = :kalman_em: if run_kalman_em.jl has written loadings for
+        # this tag they REPLACE the final proj (they already embody whatever
+        # structure — copula factors, block layout — the source run had), so
+        # the EM completion, the block layout and Fix 3 are skipped below.
+        kem_present = false
+        kem_path = ""
+        if hasproperty(model_options, :pca_method) && model_options.pca_method == :kalman_em
+            kem_path = BASE_PATH * "/7_Results/$(measures_folder(measures))$tag/from_mcmc/parameter_vectors/kalman_em_loadings.csv"
+            kem_present = isfile(kem_path)
+        end
+        if hasproperty(model_options, :pca_method) && model_options.pca_method in (:em, :kalman_em) && !kem_present
             k_em = size(projection(M), 2)
             Xem, usable, iters, Δ = em_complete(pool, k_em)
             if size(Xem, 2) > size(data_matrix, 2)
@@ -1852,39 +1862,13 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # proj  = projection(M) * sqrt.(Diagonal(pcs * pcs'))
         # pcs_s = pcs ./ sqrt.(diag(pcs * pcs')) 
 
-        # ── Kalman-EM loadings (pca_method = :kalman_em) ─────────────────
-        # run_kalman_em.jl holds A, Ω, Σ at an estimated mode, smooths the
-        # factors over every quarter from every dataset, and re-estimates Λ
-        # by a pooled regression of the coefficients on that path. If it has
-        # written the result for this tag, use it; otherwise fall through
-        # with the :em initialisation (the driver itself runs in that state).
-        if hasproperty(model_options, :pca_method) && model_options.pca_method == :kalman_em
-            kem_path = BASE_PATH * "/7_Results/$(measures_folder(measures))$tag/from_mcmc/parameter_vectors/kalman_em_loadings.csv"
-            if isfile(kem_path)
-                Λk = Matrix{Float64}(readdlm(kem_path, ','))
-                if size(Λk, 1) == size(proj, 1)
-                    proj = Λk
-                    # least-squares scores on the complete-case columns, same
-                    # role as transform(M)./λ for the PCA loadings
-                    pcs_s = (proj' * proj + 1e-10I) \ (proj' * data_matrix)
-                    @info "Kalman-EM loadings loaded from $(basename(kem_path)): $(size(proj, 2)) factors, " *
-                          "$(size(proj, 1)) rows (replaces the :em initialisation; frame kept as-is)"
-                else
-                    @warn "Kalman-EM loadings at $(kem_path) have $(size(Λk, 1)) rows, pool has $(size(proj, 1)) — ignored"
-                end
-            else
-                @info "pca_method = :kalman_em: no kalman_em_loadings.csv for this tag yet — using the :em initialisation " *
-                      "(run run_kalman_em.jl to produce it)"
-            end
-        end
-
         # ── Block-diagonal loadings (loading_structure = :block) ─────────
         # Separate projections for the copula rows and the marginal rows, so
         # each block's directions are chosen to explain IT. Under :joint the
         # 1694 copula rows carry ~98% of the pooled variance and the 36
         # marginal rows have almost no say; the EM rank CV showed the marginal
         # block losing directions outright when copula-serving factors enter.
-        if hasproperty(model_options, :loading_structure) && model_options.loading_structure == :block
+        if hasproperty(model_options, :loading_structure) && model_options.loading_structure == :block && !kem_present
             cp_b, imm_b = retrieve_cop_and_imm_part(model_options.estimator, length(measures))
             gp_b = cp_b - imm_b
             n_rows = size(load_matrix, 1)
@@ -1920,7 +1904,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         # matrix is block-triangular (doc/copula_identification.tex, eq. 11)
         # and the new factors cannot contaminate the marginals. Everything
         # downstream reads the factor count off size(proj, 2).
-        n_cf = (hasproperty(model_options, :loading_structure) && model_options.loading_structure == :block) ? 0 :
+        n_cf = (kem_present || (hasproperty(model_options, :loading_structure) && model_options.loading_structure == :block)) ? 0 :
                (hasproperty(model_options, :n_copula_factors) ? Int(model_options.n_copula_factors) : 0)
         if n_cf > 0
             cop_part_cf, imm_cf = retrieve_cop_and_imm_part(model_options.estimator, length(measures))
@@ -1951,6 +1935,32 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
                     @warn "n_copula_factors = $(n_cf) requested but the copula residual has too few columns — skipping"
                 end
             end
+        end
+
+        # ── Kalman-EM loadings (pca_method = :kalman_em) ─────────────────
+        # Loaded AS-IS: the driver held A, Ω, Σ at the source mode, so Λ is in
+        # that mode's factor frame and must not be re-rotated here. Scores are
+        # least squares on the complete-case columns (the role transform./λ
+        # plays for PCA loadings). Placed after the structural blocks so
+        # nothing overwrites or re-augments it; before Fix 1 so the
+        # communality weights are computed from the loadings actually used.
+        if kem_present
+            Λk = Matrix{Float64}(readdlm(kem_path, ','))
+            if size(Λk, 1) == size(proj, 1)
+                proj = Λk
+                gram = proj' * proj
+                ridge = 1e-8 * tr(gram) / max(size(gram, 1), 1)      # relative, not absolute
+                pcs_s = (gram + ridge * I) \ (proj' * data_matrix)
+                @info "Kalman-EM loadings loaded from $(basename(kem_path)) (written $(Dates.format(Dates.unix2datetime(mtime(kem_path)), "yyyy-mm-dd HH:MM"))): " *
+                      "$(size(proj, 2)) factors, $(size(proj, 1)) rows, cond(Λ) = $(round(cond(proj); sigdigits = 3)). " *
+                      "EM completion, block layout and copula-factor augmentation skipped; frame kept as-is."
+            else
+                @warn "Kalman-EM loadings at $(kem_path) have $(size(Λk, 1)) rows, pool has $(size(proj, 1)) — ignored"
+                kem_present = false
+            end
+        elseif hasproperty(model_options, :pca_method) && model_options.pca_method == :kalman_em
+            @info "pca_method = :kalman_em: no kalman_em_loadings.csv for this tag yet — using the :em initialisation " *
+                  "(run run_kalman_em.jl to produce it)"
         end
 
         # ── Fix 1: per-coefficient weights for the copula measurement error ──
