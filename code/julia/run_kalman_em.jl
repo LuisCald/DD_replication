@@ -56,6 +56,15 @@
 #                      on five smoothed factors from twelve points is noise
 #                      (R² ≈ 45% under the null) — the first run's 40–56×
 #                      "explosion" was exactly these rows.
+#   DD_KEM_DAMP        step damping α in Λ_{k+1} = Λ_k + α (Λ_MAP − Λ_k)
+#                      (default 0.5). The raw-data M-step and the whitened
+#                      E-step optimise slightly different objectives, so the
+#                      undamped iteration overshoots: the first full run rose
+#                      ~1000 log-points in 3 iterations, then oscillated with
+#                      growing swings and blew up at iteration 29.
+#   DD_KEM_PATIENCE    stop after this many iterations without a new best
+#                      likelihood (default 5). The SAVED loadings are always
+#                      the best-likelihood iterate, never the last one.
 #   DD_KEM_POST        1 (default) = hand off to run_postestimation.jl after
 # Output (under this tag's from_mcmc/parameter_vectors/):
 #   kalman_em_loadings.csv   the new Λ (rows = coefficients, cols = factors)
@@ -77,6 +86,8 @@ src_tag  = get(ENV, "DD_KEM_SOURCE_TAG", replace(tag, " kem" => ""))
 maxit    = parse(Int, get(ENV, "DD_KEM_ITERS", "50"))
 tol      = parse(Float64, get(ENV, "DD_KEM_TOL", "1e-5"))
 n0       = parse(Float64, get(ENV, "DD_KEM_PRIOR_OBS", "12"))
+α_damp   = parse(Float64, get(ENV, "DD_KEM_DAMP", "0.5"))
+patience = parse(Int, get(ENV, "DD_KEM_PATIENCE", "5"))
 min_obs_env = get(ENV, "DD_KEM_MIN_OBS", "")
 premult  = hasproperty(model_options, :pre_multiply) ? model_options.pre_multiply : true
 @info "this tag   : $(tag)"
@@ -202,6 +213,11 @@ end
 trace  = Float64[]
 dtrace = Float64[]
 blk(l) = (l - 1) * r + 1 : l * r
+Λ_best  = copy(proj)          # the iterate with the highest likelihood is what gets saved
+ll_best = -Inf
+it_best = 0
+stall   = 0
+procrustes_rem(A, B) = (F = svd(B' * A); norm(A - B * (F.U * F.Vt)) / max(norm(A), eps()))
 
 for it in 1:maxit
     out = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth = true)
@@ -209,6 +225,11 @@ for it in 1:maxit
     sm, ll, alarm = out
     alarm && error("smoother alarm at iteration $(it) — the mode is inconsistent with the updated loadings")
     push!(trace, ll)
+    if ll > ll_best + 1e-6
+        global ll_best = ll; global it_best = it; global Λ_best = copy(Λ_old); global stall = 0
+    else
+        global stall += 1
+    end
     it == 1 && abs(ll - ll0) > 1e-6 &&
         @info "note: likeli(smooth=true) at the same parameters gives $(round(ll; digits = 2)) vs $(round(ll0; digits = 2)) from the plain filter (Δ = $(round(ll - ll0; digits = 2))) — pre-existing difference between the forward and smoother recursions; the trace uses the smoother's value throughout"
     X = sm.x_smoothed
@@ -268,7 +289,15 @@ for it in 1:maxit
         D = Symmetric(den[i][s, s]) + κ * I
         Λ_new[i, s] = row_sd[i] .* (D \ (num[i][s] ./ row_sd[i] .+ κ .* Λ_init[i, s] ./ row_sd[i]))
     end
+    # damped step (the undamped MAP target is what the stale-G self-check compares:
+    # with damping, consecutive Λ differ even when the smoother never moved)
+    Λ_map = copy(Λ_new)
+    Λ_new = Λ_old .+ α_damp .* (Λ_new .- Λ_old)
     rel = norm(Λ_new - Λ_old) / max(norm(Λ_old), eps())
+    if n_skipped == n_coef
+        @warn "iteration $(it): no row could be updated (the smoother returned a degenerate path) — stopping; keeping the best iterate"
+        break
+    end
     if rel > 5
         big = sortperm(vec(sum(abs2, Λ_new - Λ_old; dims = 2)); rev = true)[1:min(8, n_coef)]
         @error "loadings exploded at iteration $(it) (‖ΔΛ‖/‖Λ‖ = $(round(rel; sigdigits = 3))). Largest-moving rows (row, n_obs, max|Λ_new|, max|Λ_old|): " *
@@ -276,19 +305,36 @@ for it in 1:maxit
         error("stopping — raise DD_KEM_PRIOR_OBS or inspect the smoothed-factor sd line above")
     end
     push!(dtrace, rel)
-    push!(Λ_hist, Λ_new)
-    @info "iter $(lpad(it, 3)): loglik $(round(ll; digits = 2))  ‖ΔΛ‖/‖Λ‖ = $(round(rel; sigdigits = 3))" *
-          (n_skipped > 0 ? "  ($(n_coef - n_skipped) rows updated)" : "") *
-          (it > 1 && ll < trace[end-1] - 1e-6 ? "   (likelihood dipped — allowed for this generalized-EM step, watch that it does not trend down)" : "")
+    push!(Λ_hist, Λ_map)
+    @info "iter $(lpad(it, 3)): loglik $(round(ll; digits = 2))$(it == it_best ? " ★" : "")  ‖ΔΛ‖/‖Λ‖ = $(round(rel; sigdigits = 3))  " *
+          "drift vs init (after best rotation) $(round(procrustes_rem(Λ_new, Λ_init); sigdigits = 3))" *
+          (n_skipped > 0 ? "  ($(n_coef - n_skipped) rows updated)" : "")
     rebuild_G!(model_elements, Λ_new, W, r, n_coef, n_dfs, N_dist, y_full_raw, Σ̂⁻¹², premult)
     global Λ_old = Λ_new
-    rel < tol && (@info "converged at iteration $(it)"; break)
+    if rel < tol
+        @info "converged at iteration $(it) (Λ change below $(tol))"; break
+    end
+    if stall >= patience
+        @info "no likelihood improvement for $(patience) iterations — stopping; best was iteration $(it_best)"; break
+    end
 end
+# the loop's last E-step evaluated Λ_old before the final M-step; score that one too
+let out = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth = false)
+    ll_last = out[1]
+    if isfinite(ll_last) && ll_last > ll_best + 1e-6
+        global ll_best = ll_last; global it_best = length(trace) + 1; global Λ_best = copy(Λ_old)
+    end
+end
+@info "best iterate: $(it_best) with log-likelihood $(round(ll_best; digits = 2)) — saving that one" *
+      (it_best == 0 ? "  ⚠ no iterate beat the start; the initial loadings are kept" : "")
+it_best == 0 && (global Λ_best = copy(Λ_init))
+rebuild_G!(model_elements, Λ_best, W, r, n_coef, n_dfs, N_dist, y_full_raw, Σ̂⁻¹², premult)
+global Λ_old = Λ_best
 
 # self-check: the second E-step must have seen the first M-step (a stale G in
 # the smoother reproduces the first update exactly and 'converges' at once)
 if length(Λ_hist) >= 2 && Λ_hist[2] == Λ_hist[1]
-    error("iteration 2 reproduced iteration 1 exactly — the smoother did not see the updated loadings (stale G)")
+    error("the M-step target at iteration 2 reproduced iteration 1 exactly — the smoother did not see the updated loadings (stale G)")
 end
 ll_end, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options)
 @info "log-likelihood: $(round(ll0; digits = 2)) → $(round(ll_end; digits = 2))  (Δ = $(round(ll_end - ll0; digits = 2)), Λ only, dynamics fixed)"
@@ -343,7 +389,8 @@ end
 # ── save under THIS tag; copy the source mode next to it for run_postestimation
 mkpath(out_dir)
 writedlm(kem_file, Λ_old, ',')
-writedlm(joinpath(out_dir, "kalman_em_trace.csv"), hcat(1:length(trace), trace, dtrace), ',')
+writedlm(joinpath(out_dir, "kalman_em_trace.csv"), vcat(["iter" "loglik" "rel_change" "is_best"],
+         hcat(1:length(trace), trace, vcat(dtrace, fill(NaN, length(trace) - length(dtrace))), (1:length(trace)) .== it_best)), ',')
 fname   = "solution$label" * "_$end_year" * ".csv"
 src_sol = BASE_PATH * "/7_Results/$m_label" * "$src_tag" * "/from_mcmc/parameter_vectors/" * fname
 if isfile(src_sol)
