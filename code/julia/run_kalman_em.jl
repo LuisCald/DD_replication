@@ -294,6 +294,37 @@ ll_end, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, 
 @info "log-likelihood: $(round(ll0; digits = 2)) → $(round(ll_end; digits = 2))  (Δ = $(round(ll_end - ll0; digits = 2)), Λ only, dynamics fixed)"
 ll_end == ll0 && @warn "the likelihood did not change at all — check that the loadings actually entered the model"
 
+# ── fitted-value scale check per object: sd(Λ_new · f̂) vs sd(y_raw) on the
+#    observed cells. A ratio far from 1 for some object means its rows' new
+#    loadings are off-scale and the reconstruction will blow up through sinh.
+let
+    sm_f, _, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth = true)
+    Xf = sm_f.x_smoothed[1:r, :]
+    fit_raw = Λ_old * Xf                                       # n_coef × T, dataset-invariant part
+    cp_s, imm_s = retrieve_cop_and_imm_part(model_options.estimator, length(measures))
+    gp_s = cp_s - imm_s
+    n_q = (n_coef - gp_s) ÷ length(measures)
+    fit_init = Λ_init * Xf
+    objs = Tuple{String,UnitRange{Int}}[("copula", 1:gp_s)]
+    for (k, m) in enumerate(measures)                # pcf blocks follow the copula in `measures` order (id_dict in set_measurements)
+        push!(objs, (m, gp_s + (k - 1) * n_q + 1 : gp_s + k * n_q))
+    end
+    for (nm, rows) in objs
+        sd_new = Float64[]; sd_old = Float64[]; sd_dat = Float64[]
+        for j in 1:n_dfs
+            ρs = (j - 1) * n_coef .+ rows
+            m = obs_mask[ρs, :]
+            count(m) > 1 || continue
+            push!(sd_new, std(fit_raw[rows, :][m])); push!(sd_old, std(fit_init[rows, :][m])); push!(sd_dat, std(y_raw[ρs, :][m]))
+        end
+        isempty(sd_dat) && continue
+        ratio_new = mean(sd_new) / max(mean(sd_dat), eps())
+        ratio_old = mean(sd_old) / max(mean(sd_dat), eps())
+        msg = "fitted-value scale — $(nm): sd(Λ·f̂)/sd(y) = $(round(ratio_new; sigdigits = 3)) with the new loadings, $(round(ratio_old; sigdigits = 3)) with the initial ones"
+        (ratio_new > 3 || ratio_new < 0.1) ? (@warn msg * "   ⚠ off-scale — the reconstruction of this object will be wrong") : (@info msg)
+    end
+end
+
 # ── what moved, and how much of it is rotation
 cp_k, imm_k = retrieve_cop_and_imm_part(model_options.estimator, length(measures))
 gp = cp_k - imm_k
