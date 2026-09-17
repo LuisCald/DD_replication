@@ -71,6 +71,12 @@ if haskey(ENV, "DD_PERSIST_TARGET")
           "joint radius $(round(_pc.joint0; digits = 3)) → $(round(_pc.joint1; digits = 3)); innovation sds × $(round(_pc.g; digits = 3)); " *
           "log-lik $(round(_ll_before; digits = 1)) → $(round(_ll_after; digits = 1))$(_alarm ? "  ⚠ ALARM" : "")"
     report_mode_dynamics(par_final, param_sizes, model_options)
+    _alarm && error("persistence counterfactual: the modified parameters are rejected by the likelihood — no point reconstructing")
+    let sm_cf = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth = true)[1]
+        xmax = maximum(abs, sm_cf.x_smoothed)
+        xmax > 1e3 && error("persistence counterfactual: smoothed states reach $(round(xmax; sigdigits = 3)) — the smoother has degenerated (a near-singular state direction); reconstruction would be garbage. Try a lower target, or DD_PERSIST_KEEPVAR=0 if it was on.")
+        @info "persistence counterfactual: smoothed path sane (max |x| = $(round(xmax; sigdigits = 3)))"
+    end
     model_options.tag = tag * " persist$(ENV["DD_PERSIST_TARGET"])"
     tag = model_options.tag
     @info "outputs go to tag: $(tag)"
