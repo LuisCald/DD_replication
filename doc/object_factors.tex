@@ -1,0 +1,418 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\cop}{\mathrm{cop}}
+\newcommand{\pcf}{\mathrm{pcf}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\obs}{\mathrm{obs}}
+\newcommand{\diag}{\mathrm{diag}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\R}{\mathbb{R}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+\title{Shared and object-specific factors\\
+\large A hierarchical factor structure for surveys that observe different objects}
+\author{Design note}
+\date{September 18, 2026}
+
+\begin{document}
+\maketitle
+
+\section{Purpose}\label{sec:purpose}
+
+The estimated model has one factor space. Every survey's coefficients are
+$\Lambda f_t$ plus measurement error, and whatever a survey shows that the space
+cannot carry is called noise. Two symptoms of that, both established in the
+HANK exercise, motivate this note:
+\begin{enumerate}[leftmargin=*]
+  \item The measurement-error multiplier on PSID's copula settles at $30$--$34$
+        in every specification, i.e.\ the model treats the one survey that
+        observes the full dependence structure as $30\times$ noisier than its
+        bootstrap says. The conditional cells fail \emph{at} PSID's wave dates,
+        not between them.
+  \item The reconstructed series blip at PSID's wave quarters whenever the
+        loadings are not PSID's own (every EM-based run; none of the
+        complete-case runs): the arrival of $1{,}730$ coefficients every eighth
+        quarter jolts the shared factors.
+\end{enumerate}
+Both are one conflict: PSID's wave-frequency information about the 3D copula
+and the quarterly surveys' information about income want different factor
+spaces, and the model has only one. The proposal is to give each \emph{object}
+--- a marginal, a 2D copula slice, the 3D copula --- its own small block of
+factors on top of the shared ones. Objects, not datasets, are the unit, because
+an object has one set of dynamics and the datasets are partial, noisy views of
+it: the income--wealth slice is seen by PSID, SCF and SIPP, and an
+object-specific factor pools all three.
+
+Section \ref{sec:objects} defines the objects and shows the partition is
+already present in the coefficient indexing. Sections
+\ref{sec:measurement}--\ref{sec:state} give the model. Section
+\ref{sec:ident} is identification, Section \ref{sec:loadings} the estimation of
+the new loadings, Section \ref{sec:recon} the reconstruction, Section
+\ref{sec:why} why this does not repeat the block-diagonal failure, and Section
+\ref{sec:minimal} the minimal version to run first.
+
+\section{Objects and the partition of the coefficient vector}\label{sec:objects}
+
+\paragraph{Measures and datasets.} There are $D$ measures (here $D = 3$:
+consumption, income, wealth) and $J$ datasets (here $J = 5$). Dataset $j$
+observes a subset $\mathcal{M}_j \subseteq \{1,\ldots,D\}$ of the measures on a
+set of dates $\mathcal{T}_j \subseteq \{1,\ldots,T\}$.
+
+\paragraph{Coefficients.} At each date, a dataset that observes all $D$
+measures delivers
+\begin{equation}
+  \theta_{j,t} = \bigl(\theta^{\cop}_{j,t},\;\theta^{\pcf}_{j,t}\bigr) \in \R^{n},
+  \qquad n = n_c + n_q ,
+\end{equation}
+the Legendre coefficients of the copula density and of the $D$ marginal
+percentile functions. With $K$ Legendre degrees per dimension ($K = 12$,
+degrees $0,\ldots,K-1$) and $G$ degrees per percentile function ($G = 12$):
+\begin{itemize}[leftmargin=*]
+  \item The copula tensor has $K^D = 1{,}728$ entries indexed by degree triples
+        $(k_1,k_2,k_3)$, $k_d \in \{0,\ldots,K-1\}$. Entries with two or three
+        zero indices are fixed by the uniform-marginal constraint (the
+        ``immutable'' part): $1 + D(K-1) = 34$ of them. The free copula
+        coefficients number $n_c = 1{,}728 - 34 = 1{,}694$.
+  \item The marginals contribute $n_q = D\cdot G = 36$ coefficients.
+\end{itemize}
+
+\paragraph{The partition.} Classify each free copula coefficient by which of its
+degree indices are zero. A zero index in dimension $d$ means the coefficient
+does not vary with measure $d$, i.e.\ it belongs to the copula
+\emph{marginalized over} $d$. Hence:
+\begin{equation}
+\begin{aligned}
+  \mathcal{O}_{\mathrm{3D}}  &= \{(k_1,k_2,k_3): k_1,k_2,k_3 \ge 1\}, &&|\mathcal{O}_{\mathrm{3D}}| = (K-1)^3 = 1{,}331, \\
+  \mathcal{O}_{\{d,d'\}}     &= \{(k_1,k_2,k_3): k_d,k_{d'} \ge 1,\ k_{d''} = 0\}, &&|\mathcal{O}_{\{d,d'\}}| = (K-1)^2 = 121 \ \text{each, three of them},\\
+  \mathcal{O}_{d}^{\pcf}     &= \text{the $G$ percentile-function coefficients of measure $d$}, &&|\mathcal{O}_d^{\pcf}| = 12 \ \text{each, three of them}.
+\end{aligned}
+\end{equation}
+Check: $1{,}331 + 3\cdot 121 + 3\cdot 12 = 1{,}730 = n$. The seven sets are
+disjoint and exhaustive. Call them the \textbf{objects}, indexed by
+$o \in \mathcal{O} = \{\mathrm{3D},\ \{C,I\},\ \{C,W\},\ \{I,W\},\ C^{\pcf},\ I^{\pcf},\ W^{\pcf}\}$,
+with row-index sets $\mathcal{R}_o \subset \{1,\ldots,n\}$ and sizes
+$n_o = |\mathcal{R}_o|$.
+
+\paragraph{Which dataset observes which object.} Dataset $j$ observes object $o$
+iff every measure the object involves is in $\mathcal{M}_j$:
+\begin{equation}
+  \obs(j) = \bigl\{ o : \mathrm{meas}(o) \subseteq \mathcal{M}_j \bigr\},
+  \qquad
+  \mathrm{meas}(\mathrm{3D}) = \{C,I,W\},\ \ \mathrm{meas}(\{d,d'\}) = \{d,d'\},\ \ \mathrm{meas}(d^{\pcf}) = \{d\}.
+\end{equation}
+For the HANK replicas:
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+dataset & measures & objects observed & dates \\
+\midrule
+a (PSID)  & $C,I,W$ & all seven                                & 12 biennial waves \\
+b (CPS)   & $I$     & $I^{\pcf}$                              & quarterly \\
+c (CEX)   & $C,I$   & $C^{\pcf}, I^{\pcf}, \{C,I\}$          & quarterly \\
+d (SCF)   & $I,W$   & $I^{\pcf}, W^{\pcf}, \{I,W\}$          & 9 triennial waves \\
+e (SIPP)  & $I,W$   & $I^{\pcf}, W^{\pcf}, \{I,W\}$          & quarterly ($W$ annual) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two facts follow that drive everything below. The 3D object is observed by one
+dataset on twelve dates. The $\{I,W\}$ slice --- the object the
+\code{wealth\_by\_income} cells are computed from together with the 3D block ---
+is observed by three datasets, one of them quarterly.
+
+\section{Measurement equation}\label{sec:measurement}
+
+\paragraph{Standardization.} As in the current model, each dataset's
+coefficients are centred and scaled per object before estimation:
+$\tilde\theta_{j,t} = S_j^{-1}(\theta_{j,t} - \mu_j)$, with $\mu_j \in \R^n$
+the dataset's time mean and $S_j = \diag(s_{j,1},\ldots,s_{j,n})$ one scale per
+(dataset, object), broadcast over the object's rows. Rows for objects
+$\notin \obs(j)$ are missing (NaN) at every date.
+
+\paragraph{States.} Let $f_t \in \R^{r}$ be the shared distributional factors
+and, for each object $o$, $g_{o,t} \in \R^{r_o}$ its object-specific factors
+($r_o \ge 0$; $r_o = 0$ means the object has none). Let $a_t \in \R^{q}$ be the
+aggregate factors as now.
+
+\paragraph{Loadings.} $\Lambda \in \R^{n\times r}$ is the shared loading matrix,
+as now. For each object, $\Lambda_o \in \R^{n_o\times r_o}$ is its specific
+loading matrix; embed it in $\R^{n\times r_o}$ as $\bar\Lambda_o$ with rows
+$\mathcal{R}_o$ equal to $\Lambda_o$ and \emph{all other rows exactly zero}.
+
+\paragraph{The equation.} For dataset $j$ at date $t$,
+\begin{equation}
+  \tilde\theta_{j,t}
+  \;=\; H_{j,t}\Bigl( \Lambda f_t \;+\; \sum_{o\in\mathcal{O}} \bar\Lambda_o\, g_{o,t} \Bigr) \;+\; e_{j,t},
+  \qquad e_{j,t}\sim N\bigl(0, \Sigma_j\bigr),
+  \label{eq:meas}
+\end{equation}
+where $H_{j,t}$ is the diagonal selection matrix that keeps the rows observed by
+$j$ at $t$ (zero rows for unobserved objects and for dates $t\notin\mathcal{T}_j$)
+and $\Sigma_j = \diag(\sigma^2_{j,o}\mathbf{1}_{n_o})_{o}$ carries one variance
+per (dataset, object) as now. Because $\bar\Lambda_o$ is zero outside
+$\mathcal{R}_o$, the sum over $o$ contributes to dataset $j$'s rows only through
+the objects $j$ observes: the $\{I,W\}$ factor enters PSID's, SCF's and SIPP's
+income--wealth rows and nothing else; the 3D factor enters PSID's 3D rows only.
+
+Stacking datasets, the observation vector $y_t \in \R^{N}$, $N = \sum_j n$,
+has measurement matrix
+\begin{equation}
+  G_t = H_t\,\bigl[\; \Gamma\ \ \bar\Gamma_{o_1}\ \cdots\ \bar\Gamma_{o_7} \;\bigr],
+  \qquad
+  \Gamma = \begin{pmatrix}\Lambda\\ \vdots\\ \Lambda\end{pmatrix},\ \
+  \bar\Gamma_o = \begin{pmatrix}\bar\Lambda_o\\ \vdots\\ \bar\Lambda_o\end{pmatrix}
+  \quad(J\ \text{copies}),
+\end{equation}
+i.e.\ exactly the present $G_t$ with $\sum_o r_o$ extra columns. Under
+\code{pre\_multiply} the same $\hat\Sigma^{-1/2}$ whitening is applied to
+$y_t$ and to every column of $G_t$, new ones included. Annual ``tent''
+observations (PSID flows) load $\tfrac14$ on each of four lags of $f$; the same
+tent applies to $g_o$, which is why the specific states carry the same lag
+chain as $f$ in Section \ref{sec:state}.
+
+\section{State equation}\label{sec:state}
+
+\paragraph{Shared block (unchanged).} With $F_t = (f_t, f_{t-1}, f_{t-2}, f_{t-3})$,
+\begin{equation}
+  \begin{pmatrix} f_t \\ a_t \end{pmatrix}
+  = \begin{pmatrix} A & B \\ C & D \end{pmatrix}
+    \begin{pmatrix} f_{t-1} \\ a_{t-1} \end{pmatrix} + \eta_t,
+  \qquad \eta_t \sim N(0,\Omega),\quad
+  \Omega = \begin{pmatrix}\Omega_f & \Omega_{fa}\\ \Omega_{af} & \Omega_a\end{pmatrix},
+\end{equation}
+$\Omega$ full (LKJ-correlated) as now; the stochastic-trend block, if used,
+augments $f$ as before.
+
+\paragraph{Object-specific blocks.} Each $g_{o,t}$ is an independent stationary
+AR(1):
+\begin{equation}
+  g_{o,t} = \Phi_o\, g_{o,t-1} + \zeta_{o,t},
+  \qquad \zeta_{o,t}\sim N\bigl(0,\ \diag(\omega_{o,1}^2,\ldots,\omega_{o,r_o}^2)\bigr),
+  \qquad \Phi_o = \diag(\phi_{o,1},\ldots,\phi_{o,r_o}),\ \ |\phi_{o,\ell}| < 1,
+  \label{eq:specific}
+\end{equation}
+with $\zeta_{o,t}$ independent across objects, across factors within an object,
+and of $\eta_t$. In the full state vector
+\begin{equation}
+  x_t = \bigl(F_t,\ a_t,\ G_{o_1,t},\ \ldots,\ G_{o_7,t}\bigr),
+  \qquad G_{o,t} = (g_{o,t}, g_{o,t-1}, g_{o,t-2}, g_{o,t-3}),
+\end{equation}
+the transition and innovation covariance are block-diagonal between the shared
+block and every specific block:
+\begin{equation}
+  \mathcal{A} = \mathrm{blkdiag}\Bigl(\begin{pmatrix} A&B\\C&D\end{pmatrix}_{\text{with lag chain}},\ \Phi_{o_1}^{\text{lag}},\ \ldots\Bigr),
+  \qquad
+  \mathcal{Q} = \mathrm{blkdiag}\bigl(\Omega,\ \diag(\omega^2_{o_1}),\ \ldots\bigr).
+\end{equation}
+The specific blocks do not load on the aggregates ($C$-type rows zero) and are
+not driven by them ($B$-type rows zero): by construction they carry what is
+\emph{specific} to an object after the economy-wide movement has been taken by
+$f$. Section \ref{sec:ident} explains why these zeros are not optional.
+
+\paragraph{Dimensions.} With $r$ shared factors, $q$ aggregates and $\sum_o r_o$
+specifics, the state has $4r + q + 4\sum_o r_o$ entries. Parameters added
+relative to the current model: $2\sum_o r_o$ (one $\phi$ and one $\omega$ per
+specific factor). Nothing is added to $\Omega$'s correlation block, which is
+where extra \emph{shared} factors cost $O((r+q)^2)$.
+
+\section{Identification}\label{sec:ident}
+
+Three indeterminacies must be pinned down; the first is the one that decides
+whether the extension means anything.
+
+\paragraph{(i) Shared versus specific.} Without restrictions, an object's
+specific factor is observationally equivalent to a shared factor whose loadings
+happen to be zero outside $\mathcal{R}_o$; the model would be free to move
+variation between $f$ and $g_o$, and a sampler facing a spare direction switches
+it off (the 6-factor run did exactly that). The restriction that separates them
+is the block-diagonality of \eqref{eq:specific}: $g_o$ is uncorrelated with
+$\eta_t$ at all leads and lags and is not driven by $a_t$. Then the shared block
+is the unique component that (a) is common to several objects and (b) comoves
+with the aggregates, and $g_o$ is what remains in object $o$ after that
+component is removed. Formally, for any two objects observed together in some
+dataset, the cross-covariance of their coefficients at all leads and lags is
+carried by $f$ alone,
+\begin{equation}
+  \mathrm{Cov}\bigl(\tilde\theta_{\mathcal{R}_o,t},\ \tilde\theta_{\mathcal{R}_{o'},t-h}\bigr)
+  = \Lambda_{\mathcal{R}_o}\,\Gamma_f(h)\,\Lambda_{\mathcal{R}_{o'}}^{\top}
+  \qquad (o\ne o'),
+\end{equation}
+so cross-object comovement identifies $\Lambda$ and the shared dynamics, and
+the within-object autocovariance in excess of that identifies $\Lambda_o$,
+$\Phi_o$, $\omega_o$.
+
+\paragraph{(ii) Rotation and scale.} Within the shared block, rotation is fixed
+by the PCA normalization of $\Lambda$ as now (orthogonal columns, ordered).
+Within each specific block, the columns of $\Lambda_o$ are taken orthogonal and
+ordered, and the scale is fixed by unit-variance scores on the columns the
+loadings are estimated from --- the same convention as for $\Lambda$ (Section
+\ref{sec:loadings}). With that, $\omega_{o,\ell}$ is the innovation sd of a
+unit-scale factor and comparable across objects.
+
+\paragraph{(iii) The 3D block is observed twelve times.} Between PSID waves
+$g_{\mathrm{3D}}$ is unobserved. The likelihood therefore depends on
+$\phi_{\mathrm{3D}}$ only through the eight-quarter transitions between
+consecutive waves, i.e.\ through $\phi_{\mathrm{3D}}^{8}$ and the accumulated
+variance $\omega_{\mathrm{3D}}^2(1-\phi^{16}_{\mathrm{3D}})/(1-\phi^2_{\mathrm{3D}})$,
+from eleven wave-to-wave pairs. Persistence and innovation scale are nearly
+unidentified separately. They must be fixed or given a tight prior:
+\begin{equation}
+  \phi_{\mathrm{3D}} \equiv \bar\phi \in [0.95, 0.99]
+  \quad\text{(fixed, or } \phi_{\mathrm{3D}} \sim \text{a prior concentrated there)},
+  \qquad \omega_{\mathrm{3D}} \text{ estimated}.
+\end{equation}
+This is the intended behaviour, not a limitation: a near-random-walk
+$g_{\mathrm{3D}}$ \emph{holds} what PSID showed at the last wave until the next
+one, blending it into the path instead of letting it decay in two quarters and
+be discounted. The $\{I,W\}$ factor is observed quarterly by SIPP and its
+$\phi$ can be estimated.
+
+\paragraph{(iv) What is \emph{not} identified, and is not needed.} The
+decomposition of a \emph{single} object's variance into shared and specific is
+identified only through the shared block's comovement with other objects. An
+object observed by one dataset that shares no measure with any other would have
+an unidentified split; none of the seven objects is in that position (every
+object shares at least one measure with a quarterly survey).
+
+\section{Estimating the loadings}\label{sec:loadings}
+
+\paragraph{Shared loadings.} $\Lambda$ is estimated exactly as now: complete-case
+PCA, EM completion, or the Kalman-EM refinement on the rows other surveys
+observe. Nothing in this note changes that step.
+
+\paragraph{Specific loadings.} Let $\hat F$ be the shared factor path used to
+estimate $\Lambda$ (the PCA scores, or the smoothed path under Kalman-EM), and
+let $X_o$ be the pooled data matrix restricted to the rows $\mathcal{R}_o$ and to
+the columns (dataset, date) at which object $o$ is observed. The residual after
+the shared factors,
+\begin{equation}
+  R_o = X_o - \Lambda_{\mathcal{R}_o}\,\hat F_{\cdot,\mathrm{cols}(o)},
+\end{equation}
+is what $g_o$ has to explain. Take its leading $r_o$ principal components:
+\begin{equation}
+  \Lambda_o = U_o\,\mathrm{diag}(\lambda_{o,1},\ldots,\lambda_{o,r_o}),
+  \qquad R_o \approx U_o\,\mathrm{diag}(\lambda_o)\,V_o^{\top},
+\end{equation}
+with the columns rescaled so the scores $V_o^{\top}$ have unit variance on the
+columns used. Two remarks. First, $R_o$ pools every dataset observing $o$: for
+$\{I,W\}$ that is PSID's twelve waves, SCF's nine and SIPP's quarters ---
+several hundred columns, dominated by the surveys that see the object best.
+Second, for the 3D block $R_{\mathrm{3D}}$ has PSID's twelve columns only, so
+$\Lambda_{\mathrm{3D}}$ is a twelve-column PCA of PSID's residual --- the same
+information as the complete-case loadings, which is unavoidable and is
+precisely why the 3D factor must be persistent: it cannot be re-estimated
+between waves, only carried.
+
+\paragraph{Orthogonality in the sample.} Because $R_o$ is a residual on the
+shared fit, its scores are orthogonal to $\hat F$ over the columns used. This is
+the sample counterpart of restriction (i) and gives the sampler a starting
+point consistent with the block-diagonal state equation.
+
+\paragraph{Choosing $r_o$.} The rank cross-validation of
+\code{doc/em\_rank\_selection.tex} applies object by object: hold out a share
+of the observed cells of $R_o$, complete at each rank, score the held-out
+cells. Objects whose curve is flat from $r_o = 1$ get none. Prior expectation
+from the HANK runs: $r_{\mathrm{3D}} = 1$, $r_{\{I,W\}} = 1$, marginals $0$.
+
+\section{Reconstruction}\label{sec:recon}
+
+Given the smoothed states $\hat f_t$, $\hat g_{o,t}$ (and $\hat\tau_t$ if the
+trend block is on), dataset $j$'s coefficient path is
+\begin{equation}
+  \hat\theta_{j,t} = \mu_j + S_j\Bigl( \Lambda(\hat f_t + \hat\tau_t) + \sum_{o\in\obs(j)} \bar\Lambda_o\,\hat g_{o,t} \Bigr) + \mathrm{trend}_{j,t},
+\end{equation}
+for every $t$, including dates $j$ did not observe. The cross-conditional cells
+are then computed from $\hat\theta^{\cop}_{j,t}$ by the exact integration of
+\code{compute\_cross\_conditional\_means\_continuous}, unchanged. Note what
+enters \code{wealth\_by\_income}: the copula marginalized over consumption,
+i.e.\ the $\{I,W\}$ slice, whose reconstruction is
+$\Lambda_{\{I,W\}}\hat f_t + \Lambda_{\{I,W\}}^{\text{spec}}\hat g_{\{I,W\},t}$
+--- the shared part plus a state informed by SCF and SIPP. The 3D factor enters
+through the marginalization only indirectly (the slice is the degree-zero
+consumption slice of the tensor; the 3D block's coefficients do not enter it).
+So for the target cells the $\{I,W\}$ factor is the direct lever, and the 3D
+factor's role is to stop PSID's 3D information from distorting $f$ --- which is
+how it helps the cells and removes the blips at the same time.
+
+\section{Why this is not the block-diagonal failure again}\label{sec:why}
+
+The 4$\times$4 block-diagonal run gave the marginals and the copula separate
+factors \emph{and nothing shared}. The marginal factors then had no route to
+comove with the copula except through $\Omega$'s cross-block correlations,
+which the LKJ prior shrinks toward zero; the filter's information about the
+marginal states came from 36 rows instead of 1,730; three of four marginal
+factors were estimated at zero innovation scale and the trend states absorbed
+the movement.
+
+Here the shared block stays. In the precision decomposition of
+\code{doc/em\_and\_copula\_factors.tex}~\S5,
+\begin{equation}
+  \bigl[G_t^{\top}\Sigma^{-1}G_t\bigr]_{ff} = \sum_{i\ \text{observed}} \frac{\Lambda_i\Lambda_i^{\top}}{\sigma^2_{i}},
+\end{equation}
+every observed row still informs the shared factors, exactly as now; the
+specific blocks \emph{add} states, they do not remove terms. An object's
+specific factor being estimated at zero is then the correct outcome for an
+object whose dynamics are fully shared --- shrinkage, not collapse --- and the
+marginals are where that is expected.
+
+\section{Priors}\label{sec:priors}
+
+\begin{itemize}[leftmargin=*]
+  \item $\phi_{o,\ell}$: for objects observed quarterly by some dataset, the
+        same persistence prior family as the shared factors
+        (\code{persistence\_prior = :per\_factor}); for the 3D block, fixed at
+        $\bar\phi$ or $\mathrm{Beta}$ concentrated on $[0.95,0.99]$.
+  \item $\omega_{o,\ell}$: half-Cauchy or the shared shock prior, with an
+        optional global--local layer across specifics,
+        $\omega_{o,\ell} \sim N^{+}(0,(\lambda_g\psi_{o,\ell})^2)$, so that
+        specifics an object does not need switch off --- the same device as the
+        trend block.
+  \item Stationarity guard: the joint radius check extends to $\mathcal{A}$;
+        since the specific blocks are diagonal AR(1)s with $|\phi|<1$, they
+        cannot violate it, so the existing cap on the shared block suffices.
+\end{itemize}
+
+\section{The minimal version, and what to measure}\label{sec:minimal}
+
+Start with two specific factors:
+\begin{equation}
+  r_{\{I,W\}} = 1,\qquad r_{\mathrm{3D}} = 1\ (\phi_{\mathrm{3D}} = 0.98\ \text{fixed}),\qquad
+  r_o = 0 \ \text{otherwise},
+\end{equation}
+on top of the current $r = 5$ shared factors. State dimension $4\cdot 5 + 8 + 4\cdot 2 = 36$
+(from 28); parameters $+3$ ($\phi_{\{I,W\}}$, two $\omega$'s). Targets, in
+order of diagnostic value:
+\begin{enumerate}[leftmargin=*]
+  \item $\sigma^2_{a,\cop}$, the PSID copula multiplier: from $\approx 32$
+        toward the prior mean. This is the direct test of the mechanism.
+  \item The wave-quarter kink statistic on the smoothed factors
+        (one-quarter deviation from the local trend at PSID wave quarters
+        versus elsewhere, currently $1.4\times$ overall and $2.4\times$ on the
+        first factor): toward $1\times$.
+  \item The exact test at observation dates
+        (\code{doc}: replica cells versus model cells at each survey's own
+        dates): SCF and SIPP from $\approx 50$ toward their ceilings of $90+$.
+  \item The \code{wealth\_by\_income} cells over all quarters, currently
+        $41/33/43$ averaged over a, d, e.
+  \item Guardrail: marginals and \code{income\_by\_wealth} must not fall.
+\end{enumerate}
+If the minimal version moves (1)--(3), the full seven-object version is
+justified and its counts should be set by the per-object rank CV of Section
+\ref{sec:loadings}; if it does not, the full version would not either.
+
+\paragraph{Implementation note.} The stochastic-trend augmentation
+(\code{StochasticTrend.jl}: \code{st\_augment\_G}, the collapsed smoother) is a
+working template for appending states with their own dynamics and extending
+$G_t$ column-wise; the object blocks differ from $\tau$ only in loading through
+$\bar\Lambda_o$ instead of $\Lambda$ and in being AR(1) rather than
+near-unit-root by default. The row sets $\mathcal{R}_o$ are recoverable from
+the Legendre indexing already used by \code{retrieve\_cop\_and\_imm\_part} and
+the marginalization in \code{compute\_cross\_conditional\_means\_continuous}.
+
+\end{document}
