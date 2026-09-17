@@ -103,6 +103,7 @@ warm && @warn "a kalman_em_loadings.csv already exists for this tag (written $(D
 const func_data, time_params, model_elements = estimation_prep(obs_data, model_options)
 const (param_vector, param_sizes, priors, meas_ind, Σ_ids) = set_params(model_elements, time_params, model_options)
 hyperpriors = st_hyperpriors(priors, param_sizes)
+of_active() && error("run_kalman_em.jl does not support object_factors yet: the M-step would attribute the specific states' contribution to Λ")
 
 # ── the mode we hold fixed
 par_final = get_param_vector(measures, :mcmc, label, data_cutoffs, src_tag)

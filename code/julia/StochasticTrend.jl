@@ -124,7 +124,9 @@ end
 
 # ── review-fix helpers (F1/F2/F4): trend-block-aware slicing ─────────────────
 st_is_stochastic(param_sizes) = length(param_sizes) == 9
-st_ntrend(param_sizes) = st_trend_dim(param_sizes[1][1])
+# The appended block's ACTUAL length (2r+1 trend entries + any object-factor
+# parameters, ObjectFactors.jl) — read from param_sizes, not recomputed from r.
+st_ntrend(param_sizes) = param_sizes[end][1]
 
 "H-block length from param_sizes: 6 (:common) or r+5 (persistence_prior = :per_factor)."
 n_hyper_block(param_sizes) = st_is_stochastic(param_sizes) ? param_sizes[end-1][1] : param_sizes[end][1]
@@ -169,11 +171,12 @@ function st_set_params(model_elements, time_p, model_options)
     r = param_sizes[1][1]
     λs = model_options.trend_lambda_scale
     # initials in RAW (softplus) coordinates: sp(-3)≈0.05, sp(0.54)≈1.0; λ starts at its prior scale
-    θ0 = [fill(-3.0, r); fill(0.54, r); log(exp(λs) - 1)]
-    push!(param_sizes, (st_trend_dim(r),))
+    θ0 = [fill(-3.0, r); fill(0.54, r); log(exp(λs) - 1); of_initials()]     # + object-factor block
+    push!(param_sizes, (st_trend_dim(r) + of_nparams(),))
     append!(priors, vcat(fill(truncated(Normal(0.0, 0.1), 0.0, Inf), r),
                          fill(truncated(Cauchy(0.0, 1.0), 0.0, Inf), r),
-                         [truncated(Cauchy(0.0, λs), 0.0, Inf)]))
+                         [truncated(Cauchy(0.0, λs), 0.0, Inf)],
+                         of_placeholder_priors()))
     return [param_vector; θ0], param_sizes, priors, meas_ind, Σ_ids
 end
 
@@ -187,10 +190,10 @@ effectively at zero). Dispatch guard at the top of `define_step_ranges`.
 """
 function st_define_step_ranges(param_sizes, priors, param_vector)
     r = param_sizes[1][1]
-    n_tr = st_trend_dim(r)
-    core = define_step_ranges(param_sizes[1:end-1], priors[1:end-n_tr],
-                              param_vector[1:end-n_tr])
-    return vcat(core, fill((-6.0, 0.5), r), fill((-2.0, 2.0), r), [(-6.0, 0.5)])
+    n_blk = st_ntrend(param_sizes)                     # trend entries + object-factor entries
+    core = define_step_ranges(param_sizes[1:end-1], priors[1:end-n_blk],
+                              param_vector[1:end-n_blk])
+    return vcat(core, fill((-6.0, 0.5), r), fill((-2.0, 2.0), r), [(-6.0, 0.5)], of_step_ranges())
 end
 
 """
@@ -210,9 +213,13 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
         error("trend_spec = :stochastic is not implemented for aggregate_rep = :as_inputs")
 
     r = param_sizes[1][1]
-    n_tr = st_trend_dim(r)
+    n_tr = st_trend_dim(r)                 # trend entries
+    n_blk = st_ntrend(param_sizes)         # whole appended block (trend + object factors)
     sp(x) = x > 35 ? x : log1p(exp(x))   # overflow-safe softplus (log1p(exp(x)) is Inf beyond x≈709)
-    θtr = @view param_vector[end-n_tr+1:end]
+    θblk = @view param_vector[end-n_blk+1:end]
+    θtr = @view θblk[1:n_tr]
+    θg  = @view θblk[n_tr+1:end]
+    any(!isfinite, θg) && return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
     # A wandering DIME proposal can put a raw coordinate far outside the
     # softplus range: λ·ψ then becomes 0·Inf = NaN and Normal() throws, killing
     # the whole run (HANK 1, 2026-08-28, iteration 351/400). Reject such points
@@ -225,7 +232,7 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
         return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
     end
 
-    core = param_vector[1:end-n_tr]
+    core = param_vector[1:end-n_blk]
     core_sizes = param_sizes[1:end-1]
 
     n_hyper = core_sizes[end][1]
@@ -286,9 +293,21 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
     Ã, B̃, C̃, Ω̃_f = st_augment_system(A, B, C, Ω_f, ω_τ)
     G̃ = st_G_cached(G, size(A, 1), r)
 
+    # object-specific factors (ObjectFactors.jl): independent AR(1) blocks
+    # appended after [f, τ]; their parameters ride at the end of this block
+    r_g = 0
+    if of_active()
+        Φ_g, ω_g, ok_g = of_unpack(θg)
+        ok_g || return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
+        log_P += of_logprior(Φ_g, ω_g)
+        Ã, B̃, C̃, Ω̃_f = of_augment_system(Ã, B̃, C̃, Ω̃_f, Φ_g, ω_g)
+        G̃ = of_G_full_cached(model_elements, model_options, size(A, 1), r)
+        r_g = length(Φ_g)
+    end
+
     if smooth
         smoother_output, log_D, alarm = recurse_kalman_filter_smoother(Ã, B̃, C̃, D, Ω̃_f, Ω_y, Σ, G̃, y)
-        return st_collapse_smoother(smoother_output, size(A, 1), r), log_P + log_D, alarm
+        return st_collapse_smoother(smoother_output, size(A, 1), r, r_g), log_P + log_D, alarm
     else
         local log_D, alarm2
         try
@@ -311,21 +330,23 @@ end
 # ("f̃-block τ at lag 0", r × T) for S5 diagnostics.
 const ST_LAST_TAU = Ref{Any}(nothing)
 
-function st_collapse_index(r::Int, rτ::Int, q::Int)
-    r̃ = r + rτ
+function st_collapse_index(r::Int, rτ::Int, q::Int, rg::Int = 0)
+    r̃ = r + rτ + rg
     fidx = vcat([lag*r̃ .+ (1:r) for lag in 0:3]...)
     τidx = vcat([lag*r̃ + r .+ (1:rτ) for lag in 0:3]...)
+    gidx = vcat([lag*r̃ + r + rτ .+ (1:rg) for lag in 0:3]...)
     aidx = 4r̃ .+ (1:q)
-    return fidx, τidx, aidx
+    return fidx, τidx, aidx, gidx
 end
 
-function st_collapse_smoother(sm, r::Int, rτ::Int)
+function st_collapse_smoother(sm, r::Int, rτ::Int, rg::Int = 0)
     n_aug = size(sm.x_smoothed, 1)
-    q = n_aug - 4 * (r + rτ)
-    fidx, τidx, aidx = st_collapse_index(r, rτ, q)
+    q = n_aug - 4 * (r + rτ + rg)
+    fidx, τidx, aidx, gidx = st_collapse_index(r, rτ, q, rg)
     keep = vcat(fidx, aidx)                       # baseline layout order
     Tn = size(sm.x_smoothed, 2)
     ST_LAST_TAU[] = sm.x_smoothed[τidx[1:rτ], :]  # τ_t at lag 0
+    OF_LAST_G[]   = rg > 0 ? sm.x_smoothed[gidx, :] : nothing   # g states, all 4 lag blocks (4rg × T)
     coll_x(X) = begin
         Xc = X[keep, :]
         Xc[1:4r, :] .+= X[τidx, :]

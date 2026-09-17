@@ -2010,6 +2010,17 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         variance_explained = principalvars(M_load) ./ tprincipalvar(M_load)
         n_less_than_one = length(findall(variance_explained .< 0.01))
 
+        # object-specific factors (ObjectFactors.jl): loadings from each object's
+        # residual after the FINAL shared loadings. Computed once per process
+        # (estimation_prep); later proof-of-concept perform_pca calls reuse them.
+        if type == :functional_data
+            spec_of = hasproperty(model_options, :object_factors) ? String(model_options.object_factors) : ""
+            if isempty(spec_of)
+                OBJECT_FACTORS[] = nothing
+            elseif OBJECT_FACTORS[] === nothing || OBJECT_FACTORS[].n_coef != size(proj, 1)
+                compute_object_loadings!(pool, proj, measures, model_options.estimator, model_options)
+            end
+        end
         return proj, pcs_s, M_load, n_less_than_one
     end
     # end

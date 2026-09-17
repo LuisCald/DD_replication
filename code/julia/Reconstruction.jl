@@ -65,6 +65,14 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
             X[i] = (Gⱼ[i] * x_smoothed[1:end-agg_count, :])
         end
     end
+    # object-specific factors: the collapsed smoother stashed the g states
+    # (4·r_g × T, lag blocks in order); Gj_g carries the same lag weights as Gⱼ
+    if of_active() && OF_LAST_G[] !== nothing && OBJECT_FACTORS[].Gj_g !== nothing
+        for i in eachindex(X)
+            X[i] .+= OBJECT_FACTORS[].Gj_g[i] * OF_LAST_G[]
+        end
+        @info "Reconstruction: added $(size(OF_LAST_G[], 1) ÷ 4) object-specific state(s) to the coefficient paths"
+    end
 
     # Split by object, multiply by stds, reform object 
     add_variance!(estimator, X, stds, measures)

@@ -304,7 +304,8 @@ function draw_from_prior(param_sizes, priors, nchain)
     if st_is_stochastic(param_sizes)
         # raw softplus coords: tight spread around the st_set_params initials
         r = param_sizes[1][1]
-        θtr = vcat(fill(-3.0, r), fill(0.54, r), [-2.25]) .+ 0.1 .* randn(2r + 1, nchain)
+        θ0 = vcat(fill(-3.0, r), fill(0.54, r), [-2.25], of_initials())   # + object-factor block
+        θtr = θ0 .+ 0.1 .* randn(length(θ0), nchain)
         return vcat(A_B_C_D, Ωf, Ωy, ΩC, Σ, H, θtr)
     end
     return vcat(A_B_C_D, Ωf, Ωy, ΩC, Σ, H)
@@ -347,9 +348,18 @@ function report_mode_dynamics(par_final, param_sizes, model_options)
         @info "Mode dynamics: innovation sds — dist $(round.(spd.(Ωd[1:r]); digits = 2)), " *
               "agg $(round.(spd.(Ωd[r+1:end]); digits = 2)); agg AR diag(D) $(round.(D isa AbstractMatrix ? diag(D) : D; digits = 2))"
         if st_is_stochastic(param_sizes)
-            θtr = par_final[end-st_ntrend(param_sizes)+1:end]
+            θblk = par_final[end-st_ntrend(param_sizes)+1:end]
+            n_tr = st_trend_dim(r)
+            θtr = θblk[1:n_tr]
             @info "Mode dynamics: trend ω_τ = $(round.(spd.(θtr[1:r]); digits = 3)), " *
-                  "ψ = $(round.(spd.(θtr[r+1:2r]); digits = 2)), λ = $(round(spd(θtr[end]); digits = 3))"
+                  "ψ = $(round.(spd.(θtr[r+1:2r]); digits = 2)), λ = $(round(spd(θtr[n_tr]); digits = 3))"
+            if of_active() && length(θblk) > n_tr
+                Φg, ωg, _ = of_unpack(θblk[n_tr+1:end])
+                O = OBJECT_FACTORS[]
+                lab = vcat([fill(string(O.names[k]), O.r[k]) for k in eachindex(O.names)]...)
+                @info "Mode dynamics: object factors — " *
+                      join(["$(lab[i]): φ = $(round(Φg[i]; digits = 3)), ω = $(round(ωg[i]; digits = 3))" for i in eachindex(lab)], "; ")
+            end
         end
     catch e
         @warn "report_mode_dynamics failed (diagnostic only): $e"
