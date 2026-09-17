@@ -389,7 +389,7 @@ end
 With ω_g = 0 the g states stay at zero and the augmented likelihood must equal
 the trend-augmented one to machine precision; with ω_g > 0 it must differ.
 """
-function of_selftest(; r = 3, rτ = 2, rg = 2, q = 2, T = 40, n = 12, seed = 7)
+function of_selftest(; r = 3, rτ = r, rg = 2, q = 2, T = 40, n = 12, seed = 7)   # rτ = r: one trend per factor, as in st_likeli (the collapse assumes it)
     rng = Random.MersenneTwister(seed)
     A = 0.6 .* Matrix(Diagonal(rand(rng, r))) .+ 0.05 .* randn(rng, r, r)
     while maximum(abs.(eigvals(A))) >= 0.95; A .*= 0.9; end
@@ -412,14 +412,15 @@ function of_selftest(; r = 3, rτ = 2, rg = 2, q = 2, T = 40, n = 12, seed = 7)
     ok_moves = !isapprox(base, aug1; rtol = 1e-6)
     ok_equal || @warn "of_selftest: ω_g = 0 does NOT reproduce the trend-augmented likelihood ($base vs $aug0)"
     ok_moves || @warn "of_selftest: ω_g > 0 does not change the likelihood"
-    # smoother leg: with ω_g at the floor the collapsed f must match the trend-only
-    # smoother, and the stashed g block must have the right shape
+    # smoother leg: with ω_g ≈ 0 (1e-10, bypassing the floor — the floor's own
+    # footprint is ~1e-6) the collapsed f must match the trend-only smoother, and
+    # the stashed g block must have the right shape
     smτ, _, _ = recurse_kalman_filter_smoother(Ã, B̃, C̃, D, Ω̃, Ω_y, Σ, G̃τ, y)
     cτ = st_collapse_smoother(smτ, r, rτ)
-    Ãs, B̃s, C̃s, Ω̃s = of_augment_system(Ã, B̃, C̃, Ω̃, 0.9 .* ones(rg), fill(OF_OMEGA_FLOOR, rg))
+    Ãs, B̃s, C̃s, Ω̃s = of_augment_system(Ã, B̃, C̃, Ω̃, 0.9 .* ones(rg), fill(1e-10, rg))
     smg, _, _ = recurse_kalman_filter_smoother(Ãs, B̃s, C̃s, D, Ω̃s, Ω_y, Σ, G̃, y)
     cg = st_collapse_smoother(smg, r, rτ, rg)
-    ok_smooth = isapprox(cτ.x_smoothed, cg.x_smoothed; atol = 1e-6) && OF_LAST_G[] !== nothing && size(OF_LAST_G[]) == (4rg, T)
+    ok_smooth = isapprox(cτ.x_smoothed, cg.x_smoothed; atol = 1e-8) && OF_LAST_G[] !== nothing && size(OF_LAST_G[]) == (4rg, T)
     ok_smooth || @warn "of_selftest: smoother leg failed (max |Δf| = $(maximum(abs, cτ.x_smoothed .- cg.x_smoothed)), OF_LAST_G $(OF_LAST_G[] === nothing ? "unset" : size(OF_LAST_G[])))"
     OF_LAST_G[] = nothing; ST_LAST_TAU[] = nothing
     return ok_equal && ok_moves && ok_smooth
