@@ -107,7 +107,8 @@ include("DIMES.jl")
 include("SeparationStrategy.jl")
 include("SelectPrior.jl")
 include("Model.jl")
-include("StochasticTrend.jl")     # trend_spec = :stochastic machinery (new-file-only; see doc/stochastic_trend_design.md)
+include("StochasticTrend.jl")
+include("ObjectFactors.jl")        # shared + object-specific factors (doc/object_factors.tex)     # trend_spec = :stochastic machinery (new-file-only; see doc/stochastic_trend_design.md)
 # include("MCMC.jl")  # moved to _archive/
 # include("Diagnostics.jl")  # acceptance rate, Gelman and Rubin (1992), Geweke (1992) convergence statistics, traceplots
 include("Reconstruction.jl")

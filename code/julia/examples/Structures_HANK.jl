@@ -63,6 +63,8 @@ const HANK_NCF = parse(Int, get(ENV, "HANK_NCF", "0"))          # Fix 3: copula-
 const HANK_LOAD = Symbol(get(ENV, "HANK_LOAD", "joint"))
 HANK_LOAD in (:joint, :block) || error("HANK_LOAD must be 'joint' or 'block', got $(HANK_LOAD)")
 const HANK_NMF = parse(Int, get(ENV, "HANK_NMF", "4"))
+# Object-specific factors (doc/object_factors.tex), e.g. HANK_OBJF="3D:1@0.98,IW:1"
+const HANK_OBJF = get(ENV, "HANK_OBJF", "")
 # Unit-variance factor scores (bug fix, 2026-09-17). HANK_EM_UNIT=0 reproduces the
 # earlier :em scaling — needed when a Kalman-EM pass must match a mode estimated
 # before the fix (e.g. the " pf em lvl" run).
@@ -90,6 +92,7 @@ const HANK_CAP = parse(Float64, get(ENV, "HANK_CAP", "0"))      # 0 = default (0
 @info "HANK exercise: economy $(HANK_ECON), trend spec $(HANK_TREND), distributional factors $(HANK_NDF == 0 ? "8 (tag pin)" : string(HANK_NDF)), persistence $(HANK_PERS)"
 @info "  copula experiments: error $(HANK_COPERR), pca $(HANK_PCA), copula factors $(HANK_NCF), integration grid $(HANK_GRID)"
 HANK_EM_UNIT || @warn "  HANK_EM_UNIT=0: reproducing the pre-fix :em score scaling"
+isempty(HANK_OBJF) || @info "  object factors: $(HANK_OBJF)"
 @info "  loading structure: $(HANK_LOAD)$(HANK_LOAD == :block ? " ($(HANK_NMF) marginal + $(HANK_NCB) copula factors)" : "")"
 @info "  aggregate inputs: $(HANK_SHOCKS)$(HANK_SHOCKS == :levels ? " (shock states untransformed)" : " (ADF differencing, empirical-pipeline mirror)")" *
       (HANK_CAP > 0 ? ", stationarity cap $(HANK_CAP)" : "")
@@ -101,7 +104,8 @@ const model_options = ModelOptions(
           (HANK_COPERR == :communality ? " cw" : "") * (HANK_PCA == :em ? " em" : HANK_PCA == :kalman_em ? " em kem" : "") *
           (HANK_NCF > 0 ? " ncf$(HANK_NCF)" : "") * (HANK_GRID == 5 ? "" : " g$(HANK_GRID)") *
           (HANK_SHOCKS == :levels ? " lvl" : "") *
-          (HANK_LOAD == :block ? " blk$(HANK_NMF)x$(HANK_NCB)" : ""),
+          (HANK_LOAD == :block ? " blk$(HANK_NMF)x$(HANK_NCB)" : "") *
+          (isempty(HANK_OBJF) ? "" : " of" * replace(HANK_OBJF, ":" => "", "," => "-", "@" => "p", " " => "")),
     trend_spec = HANK_TREND,
     persistence_prior = HANK_PERS,
     trend_lambda_scale = HANK_TLS,
@@ -125,6 +129,7 @@ const model_options = ModelOptions(
     em_unit_scores  = HANK_EM_UNIT,
     n_copula_factors = HANK_NCF,
     loading_structure = HANK_LOAD,
+    object_factors  = HANK_OBJF,
     n_marginal_factors = HANK_NMF,
     n_copula_block_factors = HANK_NCB,
 )
