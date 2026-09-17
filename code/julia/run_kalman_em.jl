@@ -79,6 +79,8 @@ using DelimitedFiles, LinearAlgebra, Statistics
 @unpack measures, data_cutoffs, tag, case = model_options
 hasproperty(model_options, :pca_method) && model_options.pca_method == :kalman_em ||
     error("run with pca_method = :kalman_em (HANK_PCA=kalman_em) so the tag and the loader match")
+hasproperty(model_options, :object_factors) && !isempty(String(model_options.object_factors)) &&
+    error("run_kalman_em.jl does not support object_factors yet (the M-step would attribute the specific states' contribution to Λ) — unset HANK_OBJF")
 label    = "3D_$case"
 m_label  = measures_folder(measures)
 end_year = data_cutoffs["end"] != "" ? data_cutoffs["end"][1:4] : "all"

@@ -33,8 +33,12 @@ hdr     = split(readline(fac_csv), ',')
 n_states = length(hdr) - 1            # collapsed layout: 4r + q
 r = (n_states - Q_AGG) ÷ 4
 @assert 4r + Q_AGG == n_states "state count $n_states not 4r+$Q_AGG"
+# If the run had object factors (ObjectFactors.jl), their parameters sit AFTER the
+# trend block; pass their count as DD_N_OF so the trend entries are sliced correctly.
+n_of = parse(Int, get(ENV, "DD_N_OF", "0"))
 ntr = 2r + 1
-θtr = par[end-ntr+1:end]
+θtr = par[end-n_of-ntr+1:end-n_of]
+n_of > 0 && println("(skipping $n_of trailing object-factor parameters, DD_N_OF)")
 ω  = sp.(θtr[1:r]); ψ = sp.(θtr[r+1:2r]); λ = sp(θtr[end])
 
 println("mode vector: $sol  (length $(length(par)), r = $r dist factors, trend block = $ntr)")

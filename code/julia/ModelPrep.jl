@@ -365,6 +365,7 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
         col_labels = vcat([fill(df_vec.df_names[j], size(dfs[j], 2)) for j in eachindex(dfs)]...)
         col_years = vcat([Float64.(year_vec[j]) for j in eachindex(dfs)]...)
     end
+    of_reset!()   # object-factor loadings must come from THIS call, not from an earlier proof-of-concept perform_pca
     proj, pcs, _, n_less_than_one = perform_pca(pooled_data, measures, :functional_data, tag; additional_data_blocks, col_labels, col_years)
 
     # Equation Objects
@@ -1751,7 +1752,12 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
         kem_present = false
         kem_path = ""
         if hasproperty(model_options, :pca_method) && model_options.pca_method == :kalman_em
-            kem_path = BASE_PATH * "/7_Results/$(measures_folder(measures))$tag/from_mcmc/parameter_vectors/kalman_em_loadings.csv"
+            # DD_KEM_LOADINGS_FROM=<tag>: take the refined loadings from ANOTHER tag's
+            # folder (e.g. run object factors on top of the " … pf em kem lvl" loadings
+            # while this run's tag carries an " of…" suffix)
+            kem_tag = get(ENV, "DD_KEM_LOADINGS_FROM", tag)
+            kem_path = BASE_PATH * "/7_Results/$(measures_folder(measures))$kem_tag/from_mcmc/parameter_vectors/kalman_em_loadings.csv"
+            kem_tag != tag && @info "pca_method = :kalman_em: taking loadings from tag $(repr(kem_tag)) (DD_KEM_LOADINGS_FROM)"
             kem_present = isfile(kem_path)
         end
         if hasproperty(model_options, :pca_method) && model_options.pca_method in (:em, :kalman_em) && !kem_present
@@ -1959,7 +1965,7 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
                 kem_present = false
             end
         elseif hasproperty(model_options, :pca_method) && model_options.pca_method == :kalman_em
-            @info "pca_method = :kalman_em: no kalman_em_loadings.csv for this tag yet — using the :em initialisation " *
+            @warn "pca_method = :kalman_em: no kalman_em_loadings.csv for tag $(repr(get(ENV, "DD_KEM_LOADINGS_FROM", tag))) — using the :em initialisation " *
                   "(run run_kalman_em.jl to produce it)"
         end
 
@@ -2019,6 +2025,17 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
                 OBJECT_FACTORS[] = nothing
             elseif OBJECT_FACTORS[] === nothing || OBJECT_FACTORS[].n_coef != size(proj, 1)
                 compute_object_loadings!(pool, proj, measures, model_options.estimator, model_options)
+                # persist next to the mode so post-estimation can verify it uses the same Λ̄
+                try
+                    of_dir = BASE_PATH * "/7_Results/$(measures_folder(measures))$tag/from_mcmc/parameter_vectors"
+                    mkpath(of_dir)
+                    if of_active()
+                        writedlm(joinpath(of_dir, "object_loadings.csv"), OBJECT_FACTORS[].Λbar, ',')
+                        write(joinpath(of_dir, "object_spec.txt"), spec_of * "\n")
+                    end
+                catch e
+                    @warn "could not persist object loadings (diagnostic only): $e"
+                end
             end
         end
         return proj, pcs_s, M_load, n_less_than_one

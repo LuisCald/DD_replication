@@ -65,6 +65,7 @@ HANK_LOAD in (:joint, :block) || error("HANK_LOAD must be 'joint' or 'block', go
 const HANK_NMF = parse(Int, get(ENV, "HANK_NMF", "4"))
 # Object-specific factors (doc/object_factors.tex), e.g. HANK_OBJF="3D:1@0.98,IW:1"
 const HANK_OBJF = get(ENV, "HANK_OBJF", "")
+isempty(HANK_OBJF) || HANK_TREND == :stochastic || error("HANK_OBJF requires HANK_TREND=stochastic (object factors ride on the trend-augmented likelihood)")
 # Unit-variance factor scores (bug fix, 2026-09-17). HANK_EM_UNIT=0 reproduces the
 # earlier :em scaling — needed when a Kalman-EM pass must match a mode estimated
 # before the fix (e.g. the " pf em lvl" run).
