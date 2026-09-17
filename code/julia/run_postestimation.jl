@@ -56,6 +56,25 @@ user_t = (deepcopy(tmin), deepcopy(tmax))
 @info "Loading estimated parameters..."
 par_final = get_param_vector(measures, kind_of_plots, label, data_cutoffs, tag)
 report_mode_dynamics(par_final, param_sizes, model_options)
+
+# ── Persistence counterfactual (DD_PERSIST_TARGET=<radius>) ─────────────
+# Raise A's spectral radius to the target at the loaded mode, hold everything
+# else fixed, and run the rest of post-estimation into a separate tag folder
+# (" persist<target>"). See PersistenceCounterfactual.jl for what it changes.
+if haskey(ENV, "DD_PERSIST_TARGET")
+    _tgt = parse(Float64, ENV["DD_PERSIST_TARGET"])
+    _ll_before, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options)
+    par_final, _pc = persistence_counterfactual(par_final, param_sizes, model_options;
+        target = _tgt, keep_var = get(ENV, "DD_PERSIST_KEEPVAR", "1") == "1")
+    _ll_after, _alarm = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options)
+    @info "Persistence counterfactual: dist radius $(round(_pc.ρ0; digits = 3)) → $(round(_pc.ρ1; digits = 3)) (shift c = $(round(_pc.c; digits = 4))); " *
+          "joint radius $(round(_pc.joint0; digits = 3)) → $(round(_pc.joint1; digits = 3)); innovation sds × $(round(_pc.g; digits = 3)); " *
+          "log-lik $(round(_ll_before; digits = 1)) → $(round(_ll_after; digits = 1))$(_alarm ? "  ⚠ ALARM" : "")"
+    report_mode_dynamics(par_final, param_sizes, model_options)
+    model_options.tag = tag * " persist$(ENV["DD_PERSIST_TARGET"])"
+    tag = model_options.tag
+    @info "outputs go to tag: $(tag)"
+end
 logV, alarm = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options)
 @info "Log-likelihood at loaded parameters: $logV"
 
