@@ -299,7 +299,7 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
     if of_active()
         Φ_g, ω_g, ok_g = of_unpack(θg)
         ok_g || return smooth ? (nothing, -1.e12, true) : (-1.e12, true)
-        log_P += of_logprior(Φ_g, ω_g)
+        log_P += of_logprior(Φ_g, ω_g, θg)
         Ã, B̃, C̃, Ω̃_f = of_augment_system(Ã, B̃, C̃, Ω̃_f, Φ_g, ω_g)
         G̃ = of_G_full_cached(model_elements, model_options, size(A, 1), r)
         r_g = length(Φ_g)

@@ -116,6 +116,16 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
         trend_df[!, "time"] = collect(dts)
         CSV.write(save_dir * "/smoothed_trends.csv", select(trend_df, "time", :))
     end
+    # 1c. Object-specific states g_t (lag 0), stashed alongside τ by st_collapse_smoother
+    if of_active() && OF_LAST_G[] !== nothing
+        rg = size(OF_LAST_G[], 1) ÷ 4
+        g_sm = OF_LAST_G[][1:rg, :]
+        O = OBJECT_FACTORS[]
+        gnames = vcat([["g_$(O.names[k])_$(l)" for l in 1:O.r[k]] for k in eachindex(O.names)]...)
+        g_df = DataFrame(Matrix(g_sm'), gnames)
+        g_df[!, "time"] = collect(dts)
+        CSV.write(save_dir * "/smoothed_object_states.csv", select(g_df, "time", :))
+    end
 
     # 2. Reconstructed coefficients per data source
     for (i, ds) in enumerate(data_sources)

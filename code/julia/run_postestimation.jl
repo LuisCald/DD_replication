@@ -55,6 +55,9 @@ user_t = (deepcopy(tmin), deepcopy(tmax))
 # ── Step 2: Load estimated parameters ────────────────────────
 @info "Loading estimated parameters..."
 par_final = get_param_vector(measures, kind_of_plots, label, data_cutoffs, tag)
+length(par_final) == length(param_vector) ||
+    error("mode has $(length(par_final)) parameters but this configuration has $(length(param_vector)) — " *
+          "the run was estimated under a different spec (factor count, trend block, object_factors). Match the switches.")
 report_mode_dynamics(par_final, param_sizes, model_options)
 
 # ── Persistence counterfactual (DD_PERSIST_TARGET=<radius>) ─────────────

@@ -21,6 +21,13 @@
 #
 # v1 scope: trend_spec = :stochastic only (the :hp likelihood is not
 # augmented); Kalman-EM driver refuses to run with object factors active.
+# Downstream consumers that see only the COLLAPSED (f+τ, a) states — forecasts,
+# FEVD's observable mapping, historical decomposition, factor-draw export, the
+# anatomy shares — carry the shared block only; the reconstruction (and hence
+# every HANK validation panel and cross-conditional cell) includes g.
+# Priors on the appended block INCLUDE the transform Jacobians (unlike the trend
+# block): with ω_g → 0 the designed outcome for a fully-shared object, a flat raw
+# tail would let chains wander to −∞; the Jacobian makes the raw prior proper.
 #
 # Spec string (ModelOptions.object_factors): "3D:1@0.98,IW:1"
 #   name  ∈ {3D, CI, CW, IW, C, I, W}  (letters = first letter of a measure)
@@ -31,10 +38,23 @@
 
 const OBJECT_FACTORS = Ref{Any}(nothing)    # set by compute_object_loadings! at prep
 const OF_LAST_G      = Ref{Any}(nothing)    # smoothed g states (4·r_g × T), lag blocks in order
-const _OF_G_CACHE    = Ref{Any}(nothing)    # (objectid(G), r_g) => Gg (whitened, masked, per t)
+const _OF_G_CACHE    = Ref{Any}(nothing)    # (objectid(G), objectid(Λ̄), r_g) => Gg (whitened, masked, per t)
+const _OF_GFULL_CACHE = Ref{Any}(nothing)   # (objectid(G), objectid(Λ̄), r, rτ, r_g) => G̃ with [f, τ, g] per lag block
 const OF_PHI_MAX     = 0.995                # |φ| < OF_PHI_MAX via tanh
+const OF_OMEGA_FLOOR = 1e-4                 # ω_g floor: exactly-zero innovation variance makes the smoother's backward pass singular
 
 of_active() = OBJECT_FACTORS[] !== nothing && OBJECT_FACTORS[].r_g > 0
+function of_clear_caches!()
+    _OF_G_CACHE[] = nothing
+    _OF_GFULL_CACHE[] = nothing
+    return nothing
+end
+"Reset all object-factor state (call before the main perform_pca of a prep so proof-of-concept calls cannot leave stale loadings)."
+function of_reset!()
+    OBJECT_FACTORS[] = nothing
+    OF_LAST_G[] = nothing
+    of_clear_caches!()
+end
 of_rg() = of_active() ? OBJECT_FACTORS[].r_g : 0
 
 # ── spec ─────────────────────────────────────────────────────────────────────
@@ -127,6 +147,7 @@ function compute_object_loadings!(pool, proj, measures, estimator, model_options
             F̂[:, k] = (Λo' * Λo + 1e-8 * I) \ (Λo' * pool[obs, j])
         end
         Rres = pool[R, cols] .- proj[R, :] * F̂
+        Rres .-= mean(Rres; dims = 2)          # centre over the object's own columns (pooled across datasets)
         Fsv = svd(Rres)
         ro = min(o.r, length(Fsv.S) - 1)
         ncol = length(cols)
@@ -148,7 +169,7 @@ function compute_object_loadings!(pool, proj, measures, estimator, model_options
     end
     OBJECT_FACTORS[] = (spec = spec, rows = rows, names = names, r = rs, phi_fixed = phis,
                         loadings = loadings, Λbar = Λbar, r_g = r_g, n_coef = n, Gj_g = nothing)
-    _OF_G_CACHE[] = nothing
+    of_clear_caches!()
     @info "Object factors active: $(r_g) specific state(s) [$(join(["$(names[k])×$(rs[k])" for k in eachindex(names)], ", "))]; " *
           "$(of_nparams()) parameters appended to the trend block"
     return OBJECT_FACTORS[]
@@ -210,6 +231,7 @@ Transform the appended block into per-state persistence and innovation sd.
 """
 function of_unpack(θg)
     O = OBJECT_FACTORS[]
+    length(θg) == of_nparams() || return Float64[], Float64[], false
     Φ = Float64[]; ω = Float64[]
     i = 0
     for k in eachindex(O.names)
@@ -218,22 +240,35 @@ function of_unpack(θg)
         else
             append!(Φ, fill(O.phi_fixed[k], O.r[k]))
         end
-        append!(ω, of_sp.(θg[i+1:i+O.r[k]])); i += O.r[k]
+        append!(ω, max.(of_sp.(θg[i+1:i+O.r[k]]), OF_OMEGA_FLOOR)); i += O.r[k]
     end
-    ok = i == length(θg) && all(isfinite, Φ) && all(x -> isfinite(x) && x >= 0, ω)
+    ok = i == length(θg) && all(isfinite, Φ) && all(x -> isfinite(x) && x > 0, ω)
     return Φ, ω, ok
 end
 
-"Log-prior of the block on the transformed scale (no Jacobian — the convention of the trend block)."
-function of_logprior(Φ, ω)
+"""
+    of_logprior(Φ, ω, θg)
+
+Log-prior of the appended block INCLUDING the transform Jacobians, so the prior
+is proper in the raw coordinates the sampler moves in:
+  ω = softplus(x):   log dω/dx = x − softplus(x)        (→ −|x| as x → −∞)
+  φ = c·tanh(x):     log dφ/dx = log c + log(1 − tanh²x)  (→ −2|x| as |x| → ∞)
+Without them a fully-shared object (ω_g → 0, the designed outcome) leaves a
+flat raw tail the chains wander along.
+"""
+function of_logprior(Φ, ω, θg)
     O = OBJECT_FACTORS[]
     lp = 0.0
-    i = 0
+    i = 0; j = 0                                # i indexes Φ/ω, j indexes the raw block
     for k in eachindex(O.names)
         if O.phi_fixed[k] === nothing
+            xφ = θg[j+1:j+O.r[k]]; j += O.r[k]
             lp += sum(logpdf.(Normal(0.9, 0.15), Φ[i+1:i+O.r[k]]))
+            lp += sum(log(OF_PHI_MAX) .+ log.(max.(1 .- tanh.(xφ) .^ 2, 1e-300)))
         end
+        xω = θg[j+1:j+O.r[k]]; j += O.r[k]
         lp += sum(logpdf.(Cauchy(0.0, 1.0), ω[i+1:i+O.r[k]])) + O.r[k] * log(2)
+        lp += sum(xω .- of_sp.(xω))
         i += O.r[k]
     end
     return lp
@@ -285,7 +320,7 @@ function of_build_Gg(model_elements, model_options)
 end
 
 function of_Gg_cached(model_elements, model_options)
-    key = (objectid(model_elements.G), of_rg())
+    key = (objectid(model_elements.G), objectid(OBJECT_FACTORS[].Λbar), of_rg())
     c = _OF_G_CACHE[]
     (c !== nothing && c[1] == key) && return c[2]
     Gg, Gj_g = of_build_Gg(model_elements, model_options)
@@ -336,10 +371,9 @@ function of_augment_system(Ã, B̃, C̃, Ω̃_f, Φ_g, ω_g)
     return Ã2, B̃2, C̃2, Ω̃2
 end
 
-const _OF_GFULL_CACHE = Ref{Any}(nothing)   # (objectid(G), r, rτ, r_g) => G̃ with [f, τ, g] per lag block
 "Full augmented measurement matrices [f, τ, g]; cached like st_G_cached."
 function of_G_full_cached(model_elements, model_options, r::Int, rτ::Int)
-    key = (objectid(model_elements.G), r, rτ, of_rg())
+    key = (objectid(model_elements.G), objectid(OBJECT_FACTORS[].Λbar), r, rτ, of_rg())
     c = _OF_GFULL_CACHE[]
     (c !== nothing && c[1] == key) && return c[2]
     Gg = of_Gg_cached(model_elements, model_options)
@@ -378,5 +412,15 @@ function of_selftest(; r = 3, rτ = 2, rg = 2, q = 2, T = 40, n = 12, seed = 7)
     ok_moves = !isapprox(base, aug1; rtol = 1e-6)
     ok_equal || @warn "of_selftest: ω_g = 0 does NOT reproduce the trend-augmented likelihood ($base vs $aug0)"
     ok_moves || @warn "of_selftest: ω_g > 0 does not change the likelihood"
-    return ok_equal && ok_moves
+    # smoother leg: with ω_g at the floor the collapsed f must match the trend-only
+    # smoother, and the stashed g block must have the right shape
+    smτ, _, _ = recurse_kalman_filter_smoother(Ã, B̃, C̃, D, Ω̃, Ω_y, Σ, G̃τ, y)
+    cτ = st_collapse_smoother(smτ, r, rτ)
+    Ãs, B̃s, C̃s, Ω̃s = of_augment_system(Ã, B̃, C̃, Ω̃, 0.9 .* ones(rg), fill(OF_OMEGA_FLOOR, rg))
+    smg, _, _ = recurse_kalman_filter_smoother(Ãs, B̃s, C̃s, D, Ω̃s, Ω_y, Σ, G̃, y)
+    cg = st_collapse_smoother(smg, r, rτ, rg)
+    ok_smooth = isapprox(cτ.x_smoothed, cg.x_smoothed; atol = 1e-6) && OF_LAST_G[] !== nothing && size(OF_LAST_G[]) == (4rg, T)
+    ok_smooth || @warn "of_selftest: smoother leg failed (max |Δf| = $(maximum(abs, cτ.x_smoothed .- cg.x_smoothed)), OF_LAST_G $(OF_LAST_G[] === nothing ? "unset" : size(OF_LAST_G[])))"
+    OF_LAST_G[] = nothing; ST_LAST_TAU[] = nothing
+    return ok_equal && ok_moves && ok_smooth
 end
