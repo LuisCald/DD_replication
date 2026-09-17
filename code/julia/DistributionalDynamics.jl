@@ -126,6 +126,7 @@ include("BlackBoxSSM.jl")
 # include("CyclicalityOfConsumption2.jl")  # removed: recession consumption panels are made in Stata
 include("DIMESampler.jl")
 include("EM.jl")
+include("PersistenceCounterfactual.jl")
 include("RobustProjection.jl")
 include("HyperparameterOptimization.jl")
 include("MDD.jl")
