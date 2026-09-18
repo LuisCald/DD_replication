@@ -674,8 +674,14 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
     #    object across all sources, so it keeps the run-level namespace.
     ci_tag_global = (tag == " higher order15" || occursin("new data", tag)) ? tag : ""
     # ci_tag = (tag == " higher order15" || occursin("new data", tag)) ? tag : ""
-    sigma_file_name = init_path * "/noise_distributions/sigma_" * m_label * grid_tag * "_" * data_label * "_$end_year" * ci_tag_global * ".jld2"
+    # The whitening matrix is cached; a nonzero whitening_ridge is part of its
+    # definition, so it gets its own cache file (otherwise a ridge would silently
+    # never apply — the cached un-ridged matrix would be loaded).
+    wr = hasproperty(model_options, :whitening_ridge) ? model_options.whitening_ridge : 0.0
+    sigma_file_name = init_path * "/noise_distributions/sigma_" * m_label * grid_tag * "_" * data_label * "_$end_year" * ci_tag_global *
+                      (wr > 0 ? "_wr$(wr)" : "") * ".jld2"
     sigma_exists = isfile(sigma_file_name)
+    sigma_exists && @info "whitening matrix Σ̂⁻¹² loaded from cache: $(basename(sigma_file_name))" * (wr > 0 ? " (ridge $(wr))" : " (no ridge)")
 
     # Threads.@threads
     for j in axes(df_vec[1], 1) # TODO: threading possible when I don't compute the correlations. Why? it doesn't use RCall
