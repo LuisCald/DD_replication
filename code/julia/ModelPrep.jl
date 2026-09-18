@@ -835,6 +835,23 @@ function transform_DCT_boot(DCT_boot, time_p, year_vec, freq, freq_type, time_di
         Σ[v, w] = 1 #[v == 0 ? v + .1 : v for v in diag(Σ[k])]
     end
 
+    # Conditioning diagnostic + optional ridge (ModelOptions.whitening_ridge).
+    # inv(Σ) is enormous along directions of tiny sampling variance; with
+    # loadings that give those rows any weight, the whitened observation pins
+    # the state at every date the dataset is observed (see Structures.jl).
+    ridge = hasproperty(model_options, :whitening_ridge) ? model_options.whitening_ridge : 0.0
+    let d = diag(Σ), dpos = d[d .> 0]
+        if !isempty(dpos)
+            ev = try eigvals(Symmetric(Matrix(Σ))) catch; Float64[] end
+            evpos = ev[ev .> 0]
+            cnd = isempty(evpos) ? NaN : maximum(evpos) / minimum(evpos)
+            @info "whitening $(source): $(size(Σ, 1)) coefficients, bootstrap-variance spread max/median = $(round(maximum(dpos) / median(dpos); sigdigits = 3)), " *
+                  "cond(Σ̂) = $(round(cnd; sigdigits = 3))" * (ridge > 0 ? "; ridge $(ridge)·mean(diag) applied → cond ≤ $(round((maximum(evpos) + ridge * mean(dpos)) / (ridge * mean(dpos)); sigdigits = 3))" : "; no ridge (whitening_ridge = 0)")
+        end
+        if ridge > 0 && !isempty(dpos)
+            Σ .+= ridge * mean(dpos) .* Matrix(I, size(Σ)...)
+        end
+    end
     Σ = sqrt(nearest_spd(inv(Σ)))
 
     for (v, w) in zero_inds
@@ -2548,6 +2565,12 @@ end
 function get_param_vector(measures, kind_of_plots, label, data_cutoffs, tag)
     init_path = BASE_PATH
     m_label = measures_folder(measures)
+    # DD_MODE_FROM=<tag>: load the mode from ANOTHER tag's folder (a cheap look at a
+    # data-layer change — e.g. HANK_WRIDGE — under an existing mode, without re-estimating)
+    if haskey(ENV, "DD_MODE_FROM") && ENV["DD_MODE_FROM"] != tag
+        @info "get_param_vector: loading the mode from tag $(repr(ENV["DD_MODE_FROM"])) (DD_MODE_FROM) instead of $(repr(tag))"
+        tag = ENV["DD_MODE_FROM"]
+    end
     end_year = data_cutoffs["end"] != "" ? data_cutoffs["end"][1:4] : "all"
 
     folder = kind_of_plots == :mcmc ? "from_mcmc" : "from_optimization"
