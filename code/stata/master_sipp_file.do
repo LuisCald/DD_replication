@@ -264,7 +264,15 @@ drop thhtwlth rhhuscbt thhtnw thhscdbt thhdebt
 * for quarterly wealth, we just need a snapshot at the end quarter
 
 * Aggregate income to quarter
-collapse (mean) hhtwlth hhusdbt hhscdbt hhdebt hhtnw (mean) h_wgt (sum) h_totinc (first) spanel,  by(hh_id year quarter)
+* NB `collapse (sum)` returns 0 — not missing — when every month is missing, so an
+* incomplete quarter (check_month < 3 above) used to come out as income == 0 and was
+* then exported as a genuine zero-income household (1.6% of SIPP1, 0.6% of SIPP2,
+* 6.8% of SIPP3 household-quarters; 2026-09-22). Carry the count of months with
+* observed income through the collapse and blank the quarter unless all 3 are there.
+gen byte inc_obs = !missing(h_totinc)
+collapse (mean) hhtwlth hhusdbt hhscdbt hhdebt hhtnw (mean) h_wgt (sum) h_totinc inc_obs (first) spanel,  by(hh_id year quarter)
+replace h_totinc = . if inc_obs < 3
+drop inc_obs
 
 * Now merge in wealth
 rename hh_id id
@@ -439,7 +447,14 @@ foreach x in 2014 2018 2019 2020 2021 2022 2023 { 	//
 	replace thtotinc = . if check_month < 3
 	drop if check_month < 3 & missing(thnetworth) // check that thnetworth is correctly computed
 
-	collapse (mean) thval_ast thdebt_usec thdebt_sec thdebt_ast thnetworth thdebt_home (mean) weight (sum) thtotinc (first) spanel,  by(hh_id year quarter)
+	* Same guard as in the 1984–2008 block: `collapse (sum)` turns an all-missing
+	* quarter into income == 0. The 2014 redesign (12 monthly records per annual
+	* interview, mid-year entries/exits) produces many more incomplete quarters, hence
+	* the 6.8% fake zeros in SIPP3 before this fix (2026-09-22).
+	gen byte inc_obs = !missing(thtotinc)
+	collapse (mean) thval_ast thdebt_usec thdebt_sec thdebt_ast thnetworth thdebt_home (mean) weight (sum) thtotinc inc_obs (first) spanel,  by(hh_id year quarter)
+	replace thtotinc = . if inc_obs < 3
+	drop inc_obs
 
 	* Now merge in wealth
 	rename hh_id id
@@ -451,7 +466,8 @@ foreach x in 2014 2018 2019 2020 2021 2022 2023 { 	//
 	rename thdebt_home mgdebt 
 	rename thnetworth wealth
 	
-// 	replace income = . if income == 0 // mostly, if not all observations where an ID is not observed for 4 quarters
+// 	replace income = . if income == 0 // superseded 2026-09-22 by the inc_obs guard at the
+//                                     // quarterly collapse (which keeps genuine zero-income households)
 
 // 	gen wealth = assets - undebt - scdebt // net worth is computed weirdly by the SIPP at times
 
@@ -492,8 +508,14 @@ foreach var in wealth undebt tdebt scdebt mgdebt income assets {
 	replace `var' = `var' * inflation_ratio
 }
 
-* Treatment of zeros may be inducing weird dynamics 
-replace income = 0 if missing(income) 
+* Missing income stays missing (2026-09-22). The former `replace income = 0 if
+* missing(income)` turned every household-quarter without a complete income record
+* into a zero-income household: the DD code then ranked them at the bottom of the
+* income distribution while keeping their (real) wealth, biasing wealth-by-income for
+* the bottom group. A missing income simply drops the household from the income
+* objects for that quarter; its wealth still enters the wealth marginal.
+* NB the 1st-percentile trim below uses `income < p1`, and Stata treats missing as
+* +infinity in comparisons, so missing-income rows are kept, as intended.
 replace income = income * 4
 
 foreach var in undebt scdebt mgdebt tdebt wealth {
@@ -573,6 +595,12 @@ drop if qdate <= yq(1995, 4)
 * 2003Q4: 6.0k vs 25.9k in 2004Q4. No macro counterpart at either date.)
 drop if qdate == yq(2003, 4)
 drop if qdate == yq(1999, 4)
+* Start-of-panel seam (2026-09-25): 1996Q1 is the 1996 panel's first quarter with
+* half the sample (18k vs 34k) and an income shape unlike every later quarter
+* (bottom-quintile/mean 0.19 vs 0.20–0.21, top 2.43 vs 2.36–2.38). Together with
+* SIPP1's 4,200-household 1995Q4 it produced an 8-sd jolt in the smoothed states at
+* 1996Q1 and a spike in every wealth series of the first transferred-model run.
+drop if qdate == yq(1996, 1)
 
 export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP2.csv", replace
 
@@ -593,6 +621,10 @@ drop if qdate > yq(1995, 4)
 * — both are panel-boundary quarters; see the audit note in SIPP2 slicing above.)
 drop if qdate == yq(1988, 1)
 drop if qdate == yq(1985, 4)
+* End-of-panel seam (2026-09-25): the 1993 panel's last quarter has 4,200 households
+* against ~35k in a normal quarter (12%), income only — the same collapse criterion
+* as the two drops above, and one half of the 1996Q1 state jolt (see the SIPP2 block).
+drop if qdate == yq(1995, 4)
 
 export delimited using "/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SIPP1.csv", replace
 

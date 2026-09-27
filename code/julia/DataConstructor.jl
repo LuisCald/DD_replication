@@ -909,10 +909,16 @@ function series_approximate_copula(period_data, obs_measures, estimator; atom::U
     # Convert to Matrix for fast BLAS path
     R = Matrix{Float64}(X2[:, obs_measures])
 
-    # Rank the data
+    # Rank the data — POPULATION ranks, i.e. the weighted ECDF (2026-09-19).
+    # The unweighted rank/(n+1) used before is only right under uniform weights;
+    # with the SCF's wealthy oversample it puts the (numerous) sampled rich in the
+    # top of the rank axis although they represent few households, so the copula's
+    # "top 10% by income" region is a different population group: on the HANK SCF
+    # replica the wealth-by-income cells came out 0.68/1.07/2.37 (truth 0.31/0.97/4.58).
+    # weighted_rankdata reduces EXACTLY to rank/(n+1) when weights are uniform.
     n = size(R, 1)
     for j in axes(R, 2)
-        R[:, j] .= rankdata(@view(R[:, j])) ./ (n + 1)
+        R[:, j] .= weighted_rankdata(@view(R[:, j]), W)
     end
 
     if atom === nothing
@@ -941,8 +947,8 @@ function series_approximate_copula(period_data, obs_measures, estimator; atom::U
     nh = count(hold_mask)
     if nh >= 2
         Rh = R[hold_mask, :]
-        Rh[:, a] .= rankdata(@view(Rh[:, a])) ./ (nh + 1)   # conditional rank within holders
         Wh = W[hold_mask]
+        Rh[:, a] .= weighted_rankdata(@view(Rh[:, a]), Wh)   # conditional (weighted) rank within holders
         A .= reshape(get_copula_coefficients_fast(Rh, Wh, K - 1), size(A))
         holder_yw = vec(collect(A[slice...]))               # κ^{YWS}|_{YW}, for the reconstruction identity
     end
@@ -1456,6 +1462,25 @@ function rankdata(a)
     order = sortperm(a)
     ranks = similar(order)
     ranks[order] .= 1:length(a)
+    return ranks
+end
+
+"""
+    weighted_rankdata(a, w) -> Vector{Float64} in (0, 1)
+
+Population rank of every observation: the weighted ECDF evaluated at the
+observation (ties broken by sort order, like `rankdata`), scaled by n/(n+1) so
+that the result is EXACTLY `rankdata(a) ./ (n + 1)` when the weights are
+uniform (the published behaviour) and never touches 1. Used for the copula's
+rank axes: with non-uniform survey weights (SCF wealthy oversample) the
+unweighted rank misplaces households along the population rank axis.
+"""
+function weighted_rankdata(a, w)
+    n = length(a)
+    order = sortperm(a)
+    cw = cumsum(@view(w[order]))
+    ranks = Vector{Float64}(undef, n)
+    ranks[order] .= (cw ./ cw[end]) .* (n / (n + 1))
     return ranks
 end
 
