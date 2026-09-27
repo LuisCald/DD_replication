@@ -1685,6 +1685,33 @@ within-top-decile composition variation that drives conditional wealth.
 Atom-aware: for the atom measure the value function is the mixed quantile
 (0 on [0, π_t], conditional inverse above).
 """
+# ── Cross-conditional group definitions ─────────────────────────────────────
+# The CROSS-conditional cells E[outcome | conditioning ∈ group] use
+# ModelOptions.cross_conditional_shares (default 40/40/20); the MARGINAL share
+# groups (income_bot50 …) keep the 50/40/10 convention. Labels follow the same
+# rule as BASEtoolbox's `_share_labels` and Validation.compute_sample_cross_conditional
+# (bot<pct> / mid<pct> / top<pct>), so pipeline, sample and truth columns agree.
+cross_conditional_shares(model_options) =
+    hasproperty(model_options, :cross_conditional_shares) ? model_options.cross_conditional_shares : [0.5, 0.4, 0.1]
+
+function cross_group_labels(shares::AbstractVector)
+    n = length(shares)
+    [i == 1 ? "bot$(round(Int, 100s))" : i == n ? "top$(round(Int, 100s))" : "mid$(round(Int, 100s))"
+     for (i, s) in enumerate(shares)]
+end
+
+"Plain titles: \"Bottom 40%\", \"Middle 40%\", \"Top 20%\"."
+function cross_group_titles(shares::AbstractVector)
+    n = length(shares)
+    [(i == 1 ? "Bottom" : i == n ? "Top" : "Middle") * " $(round(Int, 100s))%" for (i, s) in enumerate(shares)]
+end
+
+"Percentile-range strings for table rows: \"<40\", \"40-80\", \">80\"."
+function cross_group_ranges(shares::AbstractVector)
+    e = round.(Int, 100 .* cumsum(shares)); n = length(shares)
+    [i == 1 ? "<$(e[1])" : i == n ? ">$(e[n-1])" : "$(e[i-1])-$(e[i])" for i in 1:n]
+end
+
 function compute_cross_conditional_means_continuous(
     cop_coefs,          # (K,…,K,T) reconstructed copula coefficient tensor
     split_pcfs,         # D matrices (grid_pcf × T), asinh-scaled Legendre coefficients
@@ -1998,6 +2025,7 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
         #    within-top-decile composition that conditional wealth lives on)
         cross_cond_data = compute_cross_conditional_means_continuous(
             copulas_coefs, split_pcfs, sort(measures), corr_mat;
+            share_spec = cross_conditional_shares(model_options),   # 40/40/20 by default; marginal shares above stay 50/40/10
             max_order = max_order, atom_dim = atom_dim,
             atom_π = atom_ser === nothing ? nothing : atom_ser.π,
         )
@@ -2064,7 +2092,7 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
 
     # Inject cross-conditional share means into data_dict
     if typeof(estimator) <: SeriesEstimator && @isdefined(cross_cond_data)
-        cross_share_labels = ["bot50", "mid40", "top10"]
+        cross_share_labels = cross_group_labels(cross_conditional_shares(model_options))   # bot40/mid40/top20
         for (key, mat) in cross_cond_data
             data_dict[key] = Dict{String, Any}()
             for (si, sl) in enumerate(cross_share_labels)

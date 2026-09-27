@@ -8,11 +8,6 @@ const model_options = ModelOptions(
     factor_selection = :bai_ng,   # automatic count via Bai-Ng ICp2, clamped to <= 10 (MC-validated at T~33; see FactorSelectionSim.jl)
     tag           = " business economy",
 )
-# Component columns live in the regenerated PSID_new/SCF_new files (canonical
-# PSID.csv/SCF.csv predate the component export) -- swapped in as in new_data.
-const obs_data = ObservedData(
-    files = merge(retrieve_data_files(), Dict(
-        "PSID" => joinpath(DATA_PROCESSING, "PSID_new.csv"),
-        "SCF"  => joinpath(DATA_PROCESSING, "SCF_new.csv"),
-    )),
-)
+# Component columns live in the canonical PSID.csv/SCF.csv (the regenerated
+# files became the defaults on 2026-09-22; the " new data" vintage tag was retired).
+const obs_data = ObservedData()

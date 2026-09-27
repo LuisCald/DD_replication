@@ -52,6 +52,14 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
     # Import truth
     truth_file = DATA_PROCESSING * "/HANK_truth_$(economy_number).csv"
     truth_data = CSV.read(truth_file, DataFrame)
+    # Blank truth cells (e.g. a boundary row set to NaN in a merged truth file) arrive
+    # as `missing`; the NaN tests below cannot take a Missing, so make them NaN here.
+    for c in names(truth_data)
+        col = truth_data[!, c]
+        if Missing <: eltype(col) && nonmissingtype(eltype(col)) <: Real
+            truth_data[!, c] = Float64.(coalesce.(col, NaN))
+        end
+    end
 
     # # Find the bounds of each 
     # hank_year_vec = repeat([i for i in collect(tmin["year"]:tmax["year"])], inner=4)
@@ -394,8 +402,15 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
     end
 
     # --- Cross-conditional comparison: E[outcome | conditioning ∈ group] ---
-    cross_labels = ["bot50", "mid40", "top10"]
-    cross_plot_titles = [L"\textrm{Bottom\,\, 50\%}", L"\textrm{Middle\,\, 40\%}", L"\textrm{Top\,\, 10\%}"]
+    # Cross cells (out ≠ cond) use ModelOptions.cross_conditional_shares (40/40/20);
+    # self "cells" (out == cond) are the MARGINAL share groups and stay 50/40/10 —
+    # they are read from data_dict[meas]["quantiles"]["common series"][bot50|mid40|top10]
+    # and compared with truth columns <meas>_bot50 etc.
+    cross_shares = cross_conditional_shares(model_options)
+    cross_labels = cross_group_labels(cross_shares)                     # bot40 / mid40 / top20
+    marg_shares  = [0.5, 0.4, 0.1]
+    marg_labels  = ["bot50", "mid40", "top10"]
+    cross_plot_titles = [latexstring("\\textrm{" * replace(t, " " => "\\,\\, ", "%" => "\\%") * "}") for t in cross_group_titles(cross_shares)]
     group_names = ["bottom", "middle", "top"]
     meas_display = Dict("consum" => "Consumption", "income" => "Income", "wealth" => "Wealth")
     detrended_or_not = ty == "average" ? "detrended_" : ""
@@ -421,7 +436,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
             if !haskey(corr_dict, "$(key)_r2")
                 corr_dict["$(key)_r2"] = Dict()
             end
-            for (si, sl) in enumerate(cross_labels)
+            for (si, sl) in enumerate(is_self ? marg_labels : cross_labels)
                 # DDFM reconstruction
                 if is_self
                     haskey(data_dict[out_meas]["quantiles"]["common series"], sl) || continue
@@ -533,7 +548,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                 end
 
                 sample_df = compute_sample_cross_conditional(
-                    sample_path, out_meas, cond_meas; shares = [0.5, 0.4, 0.1]
+                    sample_path, out_meas, cond_meas; shares = out_meas == cond_meas ? marg_shares : cross_shares
                 )
                 if sample_df === nothing
                     sample_corr_dict[sample_name][key] = Dict(
@@ -551,7 +566,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                 end
 
                 is_self_sample = (out_meas == cond_meas)
-                for (si, sl) in enumerate(cross_labels)
+                for (si, sl) in enumerate(is_self_sample ? marg_labels : cross_labels)
                     col_name = "$(key)_$(sl)"
                     truth_col = is_self_sample ? Symbol("$(out_meas)_$(sl)") : Symbol(col_name)
                     if !hasproperty(truth_data_filtered, truth_col) ||
@@ -929,7 +944,11 @@ function generate_averaged_hank_avg_corr_table(
     data_sources = data_sources isa String ? [data_sources] : data_sources
     m_label = measures_folder(measures)
     group_names = ["bottom", "middle", "top"]
-    group_labels = ["Bottom \$<50\$", "Middle \$50\\text{-}90\$", "Top \$>90\$"]
+    # Row labels follow the CROSS groups (cross_conditional_shares, 40/40/20). NB the
+    # diagonal cells of this table (out_var == cond_var) are the marginal share groups
+    # and remain 50/40/10 — state that in the table note.
+    _rng = cross_group_ranges(cross_conditional_shares(model_options))
+    group_labels = ["Bottom \$$(_rng[1])\$", "Middle \$$(replace(_rng[2], "-" => "\\text{-}"))\$", "Top \$$(_rng[3])\$"]
     cond_vars = ["consum", "income", "wealth"]
     out_vars = ["consum", "income", "wealth"]
     section_titles = ["By Consumption Groups", "By Income Groups", "By Wealth Groups"]

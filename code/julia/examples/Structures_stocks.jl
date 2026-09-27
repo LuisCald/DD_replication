@@ -38,14 +38,10 @@ const model_options = ModelOptions(
     # an item that a dataset does observe.
 )
 
-# The component columns live in the regenerated PSID_new/SCF_new files (the
-# canonical PSID.csv/SCF.csv predate the component export), so those two inputs
-# are swapped in exactly as in Structures_new_data.jl. The aggregate workbook
-# must carry the matching `stocks_per_hh` anchor; otherwise construction errors
-# out, which is the intended signal that the data isn't ready yet.
-const obs_data = ObservedData(
-    files = merge(retrieve_data_files(), Dict(
-        "PSID" => joinpath(DATA_PROCESSING, "PSID_new.csv"),
-        "SCF"  => joinpath(DATA_PROCESSING, "SCF_new.csv"),
-    )),
-)
+# The component columns (stocks, real_estate, business, pension, vehicles) live
+# in the canonical PSID.csv/SCF.csv since 2026-09-22, when the regenerated
+# "_new" files became the defaults (the " new data" vintage tag was retired).
+# The aggregate workbook must carry the matching `stocks_per_hh` anchor;
+# otherwise construction errors out, which is the intended signal that the data
+# isn't ready yet.
+const obs_data = ObservedData()
