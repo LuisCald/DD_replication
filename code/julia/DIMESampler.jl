@@ -75,6 +75,12 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     # First run tenative optimization
     BBO(par) = -likeli(model_elements, par, param_sizes, hyperpriors, Σ_ids, model_options)[1]
     par_final = resume ? nothing : run_black_box_opt(BBO, param_vector, param_sizes, priors, measures; opttime=bbo_opttime)
+    # NB (2026-09-20, 8-factor run): the BBO candidate is NOT usable as a
+    # factor-count selector. Its Ω block sits on the prior centre (innovation
+    # sds 0.19–0.38 around 1−ρ² = 0.19, ρ_F raw all ≈ 3.0 = the initial value),
+    # while the DIME mode's are 2.4× larger and 3.5× more spread. The stage
+    # carries no information about which factors the data keeps. Count live
+    # factors at the MODE (report_mode_dynamics, called from run_estimation.jl).
 
     # A_new,B_new,Ω_new,Δ_new,G_new, likeli_vec, Δ_log = run_EM_algorithm(param_vector, param_sizes, meas_ind, Σ_ids, model_elements, model_options)
     # @unpack G = model_elements

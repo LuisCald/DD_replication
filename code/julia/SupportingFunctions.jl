@@ -319,7 +319,19 @@ end
 #   |eig(A)| ≪ the Minnesota ρ_F target with large Ω_f sds — the wealth
 #   jitter signature (empirical smoke 2026-08-28; HANK runs 2026-09).
 # ─────────────────────────────────────────────────────────────────────
-function report_mode_dynamics(par_final, param_sizes, model_options)
+"""
+    report_mode_dynamics(par, param_sizes, model_options; label = "Mode dynamics", dead_frac = 0.05)
+
+Prints the dynamics implied by a parameter vector: factor persistence, innovation
+sds, trend block, object factors — and the number of LIVE distributional factors
+(innovation sd above `dead_frac` × the median dist sd; DD_DEAD_FRAC overrides).
+Called at the DIME mode and, with `label = "BBO point"`, at the black-box
+optimiser's candidate before sampling starts: if the two live counts agree, the
+BBO stage alone can fix the factor count (estimate once at an upper bound, count
+the survivors, re-run at that count — see doc/hank_campaign_overview.md).
+"""
+function report_mode_dynamics(par_final, param_sizes, model_options; label::AbstractString = "Mode dynamics",
+                              dead_frac::Float64 = parse(Float64, get(ENV, "DD_DEAD_FRAC", "0.15")))
     try
         core = st_core_params(par_final, param_sizes)
         A, _, _, D, Ω_var, _, _ = matrisize(core, param_sizes)
@@ -327,6 +339,10 @@ function report_mode_dynamics(par_final, param_sizes, model_options)
         r = param_sizes[1][1]
         ev = sort(abs.(eigvals(A)); rev = true)
         Ωd = diag(Ω_var)
+        ωf = spd.(Ωd[1:r])
+        live = ωf .> dead_frac * median(ωf)
+        @info "$(label): live distributional factors = $(count(live)) of $(r) " *
+              "(innovation sd > $(dead_frac) × median $(round(median(ωf); digits = 3)); dead: $(findall(.!live)))"
         # κ₅/κ₆/σ_ϕ are ESTIMATED (get_priors overwrites the Minnesota struct
         # from the H block each evaluation) — report the mode's values, not
         # the struct's (which holds whatever draw was evaluated last).
@@ -343,21 +359,21 @@ function report_mode_dynamics(par_final, param_sizes, model_options)
         end
         ρ_Y = inv_logit(Hraw[iY], -0.99, 0.99)
         σϕ = spd(Hraw[iσ])
-        @info "Mode dynamics: dist-factor |eig(A)| = $(round.(ev; digits = 3)) " *
+        @info "$(label): dist-factor |eig(A)| = $(round.(ev; digits = 3)) " *
               "(estimated persistence target $(ρtxt), σ_ϕ = $(round(σϕ; digits = 2)); agg ρ_Y = $(round(ρ_Y; digits = 2)))"
-        @info "Mode dynamics: innovation sds — dist $(round.(spd.(Ωd[1:r]); digits = 2)), " *
+        @info "$(label): innovation sds — dist $(round.(spd.(Ωd[1:r]); digits = 2)), " *
               "agg $(round.(spd.(Ωd[r+1:end]); digits = 2)); agg AR diag(D) $(round.(D isa AbstractMatrix ? diag(D) : D; digits = 2))"
         if st_is_stochastic(param_sizes)
             θblk = par_final[end-st_ntrend(param_sizes)+1:end]
             n_tr = st_trend_dim(r)
             θtr = θblk[1:n_tr]
-            @info "Mode dynamics: trend ω_τ = $(round.(spd.(θtr[1:r]); digits = 3)), " *
+            @info "$(label): trend ω_τ = $(round.(spd.(θtr[1:r]); digits = 3)), " *
                   "ψ = $(round.(spd.(θtr[r+1:2r]); digits = 2)), λ = $(round(spd(θtr[n_tr]); digits = 3))"
             if of_active() && length(θblk) > n_tr
                 Φg, ωg, _ = of_unpack(θblk[n_tr+1:end])
                 O = OBJECT_FACTORS[]
                 lab = vcat([fill(string(O.names[k]), O.r[k]) for k in eachindex(O.names)]...)
-                @info "Mode dynamics: object factors — " *
+                @info "$(label): object factors — " *
                       join(["$(lab[i]): φ = $(round(Φg[i]; digits = 3)), ω = $(round(ωg[i]; digits = 3))" for i in eachindex(lab)], "; ")
             end
         end

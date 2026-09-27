@@ -663,17 +663,12 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
     Σ̂⁻¹²ⱼ = Vector{Matrix{Float64}}(undef, length(sources))
     max_draws = 999
 
-    # Cache namespaces. Two cases:
-    #  - " higher order15" changes the estimator itself → ALL per-source caches
-    #    and the joint sigma differ from baseline (global namespace).
-    #  - Data-vintage runs (tag contains "new data") swap only SOME input files
-    #    (PSID_new / SCF_new). The vintage namespace applies PER SOURCE, only to
-    #    datasets whose input file is a regenerated "_new" file — unchanged
-    #    surveys (CEX, CPS, SIPP1-3) reuse their baseline caches instead of
-    #    re-bootstrapping identical data under a new name. Sigma is a joint
-    #    object across all sources, so it keeps the run-level namespace.
-    ci_tag_global = (tag == " higher order15" || occursin("new data", tag)) ? tag : ""
-    # ci_tag = (tag == " higher order15" || occursin("new data", tag)) ? tag : ""
+    # Cache namespace: " higher order15" changes the estimator itself, so ALL
+    # per-source caches and the joint sigma differ from baseline. (The former
+    # " new data" vintage namespace — PSID_new/SCF_new — was removed 2026-09-22:
+    # the regenerated files are the data now, so the caches are simply rebuilt
+    # under the baseline names; see run_prep.jl.)
+    ci_tag_global = tag == " higher order15" ? tag : ""
     # The whitening matrix is cached; a nonzero whitening_ridge is part of its
     # definition, so it gets its own cache file (otherwise a ridge would silently
     # never apply — the cached un-ridged matrix would be loaded).
@@ -691,14 +686,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
         confidence_intervals[source] = Dict()
 
         # Per-source cache namespace (see above)
-        ci_tag = if tag == " higher order15"
-            tag
-        elseif occursin("new data", tag) &&
-               occursin("_new", basename(get(obs_data.files, source, "")))
-            tag
-        else
-            ""
-        end
+        ci_tag = tag == " higher order15" ? tag : ""
 
         # File name for the confidence intervals and noise distributions
         ci_file_name = init_path * "/confidence_intervals/ci_draws_" * m_label * grid_tag * "_" * ci_source * "_$end_year" * ci_tag * ".jld2"
@@ -846,16 +834,27 @@ function transform_DCT_boot(DCT_boot, time_p, year_vec, freq, freq_type, time_di
     # loadings that give those rows any weight, the whitened observation pins
     # the state at every date the dataset is observed (see Structures.jl).
     ridge = hasproperty(model_options, :whitening_ridge) ? model_options.whitening_ridge : 0.0
-    let d = diag(Σ), dpos = d[d .> 0]
-        if !isempty(dpos)
+    # The ridge is a FRACTION of the typical bootstrap variance of an OBSERVED
+    # coefficient. Rows this dataset never observes had their diagonal set to 1
+    # just above (placeholders); for a survey observing two measures that is
+    # ~1,585 of 1,730 rows, so mean(diag) over all rows ≈ 1 while the observed
+    # rows' variances are far smaller — the ridge would then swamp them and
+    # flatten the whitening (2026-09-26: SCF cond 17,200 → 24, SIPP2 14,900 → 62).
+    # Scale by the observed rows only; PSID (all rows observed) is unaffected.
+    placeholder_rows = Set(v for (v, _) in zero_inds)
+    obs_rows = [i for i in 1:size(Σ, 1) if !(i in placeholder_rows)]
+    let d = diag(Σ), dobs = d[obs_rows]
+        if !isempty(dobs)
             ev = try eigvals(Symmetric(Matrix(Σ))) catch; Float64[] end
             evpos = ev[ev .> 0]
             cnd = isempty(evpos) ? NaN : maximum(evpos) / minimum(evpos)
-            @info "whitening $(source): $(size(Σ, 1)) coefficients, bootstrap-variance spread max/median = $(round(maximum(dpos) / median(dpos); sigdigits = 3)), " *
-                  "cond(Σ̂) = $(round(cnd; sigdigits = 3))" * (ridge > 0 ? "; ridge $(ridge)·mean(diag) applied → cond ≤ $(round((maximum(evpos) + ridge * mean(dpos)) / (ridge * mean(dpos)); sigdigits = 3))" : "; no ridge (whitening_ridge = 0)")
+            dscale = mean(dobs)
+            @info "whitening $(source): $(length(obs_rows)) of $(size(Σ, 1)) coefficients observed, bootstrap-variance spread max/median (observed rows) = $(round(maximum(dobs) / median(dobs); sigdigits = 3)), " *
+                  "cond(Σ̂) = $(round(cnd; sigdigits = 3))" *
+                  (ridge > 0 ? "; ridge $(ridge)·mean(observed diag) = $(round(ridge * dscale; sigdigits = 3)) applied → cond ≤ $(round((maximum(evpos) + ridge * dscale) / (ridge * dscale); sigdigits = 3))" : "; no ridge (whitening_ridge = 0)")
         end
-        if ridge > 0 && !isempty(dpos)
-            Σ .+= ridge * mean(dpos) .* Matrix(I, size(Σ)...)
+        if ridge > 0 && !isempty(dobs)
+            Σ .+= ridge * mean(dobs) .* Matrix(I, size(Σ)...)
         end
     end
     Σ = sqrt(nearest_spd(inv(Σ)))
@@ -1617,7 +1616,7 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
 end
 
 
-function perform_pca(pool, measures, type, tag; additional_data_blocks=false, best_aggs=false, col_labels=nothing, col_years=nothing)
+function perform_pca(pool, measures, type, tag; additional_data_blocks=false, best_aggs=false, col_labels=nothing, col_years=nothing, fit_mask=nothing)
     local M, proj, pcs
     # if pca_perspective == "bayesian"
     #     M = MultivariateStats.fit(PPCA, data_matrix; maxiter=3000, method=:bayes)  # probabilistic PCA 
@@ -1632,7 +1631,13 @@ function perform_pca(pool, measures, type, tag; additional_data_blocks=false, be
               "the specification keeps the MDD-selected count (see Mdim below)"
         # println(tag)
 
-        M = MultivariateStats.fit(PCA, pool; pratio=0.95, method=:svd, mean=0)  # TODO: unfix this!
+        # fit_mask (ModelOptions.aggregate_pca_exclude): estimate the loadings on the
+        # unmasked quarters only, then project EVERY quarter on them — the excluded
+        # quarters (COVID) still move the aggregate states but no longer define the axes.
+        fit_pool = fit_mask === nothing ? pool : pool[:, fit_mask]
+        fit_mask === nothing || @info "Aggregate PCA: loadings fit on $(size(fit_pool, 2)) of $(size(pool, 2)) quarters " *
+                                      "($(size(pool, 2) - size(fit_pool, 2)) excluded via aggregate_pca_exclude); all quarters projected"
+        M = MultivariateStats.fit(PCA, fit_pool; pratio=0.95, method=:svd, mean=0)  # TODO: unfix this!
         pcs = MultivariateStats.transform(M, pool)
         
         λ = sqrt.(principalvars(M))
@@ -2290,7 +2295,19 @@ function select_aggregates(aggregates, measures, tot_periods, tmin, tmax, agg_la
 
         standardize_aggs!(super_aggs)
 
-        u_proj, agg_pcs, _ = perform_pca(super_aggs, measures, :aggs, tag)
+        # Column j of super_aggs stacks dates j … j+agg_lags; its contemporaneous
+        # date is row j+agg_lags of `aggregates`. Quarters listed in
+        # ModelOptions.aggregate_pca_exclude are kept out of the PCA FIT only
+        # (loadings); every quarter is still projected.
+        excl = hasproperty(model_options, :aggregate_pca_exclude) ? Set(String.(model_options.aggregate_pca_exclude)) : Set{String}()
+        fit_mask = if isempty(excl)
+            nothing
+        else
+            col_dates = aggregates[!, "date"][agg_lags+1:end]
+            [!("$(Dates.year(d))-Q$(Dates.quarterofyear(d))" in excl) for d in col_dates]
+        end
+
+        u_proj, agg_pcs, _ = perform_pca(super_aggs, measures, :aggs, tag; fit_mask = fit_mask)
 
         agg_pcs = agg_pcs[:, 1:end-dropped_rows_ub]
         agg_count = size(agg_pcs, 1)
