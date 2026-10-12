@@ -601,7 +601,19 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                     truth_vals  = truth_data_filtered[:, truth_col] ./ truth_data_filtered[:, mean_col]
                     sample_vals = sample_interp ./ truth_data_filtered[:, mean_col]
 
-                    valid_s = findall(i -> !isnan(truth_vals[i]) && !isnan(sample_vals[i]),
+                    # Score the sample on the SAME quarters as the model's cell (2026-10-12):
+                    # the model's reconstruction is undefined before the dataset's first
+                    # in-window wave (HP / alignment-drift trend), while the interpolated
+                    # sample extrapolated into those quarters — with 9 SCF waves that alone
+                    # moved the wealth-by-income sample column by 10–15 points.
+                    model_cell = if is_self_sample
+                        haskey(data_dict, out_meas) && haskey(data_dict[out_meas]["quantiles"]["common series"], sl) ?
+                            data_dict[out_meas]["quantiles"]["common series"][sl][base_jump:end-end_jump] : nothing
+                    else
+                        haskey(data_dict, key) && haskey(data_dict[key], sl) ? data_dict[key][sl][base_jump:end-end_jump] : nothing
+                    end
+                    model_ok(i) = model_cell === nothing || (i <= length(model_cell) && isfinite(model_cell[i]))
+                    valid_s = findall(i -> !isnan(truth_vals[i]) && !isnan(sample_vals[i]) && model_ok(i),
                                      1:length(truth_vals))
                     if length(valid_s) > 2
                         sample_corr_dict[sample_name][key][group_names[si]] =
