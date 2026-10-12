@@ -173,6 +173,7 @@ if occursin("HANK", tag)
             ["consum", "income", "wealth"],
             "from_mcmc";
             data_sources = ["c", "a", "d"],
+            tag = tag,
         )
     end
 end
