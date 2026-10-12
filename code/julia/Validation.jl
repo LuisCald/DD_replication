@@ -410,7 +410,51 @@ function average_out_quarters(series, ext_s, meas)
     return data_sub
 end
 
+"""
+    generate_wealth_by_income_df(source, ty, measures, opttag, gdp_series, tag)
+
+Mean wealth by income group (bottom 40 / next 40 / top 20) for the DFA comparison,
+read from the EXACT cross-conditional export (`<source>_cross_conditional….csv`,
+continuous Legendre operator, CreateTimeSeries.compute_cross_conditional_means_continuous).
+Replaces the 10×10×10 cell version (now `generate_wealth_by_income_df_cells`), which put
+every household of a cell at the unconditional decile means — a within-cell independence
+approximation that freezes the composition inside each income group (2026-10-12).
+Returns the same columns as before: `dates`, `wealthlevels_{bottom40,next40,top20}`
+(group mean × households in the group) and `tot_hhs_{…}`, so `compare_to_DFA` is unchanged.
+For `ty != "normal"` the levels are divided by `wealth_per_hh`, as the cell version did.
+"""
 function generate_wealth_by_income_df(source, ty, measures, opttag, gdp_series, tag)
+    shares = cross_conditional_shares(model_options)
+    if !(length(shares) == 3 && all(isapprox.(shares, [0.4, 0.4, 0.2]; atol = 1e-12)))
+        @warn "DFA comparison needs cross_conditional_shares = [0.4, 0.4, 0.2] to match the DFA's bottom 40 / next 40 / top 20 " *
+              "(got $(shares)); falling back to the 10-cell approximation"
+        return generate_wealth_by_income_df_cells(source, ty, measures, opttag, gdp_series, tag)
+    end
+    file_tag = ty == "normal" ? "" : "_detrended"
+    init_path = BASE_PATH
+    path = init_path * "/7_Results/$(measures_folder(measures))" * "$tag" * "/$(opttag)/data/" * "$(source)_cross_conditional" * file_tag * "_A non-diag_.csv"
+    if !isfile(path)
+        @warn "cross-conditional export not found ($(path)); falling back to the 10-cell approximation"
+        return generate_wealth_by_income_df_cells(source, ty, measures, opttag, gdp_series, tag)
+    end
+    cc = CSV.read(path, DataFrame)
+    cc[!, "time"] = QuarterlyDate.(string.(cc[!, "time"]))
+    labels = cross_group_labels(shares)                        # bot40, mid40, top20
+    cols = ["wealth_by_income_$(l)" for l in labels]
+    filter!(row -> all(c -> !ismissing(row[c]) && isfinite(row[c]), cols), cc)
+    gs = select(gdp_series, :time, :tot_hhs, :wealth_per_hh)
+    eltype(gs[!, :time]) <: QuarterlyDate || (gs[!, :time] = QuarterlyDate.(string.(gs[!, :time])))
+    df = innerjoin(cc, gs, on = :time)
+    out = DataFrame(dates = df[!, :time])
+    for (l, name, s) in zip(labels, ["bottom40", "next40", "top20"], shares)
+        mean_w = ty == "normal" ? df[!, "wealth_by_income_$(l)"] : df[!, "wealth_by_income_$(l)"] ./ df[!, :wealth_per_hh]
+        out[!, "tot_hhs_$(name)"] = s .* df[!, :tot_hhs]
+        out[!, "wealthlevels_$(name)"] = mean_w .* out[!, "tot_hhs_$(name)"]
+    end
+    return out
+end
+
+function generate_wealth_by_income_df_cells(source, ty, measures, opttag, gdp_series, tag)
     file_tag = ty == "normal" ? "" : "_detrended"
     # Import data 
     meas_folder = measures_folder(measures)
