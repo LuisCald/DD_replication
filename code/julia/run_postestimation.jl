@@ -227,8 +227,10 @@ try
     ids_sub = vcat(1:r, 4r+1:4r+q)
     Φ_sub = Φ[ids_sub, ids_sub]
 
+    # the observable mapping reads one survey's loadings: PSID, or the PSID replica in HANK
+    fevd_data = occursin("HANK", tag) ? "HANK a $(hank_economy(tag))" : "PSID"
     tbl = fevd_dist_vs_agg(model_elements, model_options, obs_data, Φ_sub, Ω;
-        r, q, horizon=20, factor_names=nothing, shock_order=:agg_first)
+        r, q, horizon=20, factor_names=nothing, shock_order=:agg_first, data_tag=fevd_data)
     mkpath(results_dir * "/data")
     if tbl isa DataFrame
         CSV.write(results_dir * "/data/fevd_table.csv", tbl)
@@ -246,7 +248,10 @@ end
 @info "Computing historical decomposition..."
 try
     smoother_res, _, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
-    hd = historical_decomp_factors_blockchol(Φ, r, q, smoother_res.dε_smoothed, smoother_res.x_smoothed, Ω;
+    # The smoother's state is [f_t, f_{t-1}, f_{t-2}, f_{t-3}, a_t] (4r+q); the decomposition
+    # works on the current-period block [f_t, a_t] (r+q), where the innovations live.
+    ids_hd = vcat(1:r, 4r+1:4r+q)     # (ids_sub / Φ_sub of Step 6 are local to its try block)
+    hd = historical_decomp_factors_blockchol(Φ[ids_hd, ids_hd], r, q, smoother_res.dε_smoothed[ids_hd, :], smoother_res.x_smoothed[ids_hd, :], Ω;
         splitting=:group, shock_order=:agg_first)
     @info "Historical decomposition: max reconstruction error $(hd.maxerr)"
 
