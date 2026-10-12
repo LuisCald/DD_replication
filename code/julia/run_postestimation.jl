@@ -165,11 +165,13 @@ end
 # economy's correlations file to exist).
 if occursin("HANK", tag)
     economy_number = parse(Int, hank_economy(tag))
-    if economy_number == 10
-        # generate_averaged_hank_avg_corr_table(
-        #     11:11,  # (stale range from the old single-economy workflow)
+    # HANK_TABLE_ECONS: economies averaged in the table, "1-10" (default) or e.g. "1";
+    # the table is built when the LAST of them finishes post-estimation.
+    _te = split(get(ENV, "HANK_TABLE_ECONS", "1-10"), "-")
+    table_econs = parse(Int, _te[1]):parse(Int, _te[end])
+    if economy_number == last(table_econs)
         generate_averaged_hank_avg_corr_table(
-            1:10,
+            table_econs,
             ["consum", "income", "wealth"],
             "from_mcmc";
             data_sources = ["c", "a", "d"],
