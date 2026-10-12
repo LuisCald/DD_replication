@@ -402,14 +402,29 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
     end
 
     # --- Cross-conditional comparison: E[outcome | conditioning ∈ group] ---
-    # Cross cells (out ≠ cond) use ModelOptions.cross_conditional_shares (40/40/20);
-    # self "cells" (out == cond) are the MARGINAL share groups and stay 50/40/10 —
-    # they are read from data_dict[meas]["quantiles"]["common series"][bot50|mid40|top10]
-    # and compared with truth columns <meas>_bot50 etc.
+    # ALL cells use ModelOptions.cross_conditional_shares (40/40/20), the diagonal
+    # (out == cond: mean of a measure within its own groups) included, so the table
+    # has one set of groups (2026-10-12). Diagonal cells are built from equal-mass
+    # bins, exactly: model from data_dict[meas]["quantiles"]["data"] (bin means of the
+    # fitted quantile function), truth from the quintile columns <meas>1q … <meas>5q,
+    # stored as <meas>_own_<label> (NOT <meas>_mid40, which is the 50–90 marginal group).
     cross_shares = cross_conditional_shares(model_options)
     cross_labels = cross_group_labels(cross_shares)                     # bot40 / mid40 / top20
-    marg_shares  = [0.5, 0.4, 0.1]
-    marg_labels  = ["bot50", "mid40", "top10"]
+    function _own_groups(bins::AbstractMatrix)                          # bins: nb × T, equal mass
+        nb = size(bins, 1); e = cumsum(cross_shares) .* nb
+        all(x -> isapprox(x, round(x); atol = 1e-9), e) || return nothing
+        ends = round.(Int, e); starts = vcat(0, ends[1:end-1]) .+ 1
+        [vec(mean(bins[a:b, :]; dims = 1)) for (a, b) in zip(starts, ends)]
+    end
+    for m in measures
+        qcols = ["$(m)$(k)q" for k in 1:5]
+        all(c -> hasproperty(truth_data_filtered, Symbol(c)), qcols) || continue
+        g = _own_groups(Matrix{Float64}(permutedims(Matrix(truth_data_filtered[:, qcols]))))
+        g === nothing && continue
+        for (sl, v) in zip(cross_labels, g)
+            truth_data_filtered[!, "$(m)_own_$(sl)"] = v
+        end
+    end
     cross_plot_titles = [latexstring("\\textrm{" * replace(t, " " => "\\,\\, ", "%" => "\\%") * "}") for t in cross_group_titles(cross_shares)]
     group_names = ["bottom", "middle", "top"]
     meas_display = Dict("consum" => "Consumption", "income" => "Income", "wealth" => "Wealth")
@@ -436,18 +451,19 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
             if !haskey(corr_dict, "$(key)_r2")
                 corr_dict["$(key)_r2"] = Dict()
             end
-            for (si, sl) in enumerate(is_self ? marg_labels : cross_labels)
+            own_model = is_self ? _own_groups(data_dict[out_meas]["quantiles"]["data"]) : nothing
+            for (si, sl) in enumerate(cross_labels)
                 # DDFM reconstruction
                 if is_self
-                    haskey(data_dict[out_meas]["quantiles"]["common series"], sl) || continue
-                    model_series = data_dict[out_meas]["quantiles"]["common series"][sl][base_jump:end-end_jump]
+                    own_model === nothing && continue
+                    model_series = own_model[si][base_jump:end-end_jump]
                 else
                     haskey(data_dict[key], sl) || continue
                     model_series = data_dict[key][sl][base_jump:end-end_jump]
                 end
 
                 # Truth: self-conditionals use "consum_bot50", cross use "consum_by_income_bot50"
-                truth_col = is_self ? Symbol("$(out_meas)_$(sl)") : Symbol("$(key)_$(sl)")
+                truth_col = is_self ? Symbol("$(out_meas)_own_$(sl)") : Symbol("$(key)_$(sl)")
                 if !hasproperty(truth_data_filtered, truth_col)
                     @warn "Truth column $truth_col not found, skipping cross-conditional for $key $sl"
                     continue
@@ -548,7 +564,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                 end
 
                 sample_df = compute_sample_cross_conditional(
-                    sample_path, out_meas, cond_meas; shares = out_meas == cond_meas ? marg_shares : cross_shares
+                    sample_path, out_meas, cond_meas; shares = cross_shares
                 )
                 if sample_df === nothing
                     sample_corr_dict[sample_name][key] = Dict(
@@ -566,9 +582,10 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                 end
 
                 is_self_sample = (out_meas == cond_meas)
-                for (si, sl) in enumerate(is_self_sample ? marg_labels : cross_labels)
+                own_model_s = is_self_sample && haskey(data_dict, out_meas) ? _own_groups(data_dict[out_meas]["quantiles"]["data"]) : nothing
+                for (si, sl) in enumerate(cross_labels)
                     col_name = "$(key)_$(sl)"
-                    truth_col = is_self_sample ? Symbol("$(out_meas)_$(sl)") : Symbol(col_name)
+                    truth_col = is_self_sample ? Symbol("$(out_meas)_own_$(sl)") : Symbol(col_name)
                     if !hasproperty(truth_data_filtered, truth_col) ||
                        !(col_name in names(sample_df_filt))
                         sample_corr_dict[sample_name][key][group_names[si]] = "--"
@@ -607,8 +624,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                     # sample extrapolated into those quarters — with 9 SCF waves that alone
                     # moved the wealth-by-income sample column by 10–15 points.
                     model_cell = if is_self_sample
-                        haskey(data_dict, out_meas) && haskey(data_dict[out_meas]["quantiles"]["common series"], sl) ?
-                            data_dict[out_meas]["quantiles"]["common series"][sl][base_jump:end-end_jump] : nothing
+                        own_model_s === nothing ? nothing : own_model_s[si][base_jump:end-end_jump]
                     else
                         haskey(data_dict, key) && haskey(data_dict[key], sl) ? data_dict[key][sl][base_jump:end-end_jump] : nothing
                     end
@@ -957,9 +973,8 @@ function generate_averaged_hank_avg_corr_table(
     data_sources = data_sources isa String ? [data_sources] : data_sources
     m_label = measures_folder(measures)
     group_names = ["bottom", "middle", "top"]
-    # Row labels follow the CROSS groups (cross_conditional_shares, 40/40/20). NB the
-    # diagonal cells of this table (out_var == cond_var) are the marginal share groups
-    # and remain 50/40/10 — state that in the table note.
+    # Row labels follow cross_conditional_shares (40/40/20), which every cell uses,
+    # the diagonal (a measure within its own groups) included.
     _rng = cross_group_ranges(cross_conditional_shares(model_options))
     group_labels = ["Bottom \$$(_rng[1])\$", "Middle \$$(replace(_rng[2], "-" => "\\text{-}"))\$", "Top \$$(_rng[3])\$"]
     cond_vars = ["consum", "income", "wealth"]
