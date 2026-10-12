@@ -673,8 +673,13 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
     # definition, so it gets its own cache file (otherwise a ridge would silently
     # never apply — the cached un-ridged matrix would be loaded).
     wr = hasproperty(model_options, :whitening_ridge) ? model_options.whitening_ridge : 0.0
+    # The whitening matrix is built from bootstrap draws detrended the SAME way as the
+    # data (HP vs per-row linear drift under trend_spec = :stochastic), so the trend
+    # handling is part of its definition: without it in the name, an HP run silently
+    # reused a matrix built under the stochastic spec and vice versa (2026-10-12).
+    tr = hasproperty(model_options, :trend_spec) ? model_options.trend_spec : :hp
     sigma_file_name = init_path * "/noise_distributions/sigma_" * m_label * grid_tag * "_" * data_label * "_$end_year" * ci_tag_global *
-                      (wr > 0 ? "_wr$(wr)" : "") * ".jld2"
+                      (wr > 0 ? "_wr$(wr)" : "") * "_tr$(tr)" * ".jld2"
     sigma_exists = isfile(sigma_file_name)
     sigma_exists && @info "whitening matrix Σ̂⁻¹² loaded from cache: $(basename(sigma_file_name))" * (wr > 0 ? " (ridge $(wr))" : " (no ridge)")
 
