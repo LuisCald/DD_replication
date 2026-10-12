@@ -59,11 +59,12 @@ the design (participation scalar `π` + conditional Legendre fit; participation-
 
 **Selecting an experiment.** `Structures.jl` reads the `DD_EXAMPLE` environment variable and,
 if set, loads `code/julia/examples/Structures_<name>.jl` instead of the baseline options
-(unset = published baseline, unchanged):
+(unset = the original published baseline, kept for reference):
 
 ```bash
 DD_EXAMPLE=stocks julia run_estimation.jl   # also: real_estate, business, pension, mortgages, consumer_credit (🚧 coming soon — see status above)
-DD_EXAMPLE=new_data julia run_estimation.jl # baseline spec on the regenerated PSID_new/SCF_new files
+DD_EXAMPLE=replication julia run_estimation.jl # the released specification (HP trend, complete-case loadings)
+DD_EXAMPLE=transfer julia run_estimation.jl    # development configuration (stochastic trend; DD_TREND, DD_PCA, DD_NDF, … switches)
 DD_EXAMPLE=6_factors julia run_estimation.jl # robustness: also 7_factors, no_housing_wealth,
                                              # no_recent_20q, cex_every_4_years (see replication map)
 ```
@@ -80,11 +81,9 @@ SCF :  data_cleaning.do ──► SCF_noForbes_nogrowth.xlsx
                               │  (generateForbes400.py: Forbes-400 augmentation,
                               │   cached 2021–24 scrape)
                               ▼
-                          SCF_new.csv    ← read via DD_EXAMPLE=new_data
-                                           (baseline still reads the frozen SCF.csv
-                                            until the new files are promoted)
+                          SCF_new.csv    → promoted to SCF.csv (2026-09-22)
 
-PSID:  data_cleaning.do ──► PSID_nogrowth.xlsx ──(GrowthCorrection.jl)──► PSID_new.csv
+PSID:  data_cleaning.do ──► PSID_nogrowth.xlsx ──(GrowthCorrection.jl)──► PSID_new.csv → promoted to PSID.csv
 
 Aggregates:  import_aggregates.do ──► inflation_corrected_correction_series.xlsx
              (per-HH anchors; component anchors need the new FRED series de-seasoned —
@@ -328,6 +327,12 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 
 ### Configuration
 
+The released estimates use `DD_EXAMPLE=replication` (`code/julia/examples/Structures_replication.jl`):
+HP trend, complete-case loadings, 5 distributional factors, whitening ridge 0.05, the
+inflation-based FRED-QD aggregate sheet with the COVID-robust aggregate PCA. `master.sh`
+sets it by default. `DD_EXAMPLE=transfer` is the same model with switchable settings
+(stochastic trend by default); the old published baseline is what runs with `DD_EXAMPLE` unset.
+
 All paths are configured in `code/julia/config.jl`. The script auto-detects the project root directory. No manual path editing should be necessary.
 
 ### Random Seed
@@ -344,8 +349,8 @@ appendices.
 ### The three commands that reproduce the computational exhibits
 
 ```bash
-julia --project=code/julia/env code/julia/run_estimation.jl       # Stage 2: baseline MCMC (~48-72h)
-julia --project=code/julia/env code/julia/run_postestimation.jl   # Stage 3: all baseline figures/tables (~hours)
+DD_EXAMPLE=replication julia --project=code/julia/env code/julia/run_estimation.jl       # Stage 2: released specification, MCMC (~48-72h)
+DD_EXAMPLE=replication julia --project=code/julia/env code/julia/run_postestimation.jl   # Stage 3: all figures/tables (~hours)
 DD_EXAMPLE=<name> julia --project=code/julia/env code/julia/run_estimation.jl   # robustness re-estimations
 ```
 

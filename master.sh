@@ -109,7 +109,7 @@ run_estimate() {
     run_stage "Stage 2: MCMC estimation (~48-72 hours)"
 
     cd "$PROJECT_ROOT"
-    julia --project="$JULIA_DIR/env" "$JULIA_DIR/run_estimation.jl"
+    DD_EXAMPLE="${DD_EXAMPLE:-replication}" julia --project="$JULIA_DIR/env" "$JULIA_DIR/run_estimation.jl"
 
     echo "Stage 2 complete."
 }
@@ -121,7 +121,7 @@ run_results() {
     run_stage "Stages 3-5: Post-estimation analysis, figures, and tables"
 
     cd "$PROJECT_ROOT"
-    julia --project="$JULIA_DIR/env" "$JULIA_DIR/run_postestimation.jl"
+    DD_EXAMPLE="${DD_EXAMPLE:-replication}" julia --project="$JULIA_DIR/env" "$JULIA_DIR/run_postestimation.jl"
 
     # Post-estimation Stata analysis (local projections, Ginis)
     echo "[Post-estimation] Stata: preparing micro data for local projections..."

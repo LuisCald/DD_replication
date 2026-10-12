@@ -19,6 +19,9 @@
 #              basis carries, 8 over-fits observed dates — doc/hank_campaign_overview.md §8)
 #   DD_WRIDGE  whitening ridge λ (default 0 = published whitening; 0.05 = HANK value)
 #   DD_PCA     em | kalman_em | complete_cases (default em)
+#   DD_TREND   stochastic (default) | hp — trend handling. hp = the per-coefficient HP
+#              filter of the published model (removed before estimation, re-added at
+#              reconstruction); the REPLICATION release uses hp (Structures_replication.jl).
 #   DD_TAG     extra tag suffix (default "")
 #   DD_AGG_SHEET   aggregates sheet in aggregates_HHs_NPs.xlsx (default stationary_series_infl:
 #                  FRED-QD published codes with prices as INFLATION, built by
@@ -36,6 +39,8 @@
 const TR_NDF    = parse(Int, get(ENV, "DD_NDF", "5"))
 const TR_WRIDGE = parse(Float64, get(ENV, "DD_WRIDGE", "0"))
 const TR_PCA    = Symbol(get(ENV, "DD_PCA", "em"))
+const TR_TREND  = Symbol(get(ENV, "DD_TREND", "stochastic"))
+TR_TREND in (:stochastic, :hp) || error("DD_TREND must be 'stochastic' or 'hp'")
 TR_PCA in (:complete_cases, :em, :kalman_em) || error("DD_PCA must be 'complete_cases', 'em' or 'kalman_em'")
 TR_NDF >= 1 || error("DD_NDF must be ≥ 1")
 
@@ -43,20 +48,20 @@ const TR_AGG_SHEET = get(ENV, "DD_AGG_SHEET", "stationary_series_infl")
 const TR_XCOVID    = get(ENV, "DD_AGG_XCOVID", "1") == "1"
 const TR_AGG_EXCL  = TR_XCOVID ? ["2020-Q1", "2020-Q2", "2020-Q3", "2020-Q4", "2021-Q1"] : String[]
 
-const TR_TAG = " transfer stochastic trend $(TR_NDF) factors pf" *
+const TR_TAG = " transfer" * (TR_TREND == :stochastic ? " stochastic trend" : " hp") * " $(TR_NDF) factors pf" *
                (TR_PCA == :em ? " em" : TR_PCA == :kalman_em ? " em kem" : "") *
                (TR_WRIDGE > 0 ? " wr$(TR_WRIDGE)" : "") *
                (TR_AGG_SHEET == "stationary_series_infl" ? " infl" : TR_AGG_SHEET == "stationary_series" ? "" : " $(TR_AGG_SHEET)") *
                (TR_XCOVID ? " xcovid" : "") *
                get(ENV, "DD_TAG", "")
 
-@info "TRANSFER spec: $(TR_NDF) distributional factors, per-factor persistence, joint cap 0.995, stochastic trend, " *
+@info "TRANSFER spec: $(TR_NDF) distributional factors, per-factor persistence, joint cap 0.995, $(TR_TREND) trend, " *
       "pca $(TR_PCA), whitening ridge $(TR_WRIDGE)$(TR_WRIDGE == 0 ? " (published whitening — read cond(Σ̂) in the prep log before deciding)" : "")"
 @info "  aggregates: sheet $(TR_AGG_SHEET); PCA loadings fit " * (TR_XCOVID ? "EXCLUDING 2020Q1–2021Q1 (all quarters projected)" : "on all quarters")
 @info "  tag: $(repr(TR_TAG))"
 
 const model_options = ModelOptions(
-    trend_spec        = :stochastic,
+    trend_spec        = TR_TREND,
     trend_lambda_scale = 0.1,
     persistence_prior = :per_factor,
     stationarity_cap  = 0.995,
