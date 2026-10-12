@@ -938,7 +938,8 @@ function generate_averaged_hank_avg_corr_table(
     measures::Vector{String},
     type::String;          # "from_mcmc" or "from_optimization"
     data_sources::Union{String, Vector{String}} = "a",   # single or multiple: ["a", "c", "d"]
-    output_path::String = ""
+    output_path::String = "",
+    tag::String = " HANK 1",   # the CURRENT run's tag; each economy's folder is this tag with its number swapped in
 )
     # Normalize to vector
     data_sources = data_sources isa String ? [data_sources] : data_sources
@@ -958,7 +959,9 @@ function generate_averaged_hank_avg_corr_table(
     all_sample = Dict{String, Dict{String, Dict{String, Vector{Float64}}}}()
 
     for econ_id in economy_ids
-        econ_tag = " HANK $(econ_id)"
+        # Runs since 2026-09 carry long tags (" HANK 1 stochastic trend 5 factors pf lvl wr0.05");
+        # the bare " HANK $(econ_id)" found nothing. Swap the economy number into the run's own tag.
+        econ_tag = replace(tag, r"HANK(\s+)\d+" => SubstitutionString("HANK\\g<1>$(econ_id)"); count = 1)
         init_path = BASE_PATH
         corr_path = init_path * "/7_Results/$(m_label)$(econ_tag)/$type/plots/correlations/"
 
