@@ -259,7 +259,7 @@ try
     hd_dir = results_dir * "/plots/historical_decomposition"
     mkpath(hd_dir)
     make_hd_tables(hd.cube, hd.order, hd.ids, year.(dts_hd), quarter.(dts_hd);
-        make_recession_plots=true, out_dir=hd_dir)
+        make_recession_plots=!occursin("HANK", tag), out_dir=hd_dir)   # US-recession panels need real dates; HANK economies are simulated
     @info "HD recession plots → $hd_dir"
 catch e
     @warn "Historical decomposition failed" exception=(e, catch_backtrace())
