@@ -219,6 +219,13 @@ function fevd_dist_vs_agg(
             end
         end
 
+        # The responses are DEVIATIONS: add_multidimensional_immutable inserted the constant
+        # κ_{0…0} = 1 into every (shock, horizon) column, which turned each response into
+        # "uniform copula + response" and made every population group receive ~1/8 of the
+        # mass from every shock — the copula FEVD then just counted shocks (160/380 = 42%).
+        # Zero it, so only the response is mapped to cell masses (2026-10-13).
+        cop_coef_events[ntuple(_ -> 1, D)..., :] .= 0.0
+
         # Reconstruct copula densities on the desired grid
         # Grid points 
         x = select_grid_points(grid_data_size_cop)
@@ -288,14 +295,10 @@ function fevd_dist_vs_agg(
                         A = permutedims(A, perm)
                     end
 
-                    if ev in dist_ev_set
-                        for (gname, (irng, wrng, crng)) in group_keys
-                            stats_dict["copula_groups"][gname][1] += sum(@view A[irng, wrng, crng])
-                        end
-                    else
-                        for (gname, (irng, wrng, crng)) in group_keys
-                            stats_dict["copula_groups"][gname][2] += sum(@view A[irng, wrng, crng])
-                        end
+                    # FEVD: squared response of the group's population share to this (shock, horizon)
+                    slot = ev in dist_ev_set ? 1 : 2
+                    for (gname, (irng, wrng, crng)) in group_keys
+                        stats_dict["copula_groups"][gname][slot] += sum(@view A[irng, wrng, crng])^2
                     end
                 end
 
@@ -335,10 +338,10 @@ function fevd_dist_vs_agg(
                         A2 = permutedims(A2)
                     end
 
-                    mLL = sum(@view A2[low, low])
-                    mLH = sum(@view A2[low, high])
-                    mHL = sum(@view A2[high, low])
-                    mHH = sum(@view A2[high, high])
+                    mLL = sum(@view A2[low, low])^2      # squared share responses (FEVD)
+                    mLH = sum(@view A2[low, high])^2
+                    mHL = sum(@view A2[high, low])^2
+                    mHH = sum(@view A2[high, high])^2
 
                     if ev in dist_ev_set
                         stats_dict["copula_quadrants"]["LowInc_LowWealth"][1] += mLL
@@ -490,6 +493,40 @@ function fevd_dist_vs_agg(
         println(latex_tbl)
     end
 
+
+    # Paper table "Decomposition of the Observables" (tab:fevd_obs_app): Group × Distributional/Aggregate
+    # for bottom 50 / next 40 / top 10 of consumption, income, wealth. Saved as .tex and .csv
+    # (it used to be printed to the log only), plus every group in fevd_obs_all.csv.
+    try
+        outdir = BASE_PATH * "/7_Results/$(measures_folder(measures))$(tag)/from_mcmc/data"
+        mkpath(outdir)
+        names_ = Dict("consum" => "Consumption", "income" => "Income", "wealth" => "Wealth")
+        glab = [("bottom50", "Bottom 50\\%"), ("next40", "Next 40\\%"), ("top10", "Top 10\\%")]
+        rows = String["\\begin{tabular}{lcc}", "\\toprule", "Group & Distributional (\\%) & Aggregate (\\%) \\\\", "\\midrule"]
+        csvrows = DataFrame(measure = String[], group = String[], distributional = Float64[], aggregate = Float64[])
+        for m in ("consum", "income", "wealth")
+            haskey(stats_dict, m) || continue
+            push!(rows, " & \\multicolumn{2}{c}{\\textit{$(names_[m])}} \\\\")
+            for (g, gl) in glab
+                haskey(stats_dict[m], g) || continue
+                d, a = 100 .* stats_dict[m][g]
+                push!(rows, "$gl & $(round(d; digits = 2)) & $(round(a; digits = 2)) \\\\")
+            end
+            push!(rows, "\\addlinespace")
+        end
+        push!(rows, "\\bottomrule", "\\end{tabular}")
+        write(outdir * "/fevd_obs_table.tex", join(rows, "\n"))
+        for (k, v) in stats_dict
+            v isa AbstractDict || continue
+            for (g, x) in v
+                (x isa AbstractVector && length(x) == 2) && push!(csvrows, (String(k), String(g), 100 * x[1], 100 * x[2]))
+            end
+        end
+        CSV.write(outdir * "/fevd_obs_all.csv", sort(csvrows, [:measure, :group]))
+        @info "FEVD of the observables → $outdir/fevd_obs_table.tex (+ fevd_obs_all.csv)"
+    catch e
+        @warn "saving the observables FEVD table failed: $e"
+    end
 
     return tbl
 

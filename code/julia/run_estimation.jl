@@ -16,6 +16,18 @@
 
 include(joinpath(@__DIR__, "DistributionalDynamics.jl"))
 
+# Results tree for this spec (some writers — Validation.jl, Correlations.jl,
+# CreateTimeSeries.jl — don't mkpath their folders)
+let rd = BASE_PATH * "/7_Results/" * measures_folder(model_options.measures) * model_options.tag
+    for sub in ("other_results/noise_distributions/measurement_noise", "other_results/noise_distributions/process_noise",
+                "plots/correlations", "from_mcmc/parameter_vectors", "from_mcmc/plots/correlations",
+                "from_mcmc/bayesian_convergence", "from_mcmc/data")
+        mkpath(joinpath(rd, sub))
+    end
+    mkpath(BASE_PATH * "/7_Results/factor_analysis"); mkpath(BASE_PATH * "/7_Results/MDD"); mkpath(BASE_PATH * "/posterior_draws")
+    @info "Results folder: $rd"
+end
+
 @info "═══ Stage 2: MCMC Estimation ═══"
 @info "BASE_PATH = $BASE_PATH"
 
@@ -110,4 +122,12 @@ for (c, k) in enumerate(keys(dv))
     end
 end
 @info "Time series export and validation complete."
+
+# Paper figure "Consumption Dynamics during Recessions" (RecessionPanels.jl)
+try
+    isfile(BASE_PATH * "/7_Results/$m_label" * "$tag" * "/from_mcmc/data/PSID_recession_groups_A non-diag_.csv") &&
+        plot_recession_panels(BASE_PATH * "/7_Results/$m_label" * "$tag")
+catch e
+    @warn "recession panels failed: $e"
+end
 

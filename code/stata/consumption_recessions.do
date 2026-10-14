@@ -9,6 +9,9 @@
 * placed in DATADIR). Output: 7_Results/Application/with_time_varying_trend/,
 * copied into the Overleaf Plots/consumption_plots/ tree for compilation.
 * Standalone post-estimation step — not part of 00_master_data.do.
+* SUPERSEDED (2026-10-13) by code/julia/RecessionPanels.jl, which runs in the
+* Julia post-estimation and computes the same groups exactly from the copula
+* (this file averages 10x10x10 grid cells). Kept for comparison.
 * ─────────────────────────────────────────────────────────────
 	clear
 	set more off

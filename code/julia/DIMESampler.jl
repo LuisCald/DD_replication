@@ -110,7 +110,15 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
     log_likeli = SSM(model_elements, param_sizes, hyperpriors, meas_ind, Σ_ids, model_options)
 
     # Run MCMC using Gregor's paper 
-    LogProbParallel(x) = pmap(log_likeli, eachslice(x, dims=2))  # running an ensemble in parallel (ensemble of chains)
+    # running an ensemble in parallel (ensemble of chains), one chain per thread;
+    # pmap without Distributed workers ran them serially
+    function LogProbParallel(x)
+        out = Vector{Float64}(undef, size(x, 2))
+        Threads.@threads for j in 1:size(x, 2)
+            out[j] = log_likeli(@view x[:, j])
+        end
+        return out
+    end
     
     if !resume
         hyper_params = st_hyper_params(par_final, param_sizes) #TODO: hardcoded
@@ -188,6 +196,10 @@ function run_DIME_sampler(model_elements, niter, param_vector, param_sizes, prio
         mv(tmp, ckpt_path; force = true)
     end
 
+    # serial warm-up: fills the lazy G caches (st_G_cached, of_*_cached) before
+    # the first threaded batch, so threads only ever read them
+    log_likeli(vec(donor))
+
     # off you go sampling
     DIME_chains, lprobs, propdist = RunDIME(LogProbParallel, init_chains, niter - done_iters, progress=true, aimh_prob=0.1,
                                             checkpoint=checkpoint, checkpoint_every=10)
@@ -246,7 +258,7 @@ function generate_marginals_for_hyperparameters(DIME_chains, m_label, tag; n_tre
         # if exp_vec[i] == 1
         #     filt_chain = exp.(filt_chain)
         # end
-        Plots.plot(filt_chain, lc=:black, color=:orange, fa=0.8, xformatter=:latex, yformatter=:latex, lt=:barhist, legend=false, xtickfontsize=14, ytickfontsize=14, guidefontsize=14)
+        Plots.plot(filt_chain, lc=:black, color=:orange, fa=0.8, xformatter=:latex, yformatter=:latex, lt=:barhist, legend=false, xtickfontsize=16, ytickfontsize=16, guidefontsize=16)
         Plots.savefig(init_path * "/7_Results/" * m_label * "$tag" * "/from_mcmc/bayesian_convergence/" * "hyperparameter_optimization_$i.pdf")
     end
 end

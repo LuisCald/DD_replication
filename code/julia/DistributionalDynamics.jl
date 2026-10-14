@@ -48,6 +48,7 @@ using GenericLinearAlgebra: svd
 using Distributions
 using StatsPlots
 using Plots
+Plots.default(tickfontsize = 16, guidefontsize = 16, legendfontsize = 16, titlefontsize = 16)   # paper figures: 16 pt everywhere (explicit per-plot sizes are ≥ 16 too)
 using MCMCChains
 using HypothesisTests
 using GLM
@@ -95,7 +96,7 @@ using ChebyshevApprox
 # @rlibrary rvinecopulib
 # @rlibrary copula
 
-# BLAS.set_num_threads(1)
+BLAS.set_num_threads(1)   # Julia threads own the cores (threaded DIME ensemble); avoids BLAS oversubscription
 # include("kernelPCA.jl")
 include("config.jl")
 include("Structures.jl")
@@ -116,6 +117,7 @@ include("HistoricalDecomposition.jl")
 include("IntervalEstimation.jl")
 include("Correlations.jl")
 include("CreateTimeSeries.jl")
+include("RecessionPanels.jl")        # paper recession panels, exact groups (replaces consumption_recessions.do)
 include("plot_HANK.jl")           # HANK-replica plotting + correlations export (restored from 6435306^; the exercise runs in this repo again)
 include("PosteriorDraws.jl")
 include("ObservationWeights.jl")       # anatomy: information/interpolation shares

@@ -2,7 +2,9 @@
 # (point-data) pass; the interval-estimation bootstrap (transform_DCT_boot)
 # reuses these decisions instead of re-testing every draw, so the M7 screen
 # adds no cost to the noise/CI construction.
-const _X13_ROW_MASKS = Dict{String,Vector{Bool}}()
+if !@isdefined(_X13_ROW_MASKS)   # guard: run_estimation.jl includes this file a second time
+    const _X13_ROW_MASKS = Dict{String,Vector{Bool}}()
+end
 
 function X13_seasonality_adjustment!(df_to_des, periods, source)
     # Find rows with at least one observation
@@ -39,8 +41,14 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
     n_screened = 0
     example_err = ""
 
+    # x12 writes its spec/output files (Rout*, gra_Rout) into R's working directory.
+    # Concurrent jobs sharing one directory overwrite each other's files and almost
+    # every series fails ("No proper run of x12", originals silently kept; seen with
+    # 24 simultaneous Marvin jobs, 2026-10-13). R's tempdir() is private per session.
     R"""
     suppressMessages(library(x12))     # x13binary must be installed
+    x13_old_wd <- getwd()
+    setwd(tempdir())                   # NB: R and Julia share the process cwd — restored below
     """
 
     # The X-13 banner ("Execution began ...") is printed by the x13 BINARY,
@@ -163,6 +171,7 @@ function X13_seasonality_adjustment!(df_to_des, periods, source)
               "observed series ($(n_screened) degenerate screened; pattern + M7 screens)"
     end
 
+    R"setwd(x13_old_wd)"
     return df_to_des
 end
 
@@ -296,20 +305,23 @@ function estimation_prep(obs_data::ObservedData, model_options::ModelOptions)
 
     cutoff_bounds = align_data_with_timeframe!(dfs, year_vec, time_p, data_cutoffs)
 
-    # Define data intervals # TODO: for the future, run this after data_constructor so that we construct intervals for all data and then subset to the timeframe we want vs. estimating separate intervals for different time frames 
-    confidence_intervals, Σ̂⁻¹² = define_data_intervals(df_vec, model_options, init_path, time_p, obs_data)
-    @info "Intervals defined."
-
-    # Perform proof of concept reconstruction
-    # First, select a df where all measures are observed 
-
-    # Pick the key from confidence intervals corresponding to this id 
+    # Proof of concept (figs. proof_pcfs, KL_div): raw vs 8-factor approximation of ONE
+    # survey — df_selector picks it by measure set: (C,Y,W) → PSID, (Y,W) → SCF, (C,Y) → CEX.
+    # The paper uses CEX for consumption and income, SCF for wealth, and all three for the
+    # KL panels: run_proof_of_concept.jl runs the three measure sets. It needs no bootstrap
+    # intervals, so it runs before them, and DD_PROOF_ONLY=1 stops right after it.
     if plot_proof && tag != " Γ all"
         id, OD = df_selector(dfs, df_vec, measures)
         source_of_id = df_vec.df_names[id]
 
         perform_proof_of_concept_reconstruction(OD, source_of_id, year_vec[id], gdp_series, time_p, freq_type[id], time_dict[id], model_options)
+        get(ENV, "DD_PROOF_ONLY", "0") == "1" && return nothing
     end
+
+    # Define data intervals # TODO: for the future, run this after data_constructor so that we construct intervals for all data and then subset to the timeframe we want vs. estimating separate intervals for different time frames 
+    confidence_intervals, Σ̂⁻¹² = define_data_intervals(df_vec, model_options, init_path, time_p, obs_data)
+    @info "Intervals defined."
+
 
 
     # Keep functional data for plotting against estimates 
@@ -797,20 +809,16 @@ function transform_DCT_boot(DCT_boot, time_p, year_vec, freq, freq_type, time_di
     # STEP 1: detrend 
     n_bootstraps = axes(DCT_boot, 3)
 
-    if occursin("CEX", source) || occursin("SIPP", source)
-        # Threads.@threads 
-        for b in n_bootstraps
-            X13_seasonality_adjustment!(DCT_boot[:, :, b], time_dict, source)
-            DCT_boot[:, :, b] = (hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic ?
-                st_perform_detrending : perform_detrending)(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
-            DCT_boot[:, :, b] = perform_standardization([DCT_boot[:, :, b]], estimator, dimension, measures)[1]
-        end
-    else
-        Threads.@threads for b in n_bootstraps
-            DCT_boot[:, :, b] = (hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic ?
-                st_perform_detrending : perform_detrending)(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
-            DCT_boot[:, :, b] = perform_standardization([DCT_boot[:, :, b]], estimator, dimension, measures)[1]
-        end
+    # No X-13 on the draws. CEX/SIPP draws used to go through
+    # X13_seasonality_adjustment!(DCT_boot[:, :, b], …), but that slice is a copy and
+    # the result was discarded, so Σ̂ never saw it — removing the call leaves Σ̂
+    # bit-identical and makes the CEX/SIPP draws threadable (RCall was the only reason
+    # for the serial loop). Conceptually it is not needed either: the seasonal pattern
+    # is common to all draws and leaves with the demeaning across draws below.
+    Threads.@threads for b in n_bootstraps
+        DCT_boot[:, :, b] = (hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic ?
+            st_perform_detrending : perform_detrending)(DCT_boot[:, :, b], time_p, year_vec, freq, freq_type, time_dict; return_only_data=true)
+        DCT_boot[:, :, b] = perform_standardization([DCT_boot[:, :, b]], estimator, dimension, measures)[1]
     end
 
     # Demean across bootstraps
@@ -1493,12 +1501,12 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
         end
     end
 
-    if occursin(" Γ all", tag)
-        if tag == " Γ all"
-            pcs, proj = run_TW_algorithm(MV, 0.8, "second tallest")
-        elseif tag == " Γ all 85"
-            pcs, proj = run_TW_algorithm(MV, 0.85, "second tallest")
-        end
+    # Tall–Wide projection: ModelOptions.tw_ratio > 0 (replication_tw80/85), or the
+    # published exact tags " Γ all" (0.80) / " Γ all 85" (0.85).
+    tw = hasproperty(model_options, :tw_ratio) && model_options.tw_ratio > 0 ? model_options.tw_ratio :
+         tag == " Γ all" ? 0.8 : tag == " Γ all 85" ? 0.85 : 0.0
+    if tw > 0
+        pcs, proj = run_TW_algorithm(MV, tw, "second tallest")
         @info "The size of the projection matrix for TW is $(size(proj))"
 
         if plot_proof

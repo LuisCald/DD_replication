@@ -3,8 +3,9 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__, "env"))
 using Plots, LaTeXStrings, CSV, DataFrames, Statistics
 
-out = "/Users/lc/Dropbox/Apps/Overleaf/Distributional Dynamics/Plots"
-counts = CSV.read("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/obs_counts.csv", DataFrame)
+const DD_ROOT = normpath(joinpath(@__DIR__, "..", "..", ".."))
+out = joinpath(DD_ROOT, "7_Results", "data_timeline"); mkpath(out)   # never the Overleaf folder: copy by hand
+counts = CSV.read(joinpath(DD_ROOT, "2_Data_processing", "obs_counts.csv"), DataFrame)
 counts = counts[counts.year .>= 1962, :]          # estimation sample starts 1962Q3
 counts.t = counts.year .+ (counts.quarter .- 1) ./ 4
 
@@ -94,7 +95,7 @@ Plots.plot!(plt, [1962.5, 2024.0 + LAG["Aggregates"]], [1, 1];
     color="#e34948", linewidth=8, alpha=0.9)
 
 for (y, n) in nlab
-    Plots.annotate!(plt, 2025.6, y, Plots.text(klabel(n), 14, "#6a6a6a", :left))
+    Plots.annotate!(plt, 2025.6, y, Plots.text(klabel(n), 16, "#6a6a6a", :left))
 end
 
 # PSID coverage phases: income always, wealth from 1983, consumption from 1999
@@ -102,9 +103,9 @@ for x in (1983.0, 1999.0)
     Plots.plot!(plt, [x, x], [3.74, 4.28]; color="#9a9a9a", linewidth=1.5,
         linestyle=:dot)
 end
-Plots.annotate!(plt, 1975.5, 4.44, Plots.text(L"Y", 15, "#2a78d6", :center))
-Plots.annotate!(plt, 1991.0, 4.44, Plots.text(L"Y,\,W", 15, "#2a78d6", :center))
-Plots.annotate!(plt, 2010.5, 4.44, Plots.text(L"C,\,Y,\,W", 15, "#2a78d6", :center))
+Plots.annotate!(plt, 1975.5, 4.44, Plots.text(L"Y", 16, "#2a78d6", :center))
+Plots.annotate!(plt, 1991.0, 4.44, Plots.text(L"Y,\,W", 16, "#2a78d6", :center))
+Plots.annotate!(plt, 2010.5, 4.44, Plots.text(L"C,\,Y,\,W", 16, "#2a78d6", :center))
 
 # "today" line at end of aggregate sample
 Plots.vline!(plt, [2024.0]; color="#3a3935", linestyle=:dash, linewidth=2)

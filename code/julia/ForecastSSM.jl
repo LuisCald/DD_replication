@@ -659,10 +659,10 @@ function plot_forecasts(data_dt, data_dt_r, ty, func_data, obs_data, avg_series,
                             yformatter=:latex,
                             xticks=(p_xaxis[1:intd:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(p_xaxis[1:intd:end])]),
                             legend=:best,
-                            xtickfontsize=14,
-                            ytickfontsize=14,
-                            legendfontsize=10,
-                            guidefontsize=14,
+                            xtickfontsize=16,
+                            ytickfontsize=16,
+                            legendfontsize=16,
+                            guidefontsize=16,
                             lc=:red,
                             lw=4,
                             # yerror = (dist[1][source][obj][meas] - dist[1][source]["lb"][obj][meas], dist[1][source]["ub"][obj][meas] - dist[1][source][obj][meas]),
@@ -687,7 +687,7 @@ function plot_forecasts(data_dt, data_dt_r, ty, func_data, obs_data, avg_series,
                             Plots.plot!(xaxis[cond],
                                 dist[1][source]["lb"][obj][meas][cond],
                                 fillrange=dist[1][source]["ub"][obj][meas][cond],
-                                fillalpha=0.1,
+                                fillalpha=0.35,
                                 fillcolor=:red,
                                 la=0.0,
                                 lw=4, dpi=500,
@@ -1019,10 +1019,24 @@ function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hype
     # dv[dataset_choice] = export_functional_data(dv[dataset_choice], dataset_choice, opttag, obs_data, func_data, time_params, user_t, model_options, false, false, :forecast)     
 
     plot_iterative_forecasts(dataset_choice, dv, predictions_dict, func_data, obs_data, user_t, time_params, model_options, opttag, label, avg_series) # select_series could go in here, but it's already relative to the average  
+    # scores of the drop-one-wave predictions → <results>/<folder>/data/<dataset>_dropwave_scores.csv
+    try
+        sc = DataFrame(filter(r -> r.tag == model_options.tag && r.source == dataset_choice, DROPWAVE_SCORES))
+        if nrow(sc) > 0
+            spath = BASE_PATH * "/7_Results/$(measures_folder(measures))" * model_options.tag * "/$optfolder/data"
+            mkpath(spath)
+            CSV.write(spath * "/" * dataset_choice * "_dropwave_scores.csv", sc)
+            @info "Drop-one-wave scores ($dataset_choice): " * join(["$(r.measure) $(r.group): rmse $(round(r.rmse; sigdigits=3)), cover $(round(r.cover; digits=2))" for r in eachrow(sc)], "; ")
+        end
+    catch e
+        @warn "drop-one-wave scores failed: $e"
+    end
     y = deepcopy(orig_y)
     @pack! model_elements = y
 end
 
+
+const DROPWAVE_SCORES = NamedTuple[]
 
 function plot_iterative_forecasts(dataset_choice, data_dt, data_dt_r, func_data, obs_data, user_params, time_params, model_options, type, label, avg_series)
     @unpack measures, lags, estimator, tag = model_options
@@ -1168,6 +1182,27 @@ function plot_iterative_forecasts(dataset_choice, data_dt, data_dt_r, func_data,
 
             end
 
+            # Drop-one-wave SCORE (fig. recon_missing1, panels g-i, as numbers): at each
+            # dropped wave, the prediction vs the survey's own estimate. rmse/mae relative
+            # to the average; cover = share of predictions inside the survey's 95% sampling
+            # interval; rmse_insample = the same for the smoother WITH that wave (reference).
+            for source in data_sources
+                for (g, d) in (("bottom50", bot), ("next40", mid), ("top10", top))
+                    pr, ob = d === bot ? bot_r : d === mid ? mid_r : top_r, d
+                    p_ = Float64.(pr[source][obj][meas]); o_ = Float64.(ob[source*"_obs"][obj][meas])
+                    f_ = Float64.(ob[source][obj][meas])
+                    l_ = Float64.(ob[source]["lb"][obj][meas]); u_ = Float64.(ob[source]["ub"][obj][meas])
+                    ok = findall(i -> isfinite(p_[i]) && isfinite(o_[i]), eachindex(p_))
+                    isempty(ok) && continue
+                    e = p_[ok] .- o_[ok]
+                    okc = filter(i -> isfinite(l_[i]) && isfinite(u_[i]), ok)
+                    push!(DROPWAVE_SCORES, (tag = tag, source = source, measure = meas, group = g, n = length(ok),
+                        rmse = sqrt(mean(abs2, e)), mae = mean(abs, e), bias = mean(e),
+                        cover = isempty(okc) ? NaN : mean(l_[okc] .<= p_[okc] .<= u_[okc]),
+                        rmse_insample = sqrt(mean(abs2, f_[ok] .- o_[ok]))))
+                end
+            end
+
             # Plots of both data, 2 lines per plot (we take the first quarter for the year)
             xaxis = QuarterlyDate(dates[meas]["tmin"]["year"], dates[meas]["tmin"]["quarter"]):Quarter(1):QuarterlyDate(dates[meas]["tmax"]["year"], dates[meas]["tmax"]["quarter"])
             dist_dict = Dict("top" => [top, top_r], "bottom" => [bot, bot_r], "middle" => [mid, mid_r])
@@ -1191,10 +1226,10 @@ function plot_iterative_forecasts(dataset_choice, data_dt, data_dt_r, func_data,
                         legend=ds == "bottom" ? :best : false,
                         lc=:red, #select_color(plot_name),
                         lw=4,
-                        xtickfontsize=14,
-                        ytickfontsize=14,
-                        legendfontsize=10,
-                        guidefontsize=14,
+                        xtickfontsize=16,
+                        ytickfontsize=16,
+                        legendfontsize=16,
+                        guidefontsize=16,
                         label=L"\textrm{Baseline}" #L"\textrm{%$(plot_name)}\,\,\textrm{Approximation}"
                     )
 

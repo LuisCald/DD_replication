@@ -508,7 +508,9 @@ function get_priors(model_elements, model_options, hyper_params)
     @unpack agg_count, factor_count, pcs, u, MV, proj = model_elements
     @unpack estimator, measures, constant, lags, prior, measurement_error, estimation_object, case, errors_process, pre_multiply = model_options
     @unpack grid_pcf, grid_cop = estimator
-    @unpack hyperparameters = prior
+    # per-call copy: the branches below overwrite entries, and the DIME ensemble
+    # evaluates chains on several threads that share model_options.prior
+    hyperparameters = copy(prior.hyperparameters)
 
     aggregate_rep = hasproperty(model_options, :aggregate_rep) ? model_options.aggregate_rep : :as_states
 
@@ -769,21 +771,25 @@ function likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, 
     Σ[.!cond] .= log.(exp.(Σ[.!cond]) .+ 1) # Basically, for large numbers, it does not matter if we use log(exp(x) + 1) or log(x + 1)
     apply_copula_error_weights!(Σ, model_options, agg_count)   # copula_error = :communality
 
-    # Create the separate Ω_f, Ω_y
+    # Blocks of Ω: Ω_f, Ω_y and the cross-covariance Ω_fy. The paper estimates the full Ω
+    # (innovations to the distributional and aggregate factors may be contemporaneously
+    # correlated); until 2026-10-14 the filter used only the diagonal blocks, leaving the
+    # cross correlations in Ω_corr unidentified (prior only).
     Ω_f = Ω[1:size(A, 1), 1:size(A, 1)]
     Ω_y = Ω[size(A, 1)+1:end, size(A, 1)+1:end]
+    Ω_fy = Ω[1:size(A, 1), size(A, 1)+1:end]
 
     # Filter-smoother estimates
     if smooth
         # Generate likelihood of data and smoother output 
-        smoother_output, log_D, alarm = recurse_kalman_filter_smoother(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
+        smoother_output, log_D, alarm = recurse_kalman_filter_smoother(A, B, C, D, Ω_f, Ω_y, Σ, G, y; Ω_fy = Ω_fy)
         tot_log_like = log_P + log_D         # Total likelihood 
         return smoother_output, tot_log_like, alarm
 
     else
         local log_D, alarm
         try
-            log_D, alarm = recurse_kalman_filter_forward(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
+            log_D, alarm = recurse_kalman_filter_forward(A, B, C, D, Ω_f, Ω_y, Σ, G, y; Ω_fy = Ω_fy)
         catch e
             log_D = -1.e12
             alarm = true
@@ -796,7 +802,7 @@ function likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, 
 end
 
 
-function recurse_kalman_filter_smoother(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
+function recurse_kalman_filter_smoother(A, B, C, D, Ω_f, Ω_y, Σ, G, y; Ω_fy = nothing)
     """Performs kalman filter recursively, performing a filtering step and updating step thereafter.
     Assumption is: measurements are uncorrelated.
 
@@ -827,6 +833,12 @@ function recurse_kalman_filter_smoother(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
     @views begin
         bigΩ[1:r, 1:r] .= Ω_f
         bigΩ[4r+1:end, 4r+1:end] .= Ω_y
+        # contemporaneous correlation between distributional and aggregate innovations
+        # (the paper's full Ω; it was block-diagonal before 2026-10-14)
+        if Ω_fy !== nothing
+            bigΩ[1:r, 4r+1:end] .= Ω_fy
+            bigΩ[4r+1:end, 1:r] .= transpose(Ω_fy)
+        end
     end
 
     # --------- initial prior ----------------------------------------
@@ -835,6 +847,10 @@ function recurse_kalman_filter_smoother(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
     Qcore = zeros(Tval, r + q, r + q)
     Qcore[1:r, 1:r] .= Ω_f
     Qcore[r+1:end, r+1:end] .= Ω_y
+    if Ω_fy !== nothing
+        Qcore[1:r, r+1:end] .= Ω_fy
+        Qcore[r+1:end, 1:r] .= transpose(Ω_fy)
+    end
     Pcore = lyapd(Lcore, Qcore)
 
     P_F = zeros(Tval, nₛ, nₛ)
@@ -999,7 +1015,7 @@ end
 #     return logL, alarm
 # end
 
-function recurse_kalman_filter_forward(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
+function recurse_kalman_filter_forward(A, B, C, D, Ω_f, Ω_y, Σ, G, y; Ω_fy = nothing)
     T = size(y, 2)
     r, q = size(B)
     nₛ = 4r + q
@@ -1024,6 +1040,12 @@ function recurse_kalman_filter_forward(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
     @views begin
         bigΩ[1:r, 1:r] .= Ω_f
         bigΩ[4r+1:end, 4r+1:end] .= Ω_y
+        # contemporaneous correlation between distributional and aggregate innovations
+        # (the paper's full Ω; it was block-diagonal before 2026-10-14)
+        if Ω_fy !== nothing
+            bigΩ[1:r, 4r+1:end] .= Ω_fy
+            bigΩ[4r+1:end, 1:r] .= transpose(Ω_fy)
+        end
     end
 
     # --------- initial prior ----------------------------------------
@@ -1032,6 +1054,10 @@ function recurse_kalman_filter_forward(A, B, C, D, Ω_f, Ω_y, Σ, G, y)
     Qcore = zeros(Tval, r + q, r + q)
     Qcore[1:r, 1:r] .= Ω_f
     Qcore[r+1:end, r+1:end] .= Ω_y
+    if Ω_fy !== nothing
+        Qcore[1:r, r+1:end] .= Ω_fy
+        Qcore[r+1:end, 1:r] .= transpose(Ω_fy)
+    end
     Pcore = lyapd(Lcore, Qcore)
 
     P_F = zeros(Tval, nₛ, nₛ)
