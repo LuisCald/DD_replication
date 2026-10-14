@@ -80,6 +80,26 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
     end
 
     truth_data_filtered = filter(row -> QuarterlyDate(row.year, row.quarter) in dts, truth_data)
+
+    # 40/40/20 groups (ModelOptions.cross_conditional_shares) — defined here so the
+    # Figure-10 own-group panels below and the cross-conditional table share them.
+    cross_shares = cross_conditional_shares(model_options)
+    cross_labels = cross_group_labels(cross_shares)                     # bot40 / mid40 / top20
+    function _own_groups(bins::AbstractMatrix)                          # bins: nb × T, equal mass
+        nb = size(bins, 1); e = cumsum(cross_shares) .* nb
+        all(x -> isapprox(x, round(x); atol = 1e-9), e) || return nothing
+        ends = round.(Int, e); starts = vcat(0, ends[1:end-1]) .+ 1
+        [vec(mean(bins[a:b, :]; dims = 1)) for (a, b) in zip(starts, ends)]
+    end
+    for m in measures
+        qcols = ["$(m)$(k)q" for k in 1:5]
+        all(c -> hasproperty(truth_data_filtered, Symbol(c)), qcols) || continue
+        g = _own_groups(Matrix{Float64}(permutedims(Matrix(truth_data_filtered[:, qcols]))))
+        g === nothing && continue
+        for (sl, v) in zip(cross_labels, g)
+            truth_data_filtered[!, "$(m)_own_$(sl)"] = v
+        end
+    end
     # for meas in measures
     #     for o in ["quantiles"]
     #         # println("HANK ci_u size: ", size(confidence_intervals["HANK"]["ci_u"][meas][o]))
@@ -183,10 +203,10 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                     lc=:red,
                     xformatter=:latex,
                     yformatter=:latex,
-                    xtickfontsize=14,
-                    ytickfontsize=14,
-                    legendfontsize=10,
-                    guidefontsize=14,
+                    xtickfontsize=16,
+                    ytickfontsize=16,
+                    legendfontsize=16,
+                    guidefontsize=16,
                     # xticks=(s_axis[1:intd:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:intd:end])]),
                     legend=:best,
                     label="",
@@ -226,10 +246,10 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                     lc=:blue,
                     lw=4,
                     la=0.5,
-                    xtickfontsize=14,
-                    ytickfontsize=14,
-                    legendfontsize=10,
-                    guidefontsize=14,
+                    xtickfontsize=16,
+                    ytickfontsize=16,
+                    legendfontsize=16,
+                    guidefontsize=16,
                     dpi=500, ls=:dot,
                     label=""
                 )
@@ -334,10 +354,10 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                 lc=:red,
                 xformatter=:latex,
                 yformatter=:latex,
-                xtickfontsize=14,
-                ytickfontsize=14,
-                legendfontsize=10,
-                guidefontsize=14,
+                xtickfontsize=16,
+                ytickfontsize=16,
+                legendfontsize=16,
+                guidefontsize=16,
                 legend=:best,
                 label="",
                 lw=4, dpi=500, ls=:solid,
@@ -349,10 +369,10 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                 lc=:blue,
                 lw=4,
                 la=0.5,
-                xtickfontsize=14,
-                ytickfontsize=14,
-                legendfontsize=10,
-                guidefontsize=14,
+                xtickfontsize=16,
+                ytickfontsize=16,
+                legendfontsize=16,
+                guidefontsize=16,
                 dpi=500, ls=:dot,
                 label=""
             )
@@ -399,6 +419,49 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
             Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"R^2\textrm{\, to\,\, Truth\,: %$(r2_s)\%}",)
             Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$meas" * "_share_$(sl)" * detrended_or_not * label * ".pdf")
         end
+
+        # --- Own-group panels on 40/40/20 (Figure 10, 2026-10-12) ---
+        # Same objects and normalisation as the diagonal cells of the HANK table:
+        # model = bin means of the fitted quantile function / select_series per-HH mean,
+        # truth = <meas>_own_<label> (from the quintile columns) / truth per-HH mean.
+        # The x-range runs from the first to the last quarter with a model estimate.
+        own_m = _own_groups(data_dict[meas]["quantiles"]["data"])
+        own_o = try
+            _own_groups(func_dict[data_name][meas]["quantiles"]["data"])
+        catch
+            nothing
+        end
+        if own_m !== nothing
+            for (si, sl) in enumerate(cross_labels)
+                tcol = Symbol("$(meas)_own_$(sl)")
+                hasproperty(truth_data_filtered, tcol) || continue
+                m_s = own_m[si][base_jump:end-end_jump] ./ select_series[base_jump:end-end_jump, meas*"_per_hh"]
+                t_s = truth_data_filtered[:, tcol] ./ truth_data_filtered[:, Symbol(meas * "_per_hh")]
+                ok = findall(i -> isfinite(m_s[i]) && isfinite(t_s[i]), eachindex(m_s))
+                length(ok) > 2 || continue
+                c_n = round(Int, cor(m_s[ok], t_s[ok]) * 100)
+                mdm = m_s[ok] .- mean(m_s[ok]); tdm = t_s[ok] .- mean(t_s[ok])
+                r2_n = round(Int, (1.0 - sum((mdm .- tdm) .^ 2) / length(ok) / var(t_s[ok])) * 100)
+                rng = first(ok):last(ok)
+                Plots.plot()
+                Plots.plot!(xaxis[rng], m_s[rng], ylabel=L"\textrm{%$(M)\, \, rel.\,  to\,\,  average}",
+                    lc=:red, lw=4, dpi=500, ls=:solid, label="", xformatter=:latex, yformatter=:latex,
+                    xtickfontsize=16, ytickfontsize=16, legendfontsize=16, guidefontsize=16, legend=:best,
+                    xlims=(xaxis[first(ok)], xaxis[last(ok)]))
+                Plots.plot!(xaxis[rng], t_s[rng], lc=:blue, lw=4, la=0.5, dpi=500, ls=:dot, label="")
+                if own_o !== nothing
+                    o_s = own_o[si][base_jump:end-end_jump] ./ select_series[base_jump:end-end_jump, meas*"_per_hh"]
+                    oc = [i for i in rng if isfinite(o_s[i])]
+                    if !isempty(oc)
+                        Plots.scatter!(xaxis[oc], o_s[oc], marker=:utriangle, markercolor=:black, ms=5, la=0.5, dpi=500, label="")
+                        Plots.plot!(xaxis[oc], o_s[oc], la=0.5, lw=2, dpi=500, label="", ls=:dash)
+                    end
+                end
+                Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"\textrm{Corr.\, to\,\, Truth\,: %$(c_n)\%}")
+                Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"R^2\textrm{\, to\,\, Truth\,: %$(r2_n)\%}")
+                Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$meas" * "_own_$(sl)" * detrended_or_not * label * ".pdf")
+            end
+        end
     end
 
     # --- Cross-conditional comparison: E[outcome | conditioning ∈ group] ---
@@ -408,23 +471,6 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
     # bins, exactly: model from data_dict[meas]["quantiles"]["data"] (bin means of the
     # fitted quantile function), truth from the quintile columns <meas>1q … <meas>5q,
     # stored as <meas>_own_<label> (NOT <meas>_mid40, which is the 50–90 marginal group).
-    cross_shares = cross_conditional_shares(model_options)
-    cross_labels = cross_group_labels(cross_shares)                     # bot40 / mid40 / top20
-    function _own_groups(bins::AbstractMatrix)                          # bins: nb × T, equal mass
-        nb = size(bins, 1); e = cumsum(cross_shares) .* nb
-        all(x -> isapprox(x, round(x); atol = 1e-9), e) || return nothing
-        ends = round.(Int, e); starts = vcat(0, ends[1:end-1]) .+ 1
-        [vec(mean(bins[a:b, :]; dims = 1)) for (a, b) in zip(starts, ends)]
-    end
-    for m in measures
-        qcols = ["$(m)$(k)q" for k in 1:5]
-        all(c -> hasproperty(truth_data_filtered, Symbol(c)), qcols) || continue
-        g = _own_groups(Matrix{Float64}(permutedims(Matrix(truth_data_filtered[:, qcols]))))
-        g === nothing && continue
-        for (sl, v) in zip(cross_labels, g)
-            truth_data_filtered[!, "$(m)_own_$(sl)"] = v
-        end
-    end
     cross_plot_titles = [latexstring("\\textrm{" * replace(t, " " => "\\,\\, ", "%" => "\\%") * "}") for t in cross_group_titles(cross_shares)]
     group_names = ["bottom", "middle", "top"]
     meas_display = Dict("consum" => "Consumption", "income" => "Income", "wealth" => "Wealth")
@@ -516,16 +562,16 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                     ylabel=L"\textrm{%$(Out_M)\, \, rel.\,  to\,\,  average}",
                     lc=:red,
                     xformatter=:latex, yformatter=:latex,
-                    xtickfontsize=14, ytickfontsize=14,
-                    legendfontsize=10, guidefontsize=14,
+                    xtickfontsize=16, ytickfontsize=16,
+                    legendfontsize=16, guidefontsize=16,
                     legend=:best, label="",
                     lw=4, dpi=500, ls=:solid,
                 )
                 Plots.plot!(s_axis,
                     truth_series,
                     lc=:blue, lw=4, la=0.5,
-                    xtickfontsize=14, ytickfontsize=14,
-                    legendfontsize=10, guidefontsize=14,
+                    xtickfontsize=16, ytickfontsize=16,
+                    legendfontsize=16, guidefontsize=16,
                     dpi=500, ls=:dot, label=""
                 )
                 Plots.plot!([], [], ls=:dot, lc=:black, la=0.0,
@@ -816,10 +862,10 @@ function generate_quantiles_shares_levels_HANK_full(data_dict, ty, func_data, da
                         lc=:red,
                         xformatter=:latex,
                         yformatter=:latex,
-                        xtickfontsize=14,
-                        ytickfontsize=14,
-                        legendfontsize=10,
-                        guidefontsize=14,
+                        xtickfontsize=16,
+                        ytickfontsize=16,
+                        legendfontsize=16,
+                        guidefontsize=16,
                         # xticks=(s_axis[1:intd:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:intd:end])]),
                         legend=:best,
                         label="",
@@ -831,10 +877,10 @@ function generate_quantiles_shares_levels_HANK_full(data_dict, ty, func_data, da
                         lc=:blue,
                         lw=4,
                         la=0.5,
-                        xtickfontsize=14,
-                        ytickfontsize=14,
-                        legendfontsize=10,
-                        guidefontsize=14,
+                        xtickfontsize=16,
+                        ytickfontsize=16,
+                        legendfontsize=16,
+                        guidefontsize=16,
                         dpi=500, ls=:dot,
                         label=""
                     )

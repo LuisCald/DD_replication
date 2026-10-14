@@ -11,9 +11,8 @@ quarterly noise into the distributional factors through B:
      (tcode 5, first difference of logs), ρ₁ ≈ 0.75 for the CPI.
   2. 2020Q1–2021Q1 hold ~20% of the sheet's standardised variance; that is handled
      on the Julia side (ModelOptions.aggregate_pca_exclude), not here.
-Everything else follows FRED-QD: same 198 series as the published sheet, same
-259 quarters (1959Q3–2024Q1); the three S&P series (not in FRED_QD.csv) are copied
-from the published sheet. Output: a NEW sheet `stationary_series_infl` in
+Every other series is taken unchanged from the published sheet (same 201 series,
+same 259 quarters 1959Q3–2024Q1); only the 49 price series are replaced. Output: a NEW sheet `stationary_series_infl` in
 aggregates_HHs_NPs.xlsx — the published `stationary_series` sheet is untouched.
 Select it with ObservedData(agg_data = retrieve_aggregate_data("stationary_series_infl")).
 """
@@ -46,13 +45,20 @@ d = pd.to_datetime(data["sasdate"]); quarters = [f"{y}-Q{(m - 1) // 3 + 1}" for 
 
 ref = pd.read_excel(WB, sheet_name=REF_SHEET); ref["time"] = ref["time"].astype(str)
 keep = [c for c in ref.columns if c != "time"]; low = {c.lower(): c for c in raw.columns}
-out = pd.DataFrame({"time": quarters}); n_fred = n_copied = 0; n_price = 0
+# Start from the PUBLISHED sheet and replace ONLY the price series (tcode 6 → 5).
+# (2026-10-12) An earlier version rebuilt every series from FRED_QD.csv with the
+# published codes; five series (hwix, nwpix, tlbsnnbbdix, tnwbsnnbbdix,
+# tnwmvbsnncbbdix) carry codes 1/2 but are trending, and the published sheet had
+# differenced them further — rebuilding put five non-stationary series into the PCA.
+out = ref.copy(); n_price = 0
+infl = pd.DataFrame({"time": quarters})
 for c in keep:
-    if c in low:
-        out[c] = transform(data[low[c]], tcode[low[c]]); n_fred += 1; n_price += tcode[low[c]] == 6
-    else:                                      # S&P series: not in FRED_QD.csv, carried over
-        out[c] = ref.set_index("time").reindex(quarters)[c].values; n_copied += 1
-out = out[out["time"].isin(set(ref["time"]))].reset_index(drop=True)
+    if c in low and tcode[low[c]] == 6:
+        infl[c] = transform(data[low[c]], 5); n_price += 1
+infl = infl[infl["time"].isin(set(ref["time"]))].set_index("time").reindex(out["time"])
+for c in infl.columns:
+    out[c] = infl[c].values
+n_fred, n_copied = n_price, len(keep) - n_price
 assert out.shape == ref.shape, (out.shape, ref.shape)
 assert out.isna().sum().sum() == 0, "NaNs in the rebuilt sheet"
 
@@ -62,6 +68,6 @@ with pd.ExcelWriter(WB, engine="openpyxl", mode="a", if_sheet_exists="replace") 
     out.to_excel(w, sheet_name=OUT_SHEET, index=False)
 
 def ac1(s): s = s[np.isfinite(s)]; return np.corrcoef(s[1:], s[:-1])[0, 1]
-print(f"wrote sheet '{OUT_SHEET}': {out.shape} ({n_fred} FRED-QD series, {n_price} of them prices now as inflation, {n_copied} copied), backup {stamp}")
+print(f"wrote sheet '{OUT_SHEET}': {out.shape} ({n_price} price series replaced by inflation, {n_copied} series copied from '{REF_SHEET}'), backup {stamp}")
 for c in ["gdpc1", "unrate", "cpiaucsl", "pcepilfe", "fedfunds"]:
     if c in out: print(f"  {c:9s} ρ₁ published sheet {ac1(ref[c].values.astype(float)):5.2f} → new {ac1(out[c].values.astype(float)):5.2f}")

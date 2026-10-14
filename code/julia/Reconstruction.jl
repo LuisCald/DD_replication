@@ -1,4 +1,4 @@
-function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources; reconstruction_to_show=false, dε_smoothed=false)
+function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources; reconstruction_to_show=false, dε_smoothed=false, state_draw=false, rng=Random.default_rng())
     """Reverse all steps taken in the data preparation."""
 
     @unpack lags, blind_to, case, pre_multiply, estimator, tag = model_options
@@ -23,6 +23,15 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
     else
         smoother_output, _, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
         @unpack x_smoothed, dε_smoothed = smoother_output
+        if state_draw
+            # posterior bands with factor uncertainty: x_t ~ N(x̂_{t|T}, Σ_{t|T}), pointwise
+            # (same draw as PosteriorDraws.export_factor_draws)
+            @unpack sigma_smoothed = smoother_output
+            x_smoothed = copy(x_smoothed)
+            for t in 1:size(x_smoothed, 2)
+                x_smoothed[:, t] .+= _psd_sqrt(sigma_smoothed[t]) * randn(rng, size(x_smoothed, 1))
+            end
+        end
     end
 
     @unpack proj, means, stds, agg_count = model_elements
@@ -30,27 +39,33 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
     @unpack grid_pcf, grid_cop = estimator
     dimension = length(measures)
 
-    # Plot the smoothed data
-    Plots.plot()
+    # Plot the smoothed data (not for credible-band draws: Plots' current plot is global state)
+    state_draw || Plots.plot()
     dts = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
     xaxis = 1:tot_periods
     init_path = BASE_PATH
     n_factors = size(proj, 2)
 
-    for i in 1:n_factors
+    # Distributional factors (paper fig:dist_fact): calendar years on the x-axis,
+    # boxed legend top right, thin lines.
+    yrs = [year(d) + (quarter(d) - 1) / 4 for d in dts]
+    for i in (state_draw ? (1:0) : (1:n_factors))
         Plots.plot!(
-            xaxis[5:end],
+            yrs[5:end],
             x_smoothed[i, 5:end],
-            xformatter=:latex,
-            yformatter=:latex,
-            # xticks=(xaxis[5:20:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(dts[5:20:end])]),
-            xticks=(xaxis[5:20:end], [i for i in 5:20:tot_periods]),
-            ylabel=L"\textrm{Factor\,\, Value}",
-            label=L"\textrm{Factor \,\, %$(i)}",
-            legend=:best) #, xticks=(collect(1:20:tot_periods), [L"%$(date)"[1:5] * "\$" for (_,date) in enumerate(gdp_series[1:20:end, :time])]))
+            lw = 1.2,
+            xticks = (first(5 * ceil(Int, yrs[5] / 5)):5:floor(Int, yrs[end]), string.(first(5 * ceil(Int, yrs[5] / 5)):5:floor(Int, yrs[end]))),
+            yformatter = y -> string(round(y; digits = 1) == round(y) ? Int(round(y)) : round(y; digits = 1)),
+            ylabel = "Factor Value",
+            label = "Factor $(i)",
+            legend = :topright, foreground_color_legend = :black, legendfontsize = 12,
+            framestyle = :axes, size = (900, 600), left_margin = 4Plots.mm, bottom_margin = 3Plots.mm,
+            fontfamily = "Times")
     end
-    mkpath(init_path * "/7_Results/factor_analysis")
-    Plots.savefig(init_path * "/7_Results/factor_analysis/distributional_factors$tag.pdf")
+    if !state_draw
+        mkpath(init_path * "/7_Results/factor_analysis")
+        Plots.savefig(init_path * "/7_Results/factor_analysis/distributional_factors$tag.pdf")
+    end
 
     aggregate_rep = hasproperty(model_options, :aggregate_rep) ? model_options.aggregate_rep : :as_states
 
@@ -97,6 +112,8 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
         end
     end
 
+    # (skipped for credible-band draws: they would overwrite the mode outputs, and race when threaded)
+    if !state_draw
     # Save smoothed factors and reconstructed coefficients as wide DataFrames with dates
     m_label = measures_folder(measures)
     save_dir = init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/data"
@@ -140,6 +157,7 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
         df_avg[!, "time"] = collect(dts)
         CSV.write(save_dir * "/$(ds)_coefficients_average.csv", select(df_avg, "time", :))
     end
+    end  # !state_draw
 
 
     # Create consensus average.
@@ -2649,14 +2667,14 @@ function gen_proof_of_concept_figure_Γ_comparison(d_data_dict, r_data_dict, mod
                         label="",
                         linewidth=3,
                         ls=:dot,
-                        xtickfontsize=10,
-                        ytickfontsize=10,
-                        legendfontsize=10,
-                        guidefontsize=14,
+                        xtickfontsize=16,
+                        ytickfontsize=16,
+                        legendfontsize=16,
+                        guidefontsize=16,
                         lc=:gray, #color_choices[i],
                         dpi=500,
                     )
-                    fs = 12
+                    fs = 16
                     if M == "Consum"
                         if j <= 5
                             if j == 1

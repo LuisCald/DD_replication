@@ -402,6 +402,29 @@ end
 # end
 
 
+"""
+    comparison_folder(meas_folder, current_tag, esttag)
+
+Results folder of robustness run `esttag` ("every 4 years", "6 factors", "less AF", …).
+Replication spec (current tag starts with " transfer"): the current tag plus that run's
+one change, as in examples/Structures_replication_*.jl. Old baseline: "<measures> <esttag>".
+"""
+function comparison_folder(meas_folder, current_tag, esttag)
+    if startswith(current_tag, " transfer")
+        b = current_tag
+        t = esttag == "every 4 years" ? b * " every 4 years" :
+            esttag == "excluding recent 20 quarters" ? b * " excluding recent 20 quarters" :
+            esttag == "excluding housing cycle wealth" ? b * " excluding housing cycle wealth" :
+            esttag in ("6 factors", "7 factors") ? replace(b, r" \d+ factors" => " " * esttag) :
+            esttag == "less AF" ? b * " 3 af" :
+            esttag == "more AF" ? b * " 15 af" :
+            esttag == "less DF and AF" ? replace(b, r" \d+ factors" => " 3 factors") * " 3 af" :
+            b * " " * esttag
+        return meas_folder * t
+    end
+    return meas_folder * " " * esttag
+end
+
 function get_estimates_for_comparison(data_name, ty, time_p, measures, estimator)
     if typeof(estimator) <: SeriesEstimator
         @unpack integral_pcf_grid, integral_cop_grid = estimator
@@ -473,13 +496,18 @@ function get_estimates_for_comparison(data_name, ty, time_p, measures, estimator
             #     estimates = CSV.read(init_path * "/7_Results/$meas_folder " * tag * "/from_mcmc/data/CEX_functional_data" * data_tag * "_A non-diag_.csv", DataFrame)
             # elseif !occursin("every 4 years", tag) && plot_name == "CEX"
             #     estimates = CSV.read(init_path * "/7_Results/$meas_folder " * tag * "/from_mcmc/data/CEX_all_functional_data" * data_tag * "_A non-diag_.csv", DataFrame)
-            if plot_name == "CEX"
-                estimates = CSV.read(init_path * "/7_Results/$meas_folder " * tag * "/from_mcmc/data/CEX_functional_data" * data_tag * "_A non-diag_.csv", DataFrame)
-            elseif tag == "" && plot_name == "SCF"
-                estimates = CSV.read(init_path * "/7_Results/$meas_folder" * tag * "/from_mcmc/data/$(plot_name)_functional_data" * data_tag * "_A non-diag_.csv", DataFrame)
-            else
-                estimates = CSV.read(init_path * "/7_Results/$meas_folder " * tag * "/from_mcmc/data/$(plot_name)_functional_data" * data_tag * "_A non-diag_.csv", DataFrame)
+            # Folder of the comparison run: under the replication spec (current tag starts
+            # with " transfer") each robustness run is the current tag + its one change
+            # (examples/Structures_replication_*.jl); under the old baseline it is
+            # "<measures> <esttag>". Missing runs are skipped, not fatal.
+            fname = (plot_name == "CEX" ? "CEX" : plot_name) * "_functional_data" * data_tag * "_A non-diag_.csv"
+            folder = comparison_folder(meas_folder, model_options.tag, tag)
+            fpath = init_path * "/7_Results/" * folder * "/from_mcmc/data/" * fname
+            if !isfile(fpath)
+                @info "comparison run $(repr(tag)) not found ($fpath); skipped"
+                continue
             end
+            estimates = CSV.read(fpath, DataFrame)
 
 
             # Decompose this into copulas, pcfs, levels and shares
@@ -532,7 +560,10 @@ function select_linestyle(source)
         return :dot
     elseif source == "DFA"
         return :dash
+    elseif source == "WIDq"
+        return :dashdot     # WID real-time quarterly (Blanchet–Saez–Zucman)
     end
+    return :solid
 end
 
 
@@ -553,6 +584,8 @@ function select_color(source; ext=false)
         return a[6]
     elseif source == "WID"
         return :green
+    elseif source == "WIDq"
+        return :darkorange   # WIDq: orange, readable next to WID (green) and DFA (blue)
     elseif source == "DFA"
         return :blue
     elseif source == "SIPP1"
@@ -721,10 +754,10 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                     lc=obj != "top" ? palette(:glasbey_bw_n256)[j] : :red,
                     xformatter=:latex,
                     yformatter=:latex,
-                    xtickfontsize=14,
-                    ytickfontsize=14,
-                    legendfontsize=10,
-                    guidefontsize=14,
+                    xtickfontsize=16,
+                    ytickfontsize=16,
+                    legendfontsize=16,
+                    guidefontsize=16,
                     xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
                     legend=:best,
                     label=obj != "top" ? label_quantiles[:, j][1] : L"\textrm{Model}",
@@ -785,10 +818,10 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                 xticks=(s_axis[1:intd:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:intd:end])]),
                 legend=:best,
                 linewidth=4,
-                xtickfontsize=14,
-                ytickfontsize=14,
-                legendfontsize=10,
-                guidefontsize=14,
+                xtickfontsize=16,
+                ytickfontsize=16,
+                legendfontsize=16,
+                guidefontsize=16,
                 # label=L"\textrm{Model}",
                 label="",
                 dpi=500, ls=:solid,
@@ -809,7 +842,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                     Plots.plot!(xaxis[cond],
                         c_data[2],
                         fillrange=c_data[3],
-                        fillalpha=0.2,
+                        fillalpha=0.35,
                         fillcolor=:red,
                         la=0.0,
                         lc=:white,
@@ -869,10 +902,10 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                 xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
                 legend=:best,
                 linewidth=4,
-                xtickfontsize=14,
-                ytickfontsize=14,
-                legendfontsize=10,
-                guidefontsize=14,
+                xtickfontsize=16,
+                ytickfontsize=16,
+                legendfontsize=16,
+                guidefontsize=16,
                 label=L"\textrm{Model}",
                 dpi=500, ls=:solid,
             )
@@ -904,10 +937,10 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                 yformatter=:latex,
                                 xticks=(s_axis[1:intd:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:intd:end])]),
                                 legend=:best,
-                                xtickfontsize=14,
-                                ytickfontsize=14,
-                                legendfontsize=10,
-                                guidefontsize=14,
+                                xtickfontsize=16,
+                                ytickfontsize=16,
+                                legendfontsize=16,
+                                guidefontsize=16,
                                 label=label_quantiles[:, j][1],
                                 lw=4, dpi=500, ls=line_styles[:, lsⱼ][1],
                             )
@@ -977,7 +1010,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                 Plots.plot!(xaxis[cond_cex],
                                     c_data[2],
                                     fillrange=c_data[3],
-                                    fillalpha=0.2,
+                                    fillalpha=0.35,
                                     fillcolor=obj != "top" ? palette(:glasbey_bw_n256)[j] : select_color(plot_name),
                                     la=0.0,
                                     lc=:white,
@@ -1030,6 +1063,7 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                 cex_all_est = vec(sum(s_data_all[g..., :], dims=1)' ./ n_lines) # conditional on all data 
 
                                 Plots.plot()
+                                data_ci_series = nothing
 
                                 # Fig. 7 redesign: grey band over the removed-data window
                                 # (rows 2-3 only; the every-4-years CEX row keeps its
@@ -1043,7 +1077,8 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                     fig7_sh_ids = findall(d -> fig7_shade[1] <= d <= fig7_shade[2], s_dts)
                                     !isempty(fig7_sh_ids) && Plots.vspan!(
                                         [s_axis[fig7_sh_ids[1]], s_axis[fig7_sh_ids[end]]];
-                                        color = RGB(0.92, 0.92, 0.92), alpha = 1.0, label = "")
+                                        color = RGB(0.92, 0.92, 0.92), alpha = 1.0, label = "",
+                                        linewidth = 0, linealpha = 0)   # no outline: a seamless band
                                 end
 
                                 Plots.plot!(s_axis,
@@ -1064,10 +1099,10 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                     yformatter=:latex,
                                     lw=4,
                                     la=0.5,
-                                    xtickfontsize=14,
-                                    ytickfontsize=14,
-                                    legendfontsize=10,
-                                    guidefontsize=14,
+                                    xtickfontsize=16,
+                                    ytickfontsize=16,
+                                    legendfontsize=16,
+                                    guidefontsize=16,
                                     xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
                                     legend=:best, # BUG: with twinx(), legend=:outertopright widens the plot in a weird way
                                     # label=esttag == "7 factors" ? L"\textrm{7 \,\, Factors}" : esttag == "6 factors" ? L"\textrm{6 \,\, Factors}" : esttag == "less factors" ? L"\textrm{Less \,\, Factors}" : esttag == "higher order15" ? L"\textrm{Higher \,\, Order}" : esttag == "less AF" ? L"\textrm{Less \,\,Agg.\,\, Factors}" : esttag == "less DF and AF" ? L"\textrm{Compact\,\, Model}" : esttag == "Γ estimated" ? L"\textrm{Γ\,\, estimated}" : esttag == "Γ all" ? L"\textrm{Γ-10}" : esttag == "more AF" ? L"\textrm{More\,\,Agg.\,\,Factors}" : esttag == "Γ all 85" ? L"\textrm{Γ-12}" : esttag == "PP CEX" ? L"\textrm{\Gamma_{aug}\,\, CEX}" : esttag == "PP SCF" ? L"\textrm{\Gamma_{aug}\,\, SCF}" : esttag == "PP CEX SCF" ? L"\textrm{\Gamma_{aug}\,\, CEX-SCF}" : L"\textrm{Less \,\, Data}",
@@ -1153,11 +1188,12 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                             c_int_lb(cond_cex),
                                             fillrange=c_int_ub(cond_cex),
                                             la=0.0,
-                                            fillalpha=0.2,
+                                            fillalpha=0.35,
                                             fillcolor=:red,
                                             dpi=500,
                                             label=""
                                         )
+                                        data_ci_series = length(Plots.current().series_list)   # hidden in the credible-band version (one band per panel)
 
                                         Plots.scatter!(xaxis[cond_cex],
                                             c_data(cond_cex),
@@ -1205,43 +1241,62 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                     end
                                 end
 
-                                # Fig. 7 redesign: bare zoom inset on the removal window
-                                # (no ticks/numbers; top-left unless the curve occupies it)
-                                if !isempty(fig7_sh_ids)
-                                    _i1 = max(fig7_sh_ids[1] - 2, 1)
-                                    _i2 = min(fig7_sh_ids[end] + 2, length(s_axis))
-                                    _seg = filter(!isnan, vcat(cex_all_est[fig7_sh_ids], outside_est[fig7_sh_ids]))
-                                    if !isempty(_seg)
-                                        _pad = 0.35 * (maximum(_seg) - minimum(_seg)) + 1e-12
-                                        _all = filter(!isnan, vcat(cex_all_est, outside_est))
-                                        _early = filter(!isnan, cex_all_est[1:max(1, length(cex_all_est) ÷ 3)])
-                                        _top_free = isempty(_early) ||
-                                                    Statistics.mean(_early) < (minimum(_all) + maximum(_all)) / 2
-                                        _bb = _top_free ? Plots.bbox(0.06, 0.06, 0.34, 0.30) :
-                                                          Plots.bbox(0.06, 0.62, 0.34, 0.30)
-                                        Plots.lens!(
-                                            [s_axis[_i1], s_axis[_i2]],
-                                            [minimum(_seg) - _pad, maximum(_seg) + _pad];
-                                            inset = (1, _bb), subplot = 2, framestyle = :box,
-                                            lc = :gray60, xticks = false, yticks = false)
-                                    end
+                                # Two versions of every comparison panel: plain, and "_zoom" with
+                                # a bare inset on the removal window (rows 2-3: the muted window;
+                                # CEX every 4 years: 2008-2015, two muted/observed cycles).
+                                fname(extra) = path * "$meas/" * "quantiles_levels/" * plot_name * "_$(meas)_" * "$(k)_" * "$(esttag)_" * detrended_or_not * extra * label * ".pdf"
+                                has_bounds = (plot_name == "SCF" || plot_name == "CEX") && isfile(file_name) && ty == "normal"
+
+                                # Files per panel (main body: no credible band; appendix: with it):
+                                #   <name>.pdf                 paper style (data CI band for CEX)
+                                #   <name>zoom_.pdf            + inset on the removal window   (main body)
+                                #   <name>w_bounds_.pdf        credible band only (data band hidden)   (appendix)
+                                #   <name>w_bounds_zoom_.pdf   + inset                                 (appendix)
+                                zoom_ids = fig7_sh_ids   # inset only on the removal windows (recent 20 quarters, housing cycle)
+                                function add_zoom!(pz, extra)
+                                    isempty(zoom_ids) && return false
+                                    _i1 = max(zoom_ids[1] - 2, 1)
+                                    _i2 = min(zoom_ids[end] + 2, length(s_axis))
+                                    _seg = filter(!isnan, vcat(cex_all_est[zoom_ids], outside_est[zoom_ids], extra))
+                                    isempty(_seg) && return false
+                                    _pad = 0.35 * (maximum(_seg) - minimum(_seg)) + 1e-12
+                                    _all = filter(!isnan, vcat(cex_all_est, outside_est))
+                                    _early = filter(!isnan, cex_all_est[1:max(1, length(cex_all_est) ÷ 3)])
+                                    _top_free = isempty(_early) ||
+                                                Statistics.mean(_early) < (minimum(_all) + maximum(_all)) / 2
+                                    _bb = _top_free ? Plots.bbox(0.06, 0.06, 0.34, 0.30) :
+                                                      Plots.bbox(0.06, 0.62, 0.34, 0.30)
+                                    Plots.plot!(pz; legend = _top_free ? :bottomright : :topright, subplot = 1)   # keep the legend clear of the inset
+                                    Plots.lens!(pz,
+                                        [s_axis[_i1], s_axis[_i2]],
+                                        [minimum(_seg) - _pad, maximum(_seg) + _pad];
+                                        inset = (1, _bb), subplot = 2, framestyle = :box,
+                                        lc = :gray60, xticks = false, yticks = false)
+                                    return true
                                 end
 
-                                Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$(meas)_" * "$(k)_" * "$(esttag)_" * detrended_or_not * label * ".pdf")
+                                p_main = Plots.current()
+                                Plots.savefig(p_main, fname(""))
+                                p_app = has_bounds ? deepcopy(p_main) : nothing
+                                add_zoom!(p_main, Float64[]) && Plots.savefig(p_main, fname("zoom_"))
 
-                                if (plot_name == "SCF" || plot_name == "CEX") && isfile(file_name) && ty == "normal"
-
-                                    Plots.plot!(s_axis,
+                                if has_bounds
+                                    data_ci_series !== nothing &&
+                                        (p_app.series_list[data_ci_series].plotattributes[:fillalpha] = 0.0)   # one band: the credible band
+                                    Plots.plot!(p_app, s_axis,
                                         lb[seg_dict[k], :],
                                         fillrange=ub[seg_dict[k], :],
-                                        fillalpha=0.2,
+                                        fillalpha=0.35,
                                         fillcolor=:red,
                                         la=0.0,
                                         lc=:white,
                                         lw=4, dpi=500,
-                                        label=L"\textrm{Credible\,\, Int.}"
+                                        label="",
+                                        subplot=1,
                                     )
-                                    Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$(meas)_" * "$(k)_" * "$(esttag)_" * detrended_or_not * "w_bounds_" * label * ".pdf")
+                                    Plots.savefig(p_app, fname("w_bounds_"))
+                                    add_zoom!(p_app, vcat(lb[seg_dict[k], zoom_ids], ub[seg_dict[k], zoom_ids])) &&
+                                        Plots.savefig(p_app, fname("w_bounds_zoom_"))
                                 end
                             end
                         end
@@ -1277,10 +1332,10 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                 lc=obj != "top" ? palette(:glasbey_bw_n256)[j] : select_color(plot_name),
                                 xformatter=:latex,
                                 yformatter=:latex,
-                                xtickfontsize=14,
-                                ytickfontsize=14,
-                                legendfontsize=10,
-                                guidefontsize=14,
+                                xtickfontsize=16,
+                                ytickfontsize=16,
+                                legendfontsize=16,
+                                guidefontsize=16,
                                 xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
                                 legend=:best,
                                 label=label_quantiles[:, j][1],
@@ -1397,10 +1452,10 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                     yformatter=:latex,
                                     lw=4,
                                     la=0.5,
-                                    xtickfontsize=14,
-                                    ytickfontsize=14,
-                                    legendfontsize=10,
-                                    guidefontsize=14,
+                                    xtickfontsize=16,
+                                    ytickfontsize=16,
+                                    legendfontsize=16,
+                                    guidefontsize=16,
                                     xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
                                     legend=:best,
                                     label=esttag == "7 factors" ? L"\textrm{7 \,\, Factors}" : esttag == "6 factors" ? L"\textrm{6 \,\, Factors}" : esttag == "less factors" ? L"\textrm{Less \,\, Factors}" : esttag == "higher order15" ? L"\textrm{Higher \,\, Order}" : esttag == "less AF" ? L"\textrm{Less \,\,Agg.\,\, Factors}" : esttag == "less DF and AF" ? L"\textrm{Compact\,\, Model}" : esttag == "Γ estimated" ? L"\textrm{Γ\,\, estimated}" : esttag == "Γ all" ? L"\textrm{Γ-10}" : esttag == "more AF" ? L"\textrm{More\,\,Agg.\,\,Factors}" : esttag == "Γ all 85" ? L"\textrm{Γ-12}" : esttag == "PP CEX" ? L"\textrm{\Gamma_{aug}\,\, CEX}" : esttag == "PP SCF" ? L"\textrm{\Gamma_{aug}\,\, SCF}" : esttag == "PP CEX SCF" ? L"\textrm{\Gamma_{aug}\,\, CEX-SCF}" : L"\textrm{Less \,\, Data}",
@@ -2122,6 +2177,26 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
                 @warn "cross-conditional export failed (diagnostic only): $e"
             end
         end
+
+        # Exact recession-panel group means (RecessionPanels.jl; replaces the
+        # grid-cell groups of consumption_recessions.do). Only datasets that
+        # observe consum, income and wealth produce the file.
+        if model_step != :forecast && ty == "normal"
+            try
+                @unpack tmin, tmax = time_params
+                rdts = collect(QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"]))
+                R = recession_groups_table(copulas_coefs, split_pcfs, sort(measures), corr_mat, rdts;
+                    max_order = max_order, atom_dim = atom_dim,
+                    atom_π = atom_ser === nothing ? nothing : atom_ser.π)
+                if R !== nothing
+                    xpath = BASE_PATH * "/7_Results/$m_label" * "$tag" * "/$folder/data"
+                    mkpath(xpath)
+                    CSV.write(xpath * "/" * data_name * "_recession_groups" * data_tag * "$label" * ".csv", R)
+                end
+            catch e
+                @warn "recession-group export failed: $e"
+            end
+        end
     end
 
     # Everything has been reconstructed now. Creating a new select_series object, which has the averages that correspond to the data estimates 
@@ -2445,64 +2520,65 @@ function define_sequences_q(grid)
 end
 
 
-function generate_microdata_implicates(draws, k, param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources, tag)
-    micro_full_df = DataFrame()
+"""
+    generate_credible_bounds(draws, ks, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements,
+                             obs_data, model_options, time_params, data_sources, tag; seed)
+
+Posterior bands for the "Credible Int." comparison figures (`*w_bounds*`): for each of
+`draws` parameter vectors drawn from the posterior (all kept iterations, valid draws), the
+model is smoothed and the STATE is drawn around the smoothed mean (x_t ~ N(x̂_{t|T}, Σ_{t|T}),
+reconstruct_data(…; state_draw = true)), so the band carries parameter AND factor uncertainty.
+Writes `<results>/from_mcmc/data/<k>_bounds.jld2` (lb, ub: 3 groups × T per measure,
+2.5/97.5%) for every k in `ks` (e.g. ["SCF", "CEX"]).
+"""
+function generate_credible_bounds(draws, ks, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources, tag; seed = 20261013)
+    @unpack measures = model_options
     m_label = measures_folder(measures)
     init_path = BASE_PATH
-    @unpack estimator = model_options
-    @unpack integral_pcf_grid = estimator
-    # Generate draws 
+    rng = MersenneTwister(seed)
+
     postd = jldopen(init_path * "/posterior_draws" * "/" * m_label * "_$tag.jld2", "r")
-    itr, ch, par = size(postd["d_chains"])
-    param_mat = zeros(par, draws)
+    chains = postd["d_chains"]                                   # iterations × chains × parameters
+    lp = postd["lprobs"][end-size(chains, 1)+1:end, :]
+    close(postd)
+    valid = [(i, c) for i in axes(chains, 1), c in axes(chains, 2) if isfinite(lp[i, c]) && lp[i, c] > -1e5]
+    picks = valid[randperm(rng, length(valid))[1:min(draws, length(valid))]]
+    draws = length(picks)
 
-    all_draws = postd["d_chains"][end, :, :][:, :] # take last draw from each chain
-
-    # Generate 50 draws, with sufficient distance between them
-    draw_ids = sample(1:ch, draws, replace=false)
-
-    for i in 1:draws
-        param_mat[:, i] = all_draws[draw_ids[i], :]
-    end
-
-    # Matrix to store the data
-    # - we want to store 3 series for each measure, for each draw
-    q_dict = Dict()
     T = time_params.tot_periods
-    for meas in measures
-        q_dict[meas] = zeros(3, T, draws)
+    q = Dict(k => Dict(meas => fill(NaN, 3, T, draws) for meas in measures) for k in ks)
+    pb = Progress(draws, desc = "Credible bands ($(join(ks, ", "))): θ + state draws")
+    # Threaded in batches of nthreads: the smoothing + reconstruction (the cost) runs in
+    # parallel, each draw with its own RNG; get_implicate! (touches obs_data) runs serially.
+    for batch in Iterators.partition(collect(enumerate(picks)), max(1, Threads.nthreads()))
+        dvs = Vector{Any}(undef, length(batch))
+        Threads.@threads for j in eachindex(batch)
+            p, (i, c) = batch[j]
+            dvs[j], _ = reconstruct_data(chains[i, c, :], param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data,
+                                         model_options, time_params, data_sources; state_draw = true,
+                                         rng = MersenneTwister(seed + p))
+        end
+        for j in eachindex(batch)
+            p = batch[j][1]
+            for k in ks
+                haskey(dvs[j], k) || continue
+                get_implicate!(dvs[j][k]["normal"], q[k], p, k, kind_of_plots, obs_data, func_data, time_params, user_t, model_options)
+            end
+            next!(pb)
+        end
     end
 
-    # For each parameter vector given, generate the microdata implicates
-    pb = Progress(draws, desc="Creating micro data implicates for $k")
-    for p in 1:draws
-        dv, _ = reconstruct_data(param_mat[:, p], param_sizes, priors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
-        imp_df = get_implicate!(dv[k]["normal"], q_dict, p, k, kind_of_plots, obs_data, func_data, time_params, user_t, model_options)
-
-        # Add column to imp_df that indicates the parameter vector
-        imp_df[!, :implicate] .= p
-        append!(micro_full_df, imp_df)
-
-        next!(pb)
-    end
-
-    # Keep the 95% quantiles of the implicates from q_dict 
-    lower_bound = Dict()
-    upper_bound = Dict()
-
-    for meas in measures
-        lower_bound[meas], upper_bound[meas] = conservative_bounds(q_dict[meas], 3)
-    end
-
-    save_name = k == "CEX_pooled" ? "CEX" : k
-
-    # Export the bounds
-    mkpath(init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/data")
-    jldsave(init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/data/" * save_name * "_bounds" * ".jld2"; lb=lower_bound, ub=upper_bound, q_dict=q_dict)
-
-    # Export the data
     path = init_path * "/7_Results/$m_label" * "$tag" * "/from_mcmc/data"
-    CSV.write(path * "/" * save_name * "_micro_data_w_imp" * ".csv", micro_full_df)
+    mkpath(path)
+    for k in ks
+        lb, ub = Dict(), Dict()
+        for meas in measures
+            lb[meas], ub[meas] = conservative_bounds(q[k][meas], 3)
+        end
+        save_name = k == "CEX_pooled" ? "CEX" : k
+        jldsave(path * "/" * save_name * "_bounds.jld2"; lb = lb, ub = ub, q_dict = q[k], draws = draws, uncertainty = "theta + state")
+        @info "Credible bands: $(save_name)_bounds.jld2 ($draws draws, parameter + factor uncertainty)"
+    end
 end
 
 
@@ -2612,7 +2688,6 @@ function get_implicate!(data_vector, q_dict, draw, data_name, type, obs_data, fu
     end
 
     # Generate microdata 
-    imp_df = create_micro_df(copulas, data_pcf, data_name, "", folder, time_params, model_options; return_df=true) #TODO: check that the order is correct for the pcfs 
 
     # Get data for uncertainty around the estimates
     levels, shares = generate_shares_levels(data_pcf, model_options, gdp_series)
@@ -2633,7 +2708,7 @@ function get_implicate!(data_vector, q_dict, draw, data_name, type, obs_data, fu
         end
     end
 
-    return imp_df
+    return nothing
 end
 
 
@@ -2671,6 +2746,7 @@ function export_table_to_tex_with_strings(measures, type)
     # Headers 
     headers = [
         "excluding housing cycle",
+        "excluding housing cycle wealth",   # the paper's housing-cycle row (fig. recon_missing2 row 3)
         "excluding recent 20 quarters",
         "excluding housing cycle short",
         "every 4 years",

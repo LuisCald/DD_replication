@@ -141,6 +141,11 @@ foreach var in income wealth assets liquid illiqd tdebt pdebt hdebt finast stock
 keep id year weight impnum income wealth assets finast liquid illiqd tdebt pdebt hdebt hhequiv stocks real_estate business pension vehicles
 
 append using "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022_cleaned.dta"
+* SCF+ weights (1950-2019) are in THOUSANDS of households; the 2022 public file is in
+* households. Put 2022 on the SCF+ scale (2026-10-12): generateForbes400.py gives every
+* Forbes member the SCF+ minimum weight (0.0002 ≈ one household across five implicates),
+* which in 2022 units was ~0.001 households — the 2022 Forbes top tail had zero mass.
+replace weight = weight / 1000 if year == 2022
 // 2022 carries the component columns (added in clean_SCF_2022.do). It still lacks
 // finast/liquid/assets/illiqd/tdebt/pdebt/hdebt/hhequiv (pre-existing). Output
 // renamed nogrowth -> noForbes_nogrowth (Forbes augmentation happens later).

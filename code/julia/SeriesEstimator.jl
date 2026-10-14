@@ -2,9 +2,10 @@ include(joinpath(@__DIR__, "DistributionalDynamics.jl"))
 
 using Integrals
 
-# Output directory for Figure 2 plots (Overleaf)
-const PLOT_DIR = "/Users/lc/Dropbox/Apps/Overleaf/Distributional Dynamics/Plots/proof_of_concept"
-const RESULTS_DIR = "/Users/lc/Dropbox/Distributional_Dynamics/7_Results/order_analysis"
+# Output directories (never the Overleaf folder: copy figures there by hand)
+const PLOT_DIR = joinpath(BASE_PATH, "7_Results", "proof_of_concept")
+const RESULTS_DIR = joinpath(BASE_PATH, "7_Results", "order_analysis")
+mkpath(PLOT_DIR); mkpath(RESULTS_DIR)
 
 # Plan of attack: create 3D object <-> 2D object mapping
 # Step 1: estimate the 3D copula

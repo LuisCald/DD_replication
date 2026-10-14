@@ -22,6 +22,18 @@
 
 include(joinpath(@__DIR__, "DistributionalDynamics.jl"))
 
+# Results tree for this spec (some writers — Validation.jl, Correlations.jl,
+# CreateTimeSeries.jl — don't mkpath their folders)
+let rd = BASE_PATH * "/7_Results/" * measures_folder(model_options.measures) * model_options.tag
+    for sub in ("other_results/noise_distributions/measurement_noise", "other_results/noise_distributions/process_noise",
+                "plots/correlations", "from_mcmc/parameter_vectors", "from_mcmc/plots/correlations",
+                "from_mcmc/bayesian_convergence", "from_mcmc/data")
+        mkpath(joinpath(rd, sub))
+    end
+    mkpath(BASE_PATH * "/7_Results/factor_analysis"); mkpath(BASE_PATH * "/7_Results/MDD"); mkpath(BASE_PATH * "/posterior_draws")
+    @info "Results folder: $rd"
+end
+
 @info "═══ Stages 3-5: Post-estimation ═══"
 @info "BASE_PATH = $BASE_PATH"
 
@@ -31,6 +43,15 @@ label = "3D_$case"
 m_label = measures_folder(measures)
 kind_of_plots = :mcmc
 opttag = "from_mcmc"
+
+# DD_SKIP: comma list of steps to leave out on a (re)run, e.g. DD_SKIP=bands,draws,fevd,hd,anatomy,forecasts
+#   bands     credible bands (also reused automatically when newer than the posterior; DD_REDO_BANDS=1 forces)
+#   draws     export of posterior factor draws (data/synthetic)
+#   fevd, hd  FEVD / historical decomposition (hd needs fevd)
+#   anatomy   observation-weight anatomy
+#   forecasts drop-one-SCF-wave + CEX every-4-years forecasts
+const DD_SKIP = Set(strip.(split(get(ENV, "DD_SKIP", ""), ","; keepempty = false)))
+skipstep(s) = (s in DD_SKIP) && (@info "DD_SKIP: skipping $s"; true)
 
 # ── Step 1: Prepare data ─────────────────────────────────────
 # DD_PLOT_PROOF=1 also writes the proof-of-concept figures (Legendre coefs,
@@ -96,6 +117,25 @@ logV, alarm = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids
 # include("ModelPrep.jl")
 # include("plot_HANK.jl")
 
+# ── Step 2b: Credible bands for the comparison figures ───────
+# Posterior bands (parameter + factor uncertainty) drawn in the robustness-comparison
+# panels (*w_bounds*); only needed when comparing (DD_COMPARE=1). DD_N_BAND_DRAWS draws.
+_bands_dir = BASE_PATH * "/7_Results/$m_label" * "$tag" * "/from_mcmc/data/"
+_post_file = BASE_PATH * "/posterior_draws/" * m_label * "_" * tag * ".jld2"
+_bands_fresh = all(f -> isfile(_bands_dir * f) && isfile(_post_file) && mtime(_bands_dir * f) > mtime(_post_file),
+                   ("SCF_bounds.jld2", "CEX_bounds.jld2"))
+if _bands_fresh && get(ENV, "DD_REDO_BANDS", "0") != "1"
+    @info "Credible bands: reusing SCF/CEX_bounds.jld2 (newer than the posterior; DD_REDO_BANDS=1 to redraw)"
+elseif model_options.compare_to_other_est && !occursin("HANK", tag) && !skipstep("bands")
+    try
+        generate_credible_bounds(parse(Int, get(ENV, "DD_N_BAND_DRAWS", "100")), ["SCF", "CEX"],
+            param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options,
+            time_params, data_sources, tag)
+    catch e
+        @warn "credible bands failed (the w_bounds panels will be missing): $e"
+    end
+end
+
 # ── Step 3: Reconstruct synthetic distributions ──────────────
 @info "Reconstructing synthetic distributions..."
 dv, _ = reconstruct_data(
@@ -128,6 +168,14 @@ for (c, k) in enumerate(keys(dv))
 end
 @info "Time series export and validation complete."
 
+# Paper figure "Consumption Dynamics during Recessions" (RecessionPanels.jl)
+try
+    isfile(BASE_PATH * "/7_Results/$m_label" * "$tag" * "/from_mcmc/data/PSID_recession_groups_A non-diag_.csv") &&
+        plot_recession_panels(BASE_PATH * "/7_Results/$m_label" * "$tag")
+catch e
+    @warn "recession panels failed: $e"
+end
+
 # ── Step 4b: Export posterior draws of the factors (optional) ─
 # Reconstructs the smoothed factors at a sample of posterior θ-draws and
 # writes data/synthetic/smoothed_factor_draws.csv (+ a percentile-band file).
@@ -136,7 +184,9 @@ end
 # A tag whose loadings came from run_kalman_em.jl (or any mode-only tag) has no
 # chains: skip with a note rather than abort the rest of post-estimation.
 _draws_file = BASE_PATH * "/posterior_draws/" * m_label * "_" * tag * ".jld2"
-if get(ENV, "DD_EXPORT_DRAWS", "1") != "0" && isfile(_draws_file)
+if skipstep("draws")
+    nothing
+elseif get(ENV, "DD_EXPORT_DRAWS", "1") != "0" && isfile(_draws_file)
     @info "Exporting posterior factor draws..."
     n_draws = parse(Int, get(ENV, "DD_N_DRAWS", "200"))
     export_factor_draws(param_sizes, hyperpriors, Σ_ids, model_elements,
@@ -153,11 +203,19 @@ type = "from_mcmc"
 # Empirical-only tables: they read correlations_dict_cycle_{SCF,CEX}.jld2 and
 # the SCF external comparisons, which only the empirical plotting path writes —
 # a HANK replica run has neither (crash 2026-09-09 on " HANK 1 stochastic trend").
+# The correlations_dict_cycle files exist only with compare_to_other_est (DD_COMPARE=1),
+# i.e. when the robustness runs are compared (tab:corr_outsample).
 if occursin("HANK", tag)
     @info "HANK run: skipping empirical correlation tables (no SCF/CEX comparisons for replicas)."
+elseif !model_options.compare_to_other_est
+    @info "compare_to_other_est off (set DD_COMPARE=1 once the robustness runs exist): skipping the comparison correlation tables."
 else
-    export_table_to_tex_with_strings(measures, :from_mcmc)
-    generate_correlations_table_for_external_comparisons("SCF", measures, tag, type, "cycle")
+    try
+        export_table_to_tex_with_strings(measures, :from_mcmc)
+        generate_correlations_table_for_external_comparisons("SCF", measures, tag, type, "cycle")
+    catch e
+        @warn "comparison correlation tables failed: $e"
+    end
 end
 
 # Cross-conditional averaged correlation table, averaged over all economies.
@@ -199,6 +257,7 @@ if run_full
 # shared with Steps 7/9 — top-level bindings; the `global` assignments inside
 # the try blocks write them (a `local` declaration here conflicts with those)
 Φ = nothing; Ω = nothing; r = 0; q = 0
+if !skipstep("fevd")
 try
     r_dist = param_sizes[1][1]
     q_agg = param_sizes[2][2]
@@ -243,9 +302,11 @@ try
 catch e
     @warn "FEVD failed" exception=(e, catch_backtrace())
 end
+end  # fevd
 
 # ── Step 7: Historical decomposition (hd_recessions_f*.pdf) ───
 @info "Computing historical decomposition..."
+if !skipstep("hd")
 try
     smoother_res, _, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
     # The smoother's state is [f_t, f_{t-1}, f_{t-2}, f_{t-3}, a_t] (4r+q); the decomposition
@@ -264,9 +325,11 @@ try
 catch e
     @warn "Historical decomposition failed" exception=(e, catch_backtrace())
 end
+end  # hd
 
 # ── Step 8: Anatomy — information & interpolation shares ──────
 @info "Computing observation-weight anatomy (information shares)..."
+if !skipstep("anatomy")
 try
     dec = observation_weight_decomposition(model_elements, obs_data.df_vec.df_names,
         par_final, param_sizes, hyperpriors, Σ_ids, model_options)
@@ -289,12 +352,13 @@ try
 catch e
     @warn "Anatomy step failed" exception=(e, catch_backtrace())
 end
+end  # anatomy
 
 # (The consumption-across-recessions panels are produced in Stata, not here.)
 
 # ── Step 9: Out-of-sample forecasts (fig: recon_missing1) ─────
 # If HANK do not run
-if !occursin("HANK", tag)
+if !occursin("HANK", tag) && !skipstep("forecasts")
     @info "Running out-of-sample forecasts (SCF iterative + CEX extensive)..."
     try
         how_much = 1
