@@ -13,7 +13,7 @@ authors:
     given-names: "Moritz"
     affiliation: "University of Mannheim, CEPR, IZA, CESifo"
 license: MIT
-repository-code: "https://github.com/LuisCald/DD_code"
+repository-code: "https://github.com/LuisCald/DD_replication"
 preferred-citation:
   type: article
   title: "Distributional Dynamics"

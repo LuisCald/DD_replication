@@ -6,7 +6,7 @@
 
 **The data product lives in its own repository: [github.com/LuisCald/DD_data](https://github.com/LuisCald/DD_data).**
 It ships the quarterly distributional series (1962-Q3 to 2024-Q1, joint over
-consumption, income, and wealth): the latent factors with 400 posterior draws,
+consumption, income, and wealth): the latent factors with 200 posterior draws,
 the reconstructed Legendre coefficient files, synthetic microdata, per-household
 aggregate anchors — plus small Julia/Python scripts for
 factors → coefficients → moments / micro data, including posterior bands on any
@@ -40,14 +40,16 @@ The replication package is organized into three stages:
 
 Pre-computed posterior estimates are provided in `output/estimates/`, allowing replicators to skip Stage 2 and go directly from Stage 1 to Stage 3.
 
-## DFA balance-sheet components (semicontinuous extension) — 🚧 Coming soon!
+## DFA balance-sheet components (semicontinuous extension)
 
-> **Status: not yet estimated.** The data layer below is complete and has been
-> run (component columns in the survey files, per-HH aggregate anchors), but the
-> estimation core for semicontinuous measures (marginal hurdle, participation-split
-> copula, reconstruction mixture) is still in progress — no DFA-component results
-> exist yet. The `DD_EXAMPLE=stocks` (etc.) configs load but will not produce
-> valid component estimates until that core lands.
+> **Status: estimated and published.** Real estate, mortgages, consumer credit and pensions
+> are estimated on the paper specification (`DD_EXAMPLE=replication_{real_estate,mortgages,consumer_credit,pension}`)
+> and published in [DD_data](https://github.com/LuisCald/DD_data) (`data/items/`), by SCF
+> wealth group (bottom 50 / next 40 / top 10, as in the DFA), income quintile and own decile.
+> `code/python/build_items_ddata.py` builds those files from the post-estimation exports.
+> Stocks and private business are estimated (`replication_stocks`, `replication_business`)
+> but not published: their bottom-50% holdings are below the resolution of the order-12
+> representation.
 
 Beyond the baseline `(consumption, income, wealth)` model, the code can model the joint
 distribution of `(income, wealth, <balance-sheet component>)` to replicate the Federal
@@ -56,17 +58,21 @@ component's distribution *by income group* and *by wealth group*. Components are
 **semicontinuous** (a point mass at 0 for non-holders plus a continuous part), so they use a
 two-part / hurdle treatment. See [`doc/stocks_atom_design.md`](doc/stocks_atom_design.md) for
 the design (participation scalar `π` + conditional Legendre fit; participation-split copula).
+Group means of one variable by another use the 2D maximum-entropy step
+([`doc/maxent_note.tex`](doc/maxent_note.tex); `maxent_density_2d` in `CreateTimeSeries.jl`,
+falling back to the truncated series when the moment error exceeds 2e-2).
 
 **Selecting an experiment.** `Structures.jl` reads the `DD_EXAMPLE` environment variable and,
 if set, loads `code/julia/examples/Structures_<name>.jl` instead of the baseline options
 (unset = the original published baseline, kept for reference):
 
 ```bash
-DD_EXAMPLE=stocks julia run_estimation.jl   # also: real_estate, business, pension, mortgages, consumer_credit (🚧 coming soon — see status above)
-DD_EXAMPLE=replication julia run_estimation.jl # the released specification (HP trend, complete-case loadings)
-DD_EXAMPLE=transfer julia run_estimation.jl    # development configuration (stochastic trend; DD_TREND, DD_PCA, DD_NDF, … switches)
-DD_EXAMPLE=6_factors julia run_estimation.jl # robustness: also 7_factors, no_housing_wealth,
-                                             # no_recent_20q, cex_every_4_years (see replication map)
+DD_EXAMPLE=replication julia run_estimation.jl              # the released specification (HP trend, complete-case loadings, 8 distributional factors)
+DD_EXAMPLE=replication_real_estate julia run_estimation.jl  # DFA items: also replication_{mortgages,consumer_credit,pension,stocks,business}
+DD_EXAMPLE=replication_6_factors julia run_estimation.jl    # robustness: also replication_7_factors, replication_no_housing_wealth,
+                                                            # replication_no_recent_20q, replication_cex_every_4_years (see replication map)
+DD_EXAMPLE=HANK julia run_estimation.jl                     # HANK validation (see code/hank/README.md)
+DD_EXAMPLE=transfer julia run_estimation.jl                 # development configuration (stochastic trend; DD_TREND, DD_PCA, DD_NDF, … switches)
 ```
 
 **Data flow that feeds these (SCF and PSID).** Each survey's micro file carries the component
@@ -81,9 +87,9 @@ SCF :  data_cleaning.do ──► SCF_noForbes_nogrowth.xlsx
                               │  (generateForbes400.py: Forbes-400 augmentation,
                               │   cached 2021–24 scrape)
                               ▼
-                          SCF_new.csv    → promoted to SCF.csv (2026-09-22)
+                          SCF.csv
 
-PSID:  data_cleaning.do ──► PSID_nogrowth.xlsx ──(GrowthCorrection.jl)──► PSID_new.csv → promoted to PSID.csv
+PSID:  data_cleaning.do ──► PSID_nogrowth.xlsx ──(GrowthCorrection.jl)──► PSID.csv
 
 Aggregates:  import_aggregates.do ──► inflation_corrected_correction_series.xlsx
              (per-HH anchors; component anchors need the new FRED series de-seasoned —
@@ -105,8 +111,7 @@ SIPP is excluded from the component work (only aggregate wealth/debt totals are 
 the raw files exceed local memory). Consumer durables has no clean DFA mapping (SCF captures
 vehicles only) and is dropped. DB vs DC pension cannot be separated in any source.
 
-**Files added/modified for this extension** (estimation core — marginal hurdle, copula split,
-reconstruction mixture — is still in progress; the data layer above is complete and run):
+**Files added/modified for this extension:**
 
 - `code/julia/Structures.jl` — `atom_measures` / `participation_link` options; `DD_EXAMPLE` loader
 - `code/julia/examples/Structures_*.jl` — per-component experiment configs
@@ -115,6 +120,8 @@ reconstruction mixture — is still in progress; the data layer above is complet
 - `code/stata/data_cleaning.do`, `clean_SCF_2022.do` — surface component columns (SCF + PSID)
 - `code/stata/import_aggregates.do`, `other_results.do` — per-HH component anchors; canonical-writer fix
 - `code/R/X12_averages.R` — de-season the new component series into `averages_deseasoned.csv`
+- `code/julia/CreateTimeSeries.jl` — reconstruction mixture and max-entropy group means
+- `code/python/build_items_ddata.py` — builds the published DD_data item files
 - `doc/stocks_atom_design.md` — design note
 
 ## Anatomy of the synthetic data (information & interpolation shares)
@@ -166,7 +173,7 @@ All data used in this paper are publicly available. Some datasets require free r
 
 | Software | Version | Purpose |
 |----------|---------|---------|
-| Julia | >= 1.10 | Model estimation and all quantitative analysis |
+| Julia | 1.10.4 (pinned in the Manifest) | Model estimation and all quantitative analysis |
 | Stata | >= 17 (MP recommended) | Survey data cleaning and local projections |
 | Python | >= 3.10 | Data preprocessing (stationarity, seasonal adjustment) |
 | R | >= 4.3 | optional: X-12 deseasoning of DFA-component anchors (`X12_averages.R`) |
@@ -212,7 +219,15 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   ├── julia/
 │   │   ├── DistributionalDynamics.jl   Main Julia entry point (loads all modules)
 │   │   ├── run_estimation.jl           Stage 2: MCMC estimation
-│   │   ├── run_postestimation.jl       Stages 3-5: results, figures, tables
+│   │   ├── run_postestimation.jl       Stage 3: results, figures, tables
+│   │   ├── run_mdd.jl, run_mdd_table.jl  Marginal data densities → Tables/MDD.tex
+│   │   ├── run_dropwave.jl, run_dropwave_table.jl  Drop-one-wave exercise → dropwave_table.tex
+│   │   ├── run_recession_panels.jl     Re-plot the recession panels
+│   │   ├── run_proof_of_concept.jl     Proof-of-concept figures
+│   │   ├── RecessionPanels.jl          Recession panels (consumption by income × wealth)
+│   │   ├── plot_HANK.jl                HANK validation table and Figure 10 panels
+│   │   ├── SeriesEstimator.jl          Order analysis / local vs. global estimator
+│   │   ├── examples/                   DD_EXAMPLE configurations (Structures_<name>.jl)
 │   │   ├── config.jl                   Path configuration
 │   │   ├── Structures.jl              Data structures and model options
 │   │   ├── DataConstructor.jl         Data loading and preprocessing
@@ -270,30 +285,26 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 │   │   ├── make_stationary.py         Stationarity transformations
 │   │   ├── make_stationary_x12.py     Post-X12 stationarity tests
 │   │   ├── generateForbes400.py       Forbes 400 wealth data
-│   │   ├── clean_brake_data.py        Geographic data cleaning
+│   │   ├── build_items_ddata.py       DFA item files for DD_data
 │   │   ├── MEILC_MEGC.py             Multivariate Gini coefficient
 │   │   └── multidim_inequality.py     Multidimensional inequality measures
-│   └── R/
-│       └── X12_averages.R             X-12 deseasoning of DFA-component anchors (optional)
+│   ├── R/
+│   │   └── X12_averages.R             X-12 deseasoning of DFA-component anchors (optional)
+│   └── hank/                          HANK validation: BASEtoolbox drivers + README
 │
 ├── publish_to_DD_data.sh              Copy regenerated outputs to a DD_data checkout
 │
-├── data/
-│   ├── raw/                           Raw survey data (user-provided)
-│   │   └── DOWNLOAD_INSTRUCTIONS.md
-│   ├── processed/                     Cleaned data (generated by Stage 1)
-│   ├── synthetic/                     Pipeline output dir (published data lives in DD_data)
-│   └── aggregates/                    Public macro data
-│
-├── output/
-│   ├── figures/                       Generated figures
-│   ├── tables/                        Generated LaTeX tables
-│   └── estimates/                     Pre-computed parameter vectors
+├── data/raw/DOWNLOAD_INSTRUCTIONS.md  Where to get the raw survey data
+├── output/estimates/                  Pre-computed parameter vectors
 │
 ├── slides/                            Conference / seminar slide decks
 │   └── brazil/                        Brazil 2026 (full + short 20-min version)
 │
 ├── doc/                               Methodological notes
+│   ├── maxent_note.tex                2D maximum-entropy group means
+│   ├── copula_identification.tex      Copula identification
+│   ├── object_factors.tex, em_*.tex   Factor-extraction notes
+│   ├── figure10_404020.tex            Assembles the HANK Figure 10 panels
 │   └── linearization_notes.tex
 │
 └── CITATION.cff                       Machine-readable citation
@@ -303,12 +314,12 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 
 ### Quick Start (using pre-computed estimates)
 
-1. Install Julia >= 1.10, Stata >= 17, Python >= 3.10, R >= 4.3.
+1. Install Julia 1.10.4, Stata >= 17, Python >= 3.10, R >= 4.3 (optional).
 2. Download raw survey data following `data/raw/DOWNLOAD_INSTRUCTIONS.md`.
 3. From the project root directory, run:
    ```bash
    bash master.sh data      # Stage 1: ~1 hour
-   bash master.sh results   # Stages 3-5: ~3 hours
+   bash master.sh results   # Stage 3: ~3 hours
    ```
 
 ### Full Replication (including estimation)
@@ -328,12 +339,15 @@ Using pre-computed estimates (skipping Stage 2), the total runtime is approximat
 ### Configuration
 
 The released estimates use `DD_EXAMPLE=replication` (`code/julia/examples/Structures_replication.jl`):
-HP trend, complete-case loadings, 5 distributional factors, whitening ridge 0.05, the
+HP trend, complete-case loadings, 8 distributional factors, whitening ridge 0.05, the
 inflation-based FRED-QD aggregate sheet with the COVID-robust aggregate PCA. `master.sh`
 sets it by default. `DD_EXAMPLE=transfer` is the same model with switchable settings
 (stochastic trend by default); the old published baseline is what runs with `DD_EXAMPLE` unset.
 
-All paths are configured in `code/julia/config.jl`. The script auto-detects the project root directory. No manual path editing should be necessary.
+The Julia pipeline's paths are configured in `code/julia/config.jl`, which detects the project root.
+**Caveat:** several Stage 1 scripts (Stata `.do` files, `GrowthCorrection.jl`, `code/python/*`,
+`X12_averages.R`) still hard-code the authors' project root (`/Users/lc/Dropbox/Distributional_Dynamics`);
+replicators running Stage 1 need to replace it with their own root.
 
 ### Random Seed
 
@@ -355,8 +369,17 @@ DD_EXAMPLE=<name> julia --project=code/julia/env code/julia/run_estimation.jl   
 ```
 
 Stage 3 loads the shipped parameter vector (`output/estimates/`) if Stage 2
-was skipped. All post-estimation steps run by default (`DD_FULL_RESULTS=0`
-skips Steps 6–9; `DD_PLOT_PROOF=1` adds the proof-of-concept figures).
+was skipped. All post-estimation steps run by default. Switches:
+
+| Variable | Effect |
+|---|---|
+| `DD_FULL_RESULTS=0` | skip Steps 6–9 |
+| `DD_PLOT_PROOF=1` | add the proof-of-concept figures |
+| `DD_SKIP=bands,draws,fevd,hd,anatomy,forecasts` | skip individual steps (any subset) |
+| `DD_N_DRAWS` | number of exported posterior draws (default 200) |
+| `DD_EXPORT_DRAWS=0` | skip the posterior factor-draw export (on by default; heavy) |
+| `DD_MODE_FROM="<tag>"` | load the parameter mode of another run (e.g. reuse the HANK five-factor estimates) |
+| `HANK_ECON`, `HANK_NDF`, `HANK_TABLE_ECONS`, `HANK_XSHARES`, `HANK_TRUTH_SUFFIX` | HANK validation (see `code/hank/README.md`) |
 Figures land under `7_Results/` and are copied into the Overleaf `Plots/`
 tree (only `data_timeline.jl` writes there directly).
 
@@ -368,12 +391,12 @@ tree (only `data_timeline.jl` writes there directly).
 | `fig:proof_pcfs` — quantile functions: raw vs. factor approximation | `AllPlots.jl` | Stage 3 with `DD_PLOT_PROOF=1` |
 | `fig:KL_div` — copulas: raw vs. approximation (KL divergence) | `AllPlots.jl` | Stage 3 with `DD_PLOT_PROOF=1` |
 | `fig:recon_missing1` — predictability of distributional data (baseline parameters): CEX extensive forecasts + SCF drop-one-wave | `ForecastSSM.jl` (`perform_forecast`) | Stage 3, Step 9 |
-| `fig:recon_missing2` — predictability re-estimating the model (3×3 panels) | `CreateTimeSeries.jl` exports of the three re-estimated specs | `DD_EXAMPLE=cex_every_4_years`, `no_recent_20q`, `no_housing_wealth` |
+| `fig:recon_missing2` — predictability re-estimating the model (3×3 panels) | `CreateTimeSeries.jl` exports of the three re-estimated specs | `DD_EXAMPLE=replication_cex_every_4_years`, `replication_no_recent_20q`, `replication_no_housing_wealth` |
 | `fig:ow_shares` — information shares | `ObservationWeights(Plots).jl` | Stage 3, Step 8 |
 | `fig:ow_interp` — interpolation shares | `ObservationWeights(Plots).jl` | Stage 3, Step 8 |
-| `tab:hank_avg_corr` — model vs. HANK truth correlations (average over 10 economies) | `plot_HANK.jl` (`generate_averaged_hank_avg_corr_table`) → `hank_avg_corr.tex` | `code/hank/README.md` (simulate, estimate 10 economies, `HANK_TABLE_ECONS=1-10`) |
+| `tab:hank_avg_corr` — model vs. HANK truth correlations (average over 10 economies) | `plot_HANK.jl` (`generate_averaged_hank_avg_corr_table`) → `7_Results/… HANK 1-10/…/hank_avg_corr.tex` (40/40/20 rows); the *Top 10%* rows come from the 50/40/10 run → `… HANK 1-10 x50/…/hank_avg_corr.tex` | `code/hank/README.md` (simulate, estimate 10 economies, `HANK_TABLE_ECONS=1-10`; then the 50/40/10 step) |
 | `fig:hank_full_v_incomplete_income` — model estimates vs. HANK simulated truth | `plot_HANK.jl` own-group panels (economy 1), assembled by `doc/figure10_404020.tex` | `code/hank/README.md` |
-| fig. consumption dynamics across recessions (9 panels, `relcons*.jpg`) | `code/stata/consumption_recessions.do` (reads the synthetic-micro export) | standalone Stata, after Stage 3 |
+| fig. consumption dynamics across recessions (9 panels) | `RecessionPanels.jl` (written during post-estimation); `run_recession_panels.jl` re-plots | Stage 3 |
 | `fig:cons_wealth_along_inc` — consumption over the latest business cycles (`IRFs_and_Trends/`) | Stata local projections (`prep_micro_data.do` + projection code) | standalone Stata |
 | `Tables/DataCoverage.tex` | hand-written | — |
 
@@ -383,7 +406,8 @@ tree (only `data_timeline.jl` writes there directly).
 |---|---|---|
 | `fig:data_timeline` — microdata coverage, sample sizes, publication lags | `count_observations.jl` → `data_timeline.jl` | standalone (writes to Overleaf directly) |
 | `fig:tails_wealth`, `fig:local_global_coefs`, `fig:local_global_pcf` — order analysis / local vs. global estimator | `SeriesEstimator.jl` | standalone |
-| `Tables/MDD.tex` — marginal data densities by factor count | `MDD.jl` across three posterior JLD2s | baseline + `DD_EXAMPLE=6_factors` + `7_factors` |
+| `Tables/MDD.tex` — marginal data densities by factor count | `MDD.jl` via `run_mdd.jl` → `run_mdd_table.jl` | `DD_EXAMPLE=replication` + `replication_6_factors` + `replication_7_factors` |
+| Drop-one-wave table (`dropwave_table.tex`) | `run_dropwave.jl` → `run_dropwave_table.jl` | after Stage 2 |
 | `fig:likelihood_convergence_missing` — converging chains (`log_probs*`) | `DIMESampler.jl` | written during Stage 2 |
 | `fig:recon_data_SCF` — smoothed data vs. direct survey estimates | `CreateTimeSeries.jl` (`compare_to_data`) | Stage 3, Step 4 |
 | `Tables/ModelConservatism.tex` | `export_combined_stat_dict_to_latex` | Stage 3, Step 4 |
@@ -399,6 +423,25 @@ tree (only `data_timeline.jl` writes there directly).
 `Tables/DataCoverage.tex`, the inline hand-written tables (`tab:my_label`,
 transcriptions of the FEVD/correlation output), and the
 TikZ diagrams are authored directly in the .tex sources.
+
+## Citation, license, contact
+
+Please cite the paper (BibTeX below; machine-readable metadata in [`CITATION.cff`](CITATION.cff)).
+Code is released under the MIT License ([`LICENSE`](LICENSE)). Data product:
+[DD_data](https://github.com/LuisCald/DD_data); project site:
+[distributionaldynamics.com](http://www.distributionaldynamics.com). Questions:
+Luis Calderon, luis.calderon@uni-bonn.de.
+
+```bibtex
+@techreport{BayerCalderonKuhn2026,
+  author      = {Bayer, Christian and Calderon, Luis and Kuhn, Moritz},
+  title       = {Distributional Dynamics},
+  institution = {CEPR},
+  type        = {Discussion Paper},
+  number      = {19829},
+  year        = {2026}
+}
+```
 
 ## References
 
