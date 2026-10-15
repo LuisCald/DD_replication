@@ -1153,7 +1153,9 @@ function generate_averaged_hank_avg_corr_table(
 
     # Determine output path
     if isempty(output_path)
-        tag = " HANK $(first(economy_ids))-$(last(economy_ids))"
+        # keep a trailing variant tag (" x50") so the 50/40/10 table does not overwrite the 40/40/20 one
+        m_sfx = match(r"( x\d+)$", tag)
+        tag = " HANK $(first(economy_ids))-$(last(economy_ids))$(m_sfx === nothing ? "" : m_sfx.captures[1])"
         output_path = BASE_PATH * "/7_Results/$(m_label)$(tag)/plots/correlations/"
     end
     mkpath(output_path)
