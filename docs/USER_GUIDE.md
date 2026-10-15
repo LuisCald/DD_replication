@@ -26,27 +26,44 @@ This guide covers what stays here: running the estimation itself.
 
 ## Run the model yourself
 
-The entry points are:
+The stages and their commands are in the [README](../README.md#overview).
 
-```bash
-bash master.sh data        # Stage 1: clean raw survey data (~1 h)
-bash master.sh estimate    # Stage 2: MCMC estimation (~48–72 h)
-bash master.sh results     # Stage 3: post-estimation, figures, tables (~3 h)
+**Configure a run with an example file, not by editing `Structures.jl`.** `master.sh` sets
+`DD_EXAMPLE=replication` by default, and `Structures.jl` then loads
+`code/julia/examples/Structures_replication.jl`, which defines its own `model_options` and
+`obs_data`; the baseline block at the end of `Structures.jl` then never runs, and edits there
+have no effect. Instead, create
+`code/julia/examples/Structures_<name>.jl` and run with `DD_EXAMPLE=<name>`:
+
+```julia
+# code/julia/examples/Structures_my_experiment.jl: the paper spec with 6 factors
+ENV["DD_NDF"] = "6"
+ENV["DD_TAG"] = " my_experiment"   # results go to a new 7_Results folder
+include(joinpath(@__DIR__, "Structures_replication.jl"))
 ```
 
-The single file you actually edit when configuring a new run is [`code/julia/Structures.jl`](../code/julia/Structures.jl) — specifically the [`ModelOptions`](../code/julia/Structures.jl) struct. Its docstring lists every field; the seven you'll touch in practice are:
+```bash
+DD_EXAMPLE=my_experiment bash master.sh estimate   # then: DD_EXAMPLE=my_experiment bash master.sh results
+```
+
+The environment switches of the paper specification (`DD_NDF`, `DD_MUTE`, `DD_ITEM`,
+`DD_TAG`, …) are documented at the top of `code/julia/examples/Structures_transfer.jl`. For
+options without a switch, copy `Structures_transfer.jl` and edit its `ModelOptions(...)` call.
+The [`ModelOptions`](../code/julia/Structures.jl) docstring lists every field; the ones you
+will touch most often are:
 
 | Field | What it controls | Typical change |
 |---|---|---|
-| `tag` | Result-folder suffix | `" my_experiment"` (leading space) — outputs go to `7_Results/<m_label><tag>/...` |
-| `measures` | Which household variables to model jointly | Always `["consum", "income", "wealth"]` in the paper |
-| `number_of_dfs` | # of distributional factors retained from PCA | Default `8` (~99% of business-cycle variation) |
+| `tag` | Result-folder suffix | `" my_experiment"` (leading space); outputs go to `7_Results/<m_label><tag>/...` |
+| `measures` | Which household variables to model jointly | Paper: `["consum", "income", "wealth"]`; DFA item runs: `(income, wealth, <item>)` |
+| `factor_selection`, `n_dist_factors` | Number of distributional factors | Paper: `:fixed`, `8` |
 | `lags` / `agg_lags` | AR depth of states and aggregate factors | Defaults `1` / `4` |
 | `blind_to` | Mute a measure in a specific survey | `Dict("CEX" => ["wealth"])` etc. |
-| `data_to_mute` | Drop survey waves entirely (validation experiments) | `Dict("SCF" => muted_quarters_between(QuarterlyDate(2004,1), QuarterlyDate(2009,4)))` |
-| `estimator` | `SeriesEstimator` polynomial order / output grid | `SeriesEstimator(grid_pcf=14, grid_cop=14, …)` for higher-order |
+| `data_to_mute` | Drop survey waves entirely (validation experiments) | see `DD_MUTE` in `Structures_transfer.jl` |
+| `estimator` | `SeriesEstimator` polynomial order / output grid | `SeriesEstimator(grid_pcf=14, grid_cop=14, …)` for higher order |
 
-The block of comments immediately below `ModelOptions` lists tag conventions used in the paper's validation runs (e.g., `" excluding housing cycle wealth"`, `" every 4 years"`, `" 6 factors"`), with the matching `data_to_mute` recipes. Use them as templates.
+The paper's robustness runs, `examples/Structures_replication_<variant>.jl`, are each the
+paper specification plus one change; use them as templates.
 
 ### Output layout for a fresh tag
 
@@ -54,7 +71,7 @@ When you bump `tag` to something new, the pipeline writes to a brand-new tree (t
 
 ```
 7_Results/
-└── consum_and_income_and_wealth<tag>/
+└── <m_label><tag>/        ← <m_label> = the measures joined by "_and_", e.g. consum_and_income_and_wealth
     ├── from_mcmc/
     │   ├── data/        ← *_coefficients_*.csv, smoothed_factors.csv, *_functional_data*.csv
     │   ├── plots/       ← quantile / copula plots + correlation tables
@@ -148,7 +165,7 @@ your cleaning code:
 ### One file to write
 
 The whole configuration is one Julia file in `code/julia/examples/`,
-selected with the `DD_EXAMPLE` environment variable. The twelve shipped
+selected with the `DD_EXAMPLE` environment variable. The shipped
 examples are templates; `Structures_stocks.jl` is the closest in spirit
 (it adds a new measure with an atom at zero).
 
@@ -177,7 +194,7 @@ Then skip Stage 1 (your data is already clean) and run:
 DD_EXAMPLE=firms julia --project=code/julia/env code/julia/run_estimation.jl
 ```
 
-Budget ~48–72 h for the MCMC. Outputs land in `7_Results/` in exactly the
+Budget ~48–72 h for the MCMC (Stage 2 in the [README](../README.md#overview)). Outputs land in `7_Results/` in exactly the
 format documented in [DD_data](https://github.com/LuisCald/DD_data) —
 smoothed factors, coefficient files, synthetic microdata — so all of
 DD_data's `reconstruct` helpers work on your run out of the box.
@@ -187,7 +204,7 @@ DD_data's `reconstruct` helpers work on your run out of the box.
 | Knob | When to touch it |
 |---|---|
 | `atom_measures` | Any measure where a large share of units sits exactly at zero (firm debt, stocks). Fits participation + conditional distribution separately — a single continuous fit fails badly for a large atom. |
-| `number_of_dfs` | Default 8 factors. Sensible starting point; check the PCA scree output for your data. |
+| `factor_selection`, `n_dist_factors` | `:fixed` with 8 factors in the paper. A sensible start; check the PCA scree output for your data. |
 | `estimator` | `SeriesEstimator(grid_pcf=12, grid_cop=12, …)` — polynomial orders of the marginal/copula fit. |
 | `data_cutoffs` | Restrict the sample period. |
 | `blind_to` | Only to *deliberately* mute a measure a source does observe — absence is auto-detected. |
