@@ -950,7 +950,22 @@ function series_approximate_copula(period_data, obs_measures, estimator; atom::U
         Wh = W[hold_mask]
         Rh[:, a] .= weighted_rankdata(@view(Rh[:, a]), Wh)   # conditional (weighted) rank within holders
         A .= reshape(get_copula_coefficients_fast(Rh, Wh, K - 1), size(A))
-        holder_yw = vec(collect(A[slice...]))               # κ^{YWS}|_{YW}, for the reconstruction identity
+        # κ^{YWS}|_{YW}, for the reconstruction identity. Not A[slice...]:
+        # get_copula_coefficients_fast zeroes the pure-marginal terms (right for
+        # a population copula), but on holders at POPULATION ranks those terms
+        # are the participation gradient (holders sit high in Y and W). Zeroing
+        # them spread holders/non-holders uniformly over the Y and W ranks in
+        # every reconstruction. Raw weighted moments keep them (2026-10-14).
+        if d >= 3
+            others = [i for i in 1:d if i != a]
+            Φ1 = [Q_m(k - 1, Rh[i, others[1]]) for i in axes(Rh, 1), k in 1:K]
+            Φ2 = [Q_m(k - 1, Rh[i, others[2]]) for i in axes(Rh, 1), k in 1:K]
+            Mh = (Φ1 .* (Wh ./ sum(Wh)))' * Φ2             # [k1, k2], column-major like A[slice...]
+            Mh[1, 1] = 1.0
+            holder_yw = vec(Mh)
+        else
+            holder_yw = vec(collect(A[slice...]))
+        end
     end
 
     # Overwrite the atom-degree-0 slice with the population κ^{YW}

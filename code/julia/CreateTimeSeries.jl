@@ -1767,6 +1767,97 @@ function cross_group_ranges(shares::AbstractVector)
     [i == 1 ? "<$(e[1])" : i == n ? ">$(e[n-1])" : "$(e[i-1])-$(e[i])" for i in 1:n]
 end
 
+# ── 2D maximum-entropy density from copula moments (atom items) ───────────────
+# The order-K Legendre series cannot place the top item holders in the top corner
+# of the wealth/income axis: the group indicator 1{u ∈ G} enters through its
+# truncated expansion Σ_k B_k Q_k(u), which rings (Gibbs) and lets every group pick
+# up a few percent of the top holders' (huge) holdings. On SCF 2019 the series
+# gives $9,077 of stocks per bottom-50% household against $619 in the microdata.
+# Instead, fit the positive density f(u,v) = exp(Σ_kl λ_kl Q_k(u) Q_l(v)) whose
+# moments E_f[Q_k(u) Q_l(v)] equal the K×K moment matrix, and integrate the EXACT
+# indicator over it (SCF 2019: $633). Grid: 12-point Gauss–Legendre per segment,
+# segments dense at the top and aligned with every group edge used here.
+const MAXENT_EDGES = [0.0, 0.2, 0.4, 0.5, 0.6, 0.8, 0.9, 0.95, 0.99, 0.999, 1.0]
+const MAXENT_CACHE = Dict{UInt64,Matrix{Float64}}()
+const _MAXENT_GRID = Ref{Any}(nothing)
+function _maxent_grid(K)
+    g = _MAXENT_GRID[]
+    (g !== nothing && g.K == K) && return g
+    gx = [-0.9815606342467192, -0.9041172563704749, -0.7699026741943047, -0.5873179542866175,
+          -0.3678314989981802, -0.1252334085114689, 0.1252334085114689, 0.3678314989981802,
+          0.5873179542866175, 0.7699026741943047, 0.9041172563704749, 0.9815606342467192]
+    gw = [0.0471753363865118, 0.1069393259953184, 0.1600783285433462, 0.2031674267230659,
+          0.2334925365383548, 0.2491470458134028, 0.2491470458134028, 0.2334925365383548,
+          0.2031674267230659, 0.1600783285433462, 0.1069393259953184, 0.0471753363865118]
+    x = Float64[]; w = Float64[]
+    for s = 1:length(MAXENT_EDGES)-1
+        a, b = MAXENT_EDGES[s], MAXENT_EDGES[s+1]
+        append!(x, (a + b) / 2 .+ (b - a) / 2 .* gx); append!(w, (b - a) / 2 .* gw)
+    end
+    Qx = [Q_m(k - 1, xi) for k = 1:K, xi in x]                      # K × n
+    Pq = [Qx[k, i] * Qx[k2, i] for k = 1:K, k2 = 1:K, i = 1:length(x)]  # (K,K,n): products Q_k Q_k′ per node
+    Pq = reshape(Pq, K * K, length(x))
+    g = (K = K, x = x, w = w, Qx = Qx, Pq = Pq, W2 = w * w')
+    _MAXENT_GRID[] = g
+    return g
+end
+
+"""
+    maxent_density_2d(M; λ0, maxit, tol) -> (f, λ, err)
+
+Probability masses f (n×n on the maxent grid) of exp(Σ λ_kl Q_k(u)Q_l(v)) matching the
+K×K moment matrix M (M[1,1] = 1). Damped Newton on the dual; `err` is the largest
+moment error at exit. λ0 (K×K) warm-starts from a neighbouring quarter.
+Everything is separable in (u, v): log f = Qxᵀ Λ Qx, moments μ = Qx f Qxᵀ, and the
+Hessian is (P f Pᵀ) with P the stacked products Q_k Q_k′ — small matrix products only.
+Regularized (penalty ε/2·‖λ‖² on the dual): strictly convex, so Newton converges even when the
+smoothed moments are not exactly those of a positive density — it then returns the closest one
+(moment error ≈ ε·λ) instead of diverging. `err` is the largest moment error |μ − M|.
+"""
+function maxent_density_2d(M::AbstractMatrix; λ0 = nothing, maxit::Int = 200, tol::Float64 = 1e-7, ε::Float64 = 1e-6)
+    K = size(M, 1)
+    g = _maxent_grid(K)
+    free = trues(K, K); free[1, 1] = false                          # λ_00 is the normaliser
+    Λ = λ0 === nothing ? zeros(K, K) : copy(λ0)
+    moments(fv) = g.Qx * fv * g.Qx'
+    idx = findall(vec(free))
+    # dual objective D(λ) = log Z(λ) − λ·m + ε/2‖λ‖² (over the free λ); gradient μ − m + ελ
+    function state(Λv)                                              # names differ from the outer f/μ/D on purpose:
+        ev = g.Qx' * Λv * g.Qx                                      # assigning those here would capture and overwrite them
+        mx = maximum(ev)
+        ew = exp.(ev .- mx) .* g.W2
+        Z = sum(ew)
+        fv = ew ./ Z
+        μv = moments(fv)
+        Dv = log(Z) + mx - sum(Λv[idx] .* M[idx]) + ε / 2 * sum(abs2, Λv[idx])
+        return fv, μv, Dv
+    end
+    f, μ, D = state(Λ)
+    gradv(μv, Λv) = (μv .- M)[idx] .+ ε .* Λv[idx]
+    gr = gradv(μ, Λ)
+    for it = 1:maxit
+        maximum(abs.(gr)) < tol && break
+        S4 = reshape(g.Pq * f * g.Pq', K, K, K, K)                   # Σ f Q_k Q_k′ Q_l Q_l′, dims (k,k′,l,l′)
+        H = reshape(permutedims(S4, (1, 3, 2, 4)), K * K, K * K)     # rows (k,l), cols (k′,l′)
+        H .-= vec(μ) * vec(μ)'
+        Hs = H[idx, idx] + ε * I
+        step = Symmetric(Hs) \ gr
+        t = 1.0; accepted = false
+        while t > 1e-8                                              # Armijo backtracking on the dual
+            Λn = copy(Λ); Λn[idx] .-= t .* step
+            fn, μn, Dn = state(Λn)
+            if Dn <= D - 1e-4 * t * dot(gr, step)
+                Λ, f, μ, D = Λn, fn, μn, Dn; accepted = true; break
+            end
+            t /= 2
+        end
+        accepted || break
+        gr = gradv(μ, Λ)
+    end
+    G = μ .- M; G[1, 1] = 0.0
+    return f, Λ, maximum(abs.(G))
+end
+
 function compute_cross_conditional_means_continuous(
     cop_coefs,          # (K,…,K,T) reconstructed copula coefficient tensor
     split_pcfs,         # D matrices (grid_pcf × T), asinh-scaled Legendre coefficients
@@ -1776,6 +1867,7 @@ function compute_cross_conditional_means_continuous(
     max_order::Int = size(split_pcfs[1], 1) - 1,
     atom_dim = nothing,
     atom_π = nothing,
+    atom_hyw = nothing,   # K² × T holder (Y,W) coefficients (atom_series_at); enables the exact atom pairs
 )
     D = length(measures)
     T = size(split_pcfs[1], 2)
@@ -1784,6 +1876,11 @@ function compute_cross_conditional_means_continuous(
     nS = length(share_spec)
     # conditioning-side closed-form segment integrals B[s][k+1] = ∫_G Q_k du
     B = [[integrate_legendre_polynomial(k, edges[s+1]) - integrate_legendre_polynomial(k, edges[s]) for k = 0:(K-1)] for s = 1:nS]
+    # composite Gauss–Legendre ∫₀¹ Q_j(u) V(u) du, j = 0..K-1 (deciles for tail accuracy)
+    legendre_moments(V) = [sum(gauss_legendre_integrate(u -> Q_m(j, u) * V(u), b / 10, (b + 1) / 10) for b = 0:9) for j = 0:(K-1)]
+    exact_atom = atom_dim !== nothing && atom_π !== nothing && atom_hyw !== nothing && D == 3
+    maxent_warm = Dict{Int,Matrix{Float64}}()   # warm start (λ, K×K) per pair across quarters
+    maxent_fail = Ref(0)
 
     result = Dict{String,Matrix{Float64}}()
     for oi = 1:D, ci = 1:D
@@ -1808,6 +1905,86 @@ function compute_cross_conditional_means_continuous(
             any(isnan, κslice) && continue
             κ2 = oi < ci ? κslice : permutedims(κslice)   # rows = outcome degree, cols = cond degree
 
+            # ── Atom pairs, exact: the state tensor's atom-degree-0 slice is the
+            # POPULATION κ^{YW}, degrees ≥ 1 the HOLDER tensor at the within-holder
+            # atom rank u′ = (u−π)/(1−π). Treating the slice as one population
+            # copula (the generic path below) drops P(holder | group) and mixes
+            # the two rank scales. Here, with c the non-atom measure of the pair:
+            #   holder (c, u′) plane  P[k,l] = κ[c=k, atom=l, other=0] (l ≥ 1),
+            #                         P[k,0] = holder (Y,W) slice marginalised;
+            #   non-holder c-marginal κ0[k] = (1{k=0} − (1−π)·P[k,0]) / π.
+            #   item | c ∈ G : (1−π) Σ_kl P[k,l] Ã_l B_k,  Ã_l = ∫₀¹ Q_l V_holder
+            #   c | item ∈ G : s_G Σ_k κ0[k] A_k + (1−π) Σ_kl P[k,l] A_k ∫_{G′} Q_l,
+            # s_G = |G ∩ [0,π]|, G′ = the holder part of G at the rescaled rank.
+            if exact_atom && (oi == atom_dim || ci == atom_dim) && !any(isnan, @view(atom_hyw[:, t]))
+                a = atom_dim
+                c = oi == a ? ci : oi
+                πt = clamp(atom_π[t], 0.0, 1.0)
+                others = [d for d in 1:D if d != a]
+                H = reshape(atom_hyw[:, t], K, K)
+                hmarg = c == others[1] ? H[:, 1] : vec(H[1, :])
+                P = [l == 1 ? hmarg[k] : κt[ntuple(d -> d == c ? k : d == a ? l : 1, D)...] for k = 1:K, l = 1:K]
+                any(isnan, P) && continue
+                if oi == a
+                    coefs_o = split_pcfs[oi][:, t]
+                    corr_o = corr_mat[t, oi]
+                    Vh = u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coefs_o, max_order, u))[1] * corr_o
+                    # Max-entropy holder density on (c, u′), exact group indicator (see
+                    # maxent_density_2d); the truncated series below is the fallback.
+                    fit = nothing
+                    if all(e -> any(x -> abs(x - e) < 1e-12, MAXENT_EDGES), edges)
+                        Pn = P ./ P[1, 1]
+                        h = hash(Pn)
+                        f = get(MAXENT_CACHE, h, nothing)
+                        if f === nothing
+                            f, λ, err = maxent_density_2d(Pn; λ0 = get(maxent_warm, c, nothing))
+                            if err < 1e-3
+                                MAXENT_CACHE[h] = f; maxent_warm[c] = λ
+                            else
+                                f = nothing; maxent_fail[] += 1
+                            end
+                        end
+                        fit = f
+                    end
+                    if fit !== nothing
+                        gx = _maxent_grid(K).x
+                        EV = fit * Vh.(gx)                          # Σ_v f(u,v) V(v), per u-node
+                        # the grid integrates the extreme top of V coarsely: rescale so the
+                        # groups add up to the exactly integrated holder mean ∫₀¹ V
+                        scale = legendre_moments(Vh)[1] / sum(EV)
+                        for si = 1:nS
+                            rows = (gx .> edges[si]) .& (gx .<= edges[si+1])
+                            result[key][si, t] = (1 - πt) * scale * sum(EV[rows]) / (edges[si+1] - edges[si])
+                        end
+                    else
+                        Ã = legendre_moments(Vh)
+                        for si = 1:nS
+                            num = (1 - πt) * sum(P[k, l] * Ã[l] * B[si][k] for k = 1:K, l = 1:K)
+                            result[key][si, t] = num / B[si][1]
+                        end
+                    end
+                else
+                    coefs_o = split_pcfs[oi][:, t]
+                    corr_o = corr_mat[t, oi]
+                    Ac = legendre_moments(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coefs_o, max_order, u))[1] * corr_o)
+                    κ0 = πt > 1e-10 ? [((k == 1 ? 1.0 : 0.0) - (1 - πt) * hmarg[k]) / πt for k = 1:K] : [k == 1 ? 1.0 : 0.0 for k = 1:K]
+                    slabmean = sum(κ0[k] * Ac[k] for k = 1:K)
+                    for si = 1:nS
+                        lo, hi = edges[si], edges[si+1]
+                        s_G = max(0.0, min(hi, πt) - min(lo, πt))
+                        num = s_G * slabmean
+                        if hi > πt && πt < 1
+                            a′ = (max(lo, πt) - πt) / (1 - πt)
+                            b′ = (hi - πt) / (1 - πt)
+                            B̃ = [integrate_legendre_polynomial(l - 1, b′) - integrate_legendre_polynomial(l - 1, a′) for l = 1:K]
+                            num += (1 - πt) * sum(P[k, l] * Ac[k] * B̃[l] for k = 1:K, l = 1:K)
+                        end
+                        result[key][si, t] = num / (hi - lo)
+                    end
+                end
+                continue
+            end
+
             # outcome-side integrals A[j+1] = ∫₀¹ Q_j(u) V_t(u) du
             coefs_o = split_pcfs[oi][:, t]
             corr_o = corr_mat[t, oi]
@@ -1822,6 +1999,38 @@ function compute_cross_conditional_means_continuous(
                     eval_quantile_function(coefs_o, max_order, u),
                 )[1] * corr_o
             end
+
+            # Max-entropy density of the pair (same reason as for the atom items: the
+            # truncated group indicator leaks into the other measure's top tail; SCF
+            # 2019 wealth by middle-40% income: series −9%, max-entropy 0%). One fit per
+            # unordered pair and quarter (canonical order = increasing dimension),
+            # shared by both directions and all share specs; series as fallback.
+            if !(oi === atom_dim) && all(e -> any(x -> abs(x - e) < 1e-12, MAXENT_EDGES), edges) && κslice[1, 1] > 0
+                Mc = κslice ./ κslice[1, 1]                  # rows = min(oi,ci), cols = max(oi,ci)
+                h = hash(Mc)
+                f = get(MAXENT_CACHE, h, nothing)
+                pk = -(min(oi, ci) * 10 + max(oi, ci))        # warm-start key (negative: not an atom c)
+                if f === nothing
+                    f, λ, err = maxent_density_2d(Mc; λ0 = get(maxent_warm, pk, nothing))
+                    if err < 1e-3
+                        MAXENT_CACHE[h] = f; maxent_warm[pk] = λ
+                    else
+                        f = nothing; maxent_fail[] += 1
+                    end
+                end
+                if f !== nothing
+                    fc = ci < oi ? f : permutedims(f)          # rows = conditioning, cols = outcome
+                    gx = _maxent_grid(K).x
+                    EV = fc * Vfun.(gx)
+                    scale = sum(gauss_legendre_integrate(Vfun, b / 10, (b + 1) / 10) for b = 0:9) / sum(EV)
+                    for si = 1:nS
+                        rows = (gx .> edges[si]) .& (gx .<= edges[si+1])
+                        result[key][si, t] = scale * sum(EV[rows]) / (edges[si+1] - edges[si])
+                    end
+                    continue
+                end
+            end
+
             A = zeros(K)
             for j = 0:(K-1)
                 acc = 0.0
@@ -1843,6 +2052,7 @@ function compute_cross_conditional_means_continuous(
             end
         end
     end
+    @info "cross-conditional means: max-entropy pair densities, $(maxent_fail[]) quarter fits fell back to the truncated series"
     return result
 end
 
@@ -2083,6 +2293,20 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
             share_spec = cross_conditional_shares(model_options),   # 40/40/20 by default; marginal shares above stay 50/40/10
             max_order = max_order, atom_dim = atom_dim,
             atom_π = atom_ser === nothing ? nothing : atom_ser.π,
+            atom_hyw = atom_ser === nothing ? nothing : atom_ser.hyw,
+        )
+        # Item runs: the same operator on the DFA wealth groups (bottom 50 / next
+        # 40 / top 10), exported separately as <source>_cross_conditional_dfa.
+        cross_cond_dfa = atom_ser === nothing ? nothing : compute_cross_conditional_means_continuous(
+            copulas_coefs, split_pcfs, sort(measures), corr_mat;
+            share_spec = [0.5, 0.4, 0.1], max_order = max_order, atom_dim = atom_dim,
+            atom_π = atom_ser.π, atom_hyw = atom_ser.hyw,
+        )
+        # ... and on quintiles (q1…q5), for the DFA income groups (0–20 … 80–100)
+        cross_cond_dfa_q = atom_ser === nothing ? nothing : compute_cross_conditional_means_continuous(
+            copulas_coefs, split_pcfs, sort(measures), corr_mat;
+            share_spec = fill(0.2, 5), max_order = max_order, atom_dim = atom_dim,
+            atom_π = atom_ser.π, atom_hyw = atom_ser.hyw,
         )
 
         # 'data_cop' is (x, x, x, T). Reshape to (x^d, T)
@@ -2173,6 +2397,18 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
                     end
                 end
                 ncol(X) > 1 && CSV.write(xpath * "/" * data_name * "_cross_conditional" * data_tag * "$label" * ".csv", X)
+                if @isdefined(cross_cond_dfa) && cross_cond_dfa !== nothing
+                    Xd = DataFrame(time = collect(xdts))
+                    for (key, mat) in sort(collect(cross_cond_dfa); by = first), (si, sl) in enumerate(cross_group_labels([0.5, 0.4, 0.1]))
+                        length(mat[si, :]) == length(xdts) && (Xd[!, "$(key)_$(sl)"] = mat[si, :])
+                    end
+                    if @isdefined(cross_cond_dfa_q) && cross_cond_dfa_q !== nothing
+                        for (key, mat) in sort(collect(cross_cond_dfa_q); by = first), si = 1:5
+                            length(mat[si, :]) == length(xdts) && (Xd[!, "$(key)_q$(si)"] = mat[si, :])
+                        end
+                    end
+                    ncol(Xd) > 1 && CSV.write(xpath * "/" * data_name * "_cross_conditional_dfa" * data_tag * "$label" * ".csv", Xd)
+                end
             catch e
                 @warn "cross-conditional export failed (diagnostic only): $e"
             end
