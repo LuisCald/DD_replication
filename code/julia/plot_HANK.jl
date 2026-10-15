@@ -91,10 +91,23 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
         ends = round.(Int, e); starts = vcat(0, ends[1:end-1]) .+ 1
         [vec(mean(bins[a:b, :]; dims = 1)) for (a, b) in zip(starts, ends)]
     end
+    # 50/40/10 edges are not quintile edges, but those groups are exactly the marginal
+    # share groups: truth <meas>_{bot50,mid40,top10}, model quantiles "common series".
+    marginal_groups = cross_labels == ["bot50", "mid40", "top10"]
+    function _own_model(meas)
+        g = _own_groups(data_dict[meas]["quantiles"]["data"])
+        g !== nothing && return g
+        cs = data_dict[meas]["quantiles"]["common series"]
+        (marginal_groups && all(sl -> haskey(cs, sl), cross_labels)) || return nothing
+        [cs[sl] for sl in cross_labels]
+    end
     for m in measures
         qcols = ["$(m)$(k)q" for k in 1:5]
-        all(c -> hasproperty(truth_data_filtered, Symbol(c)), qcols) || continue
-        g = _own_groups(Matrix{Float64}(permutedims(Matrix(truth_data_filtered[:, qcols]))))
+        g = all(c -> hasproperty(truth_data_filtered, Symbol(c)), qcols) ?
+            _own_groups(Matrix{Float64}(permutedims(Matrix(truth_data_filtered[:, qcols])))) : nothing
+        if g === nothing && marginal_groups && all(sl -> hasproperty(truth_data_filtered, Symbol("$(m)_$(sl)")), cross_labels)
+            g = [Vector{Float64}(truth_data_filtered[:, Symbol("$(m)_$(sl)")]) for sl in cross_labels]
+        end
         g === nothing && continue
         for (sl, v) in zip(cross_labels, g)
             truth_data_filtered[!, "$(m)_own_$(sl)"] = v
@@ -425,7 +438,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
         # model = bin means of the fitted quantile function / select_series per-HH mean,
         # truth = <meas>_own_<label> (from the quintile columns) / truth per-HH mean.
         # The x-range runs from the first to the last quarter with a model estimate.
-        own_m = _own_groups(data_dict[meas]["quantiles"]["data"])
+        own_m = _own_model(meas)
         own_o = try
             _own_groups(func_dict[data_name][meas]["quantiles"]["data"])
         catch
@@ -497,7 +510,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
             if !haskey(corr_dict, "$(key)_r2")
                 corr_dict["$(key)_r2"] = Dict()
             end
-            own_model = is_self ? _own_groups(data_dict[out_meas]["quantiles"]["data"]) : nothing
+            own_model = is_self ? _own_model(out_meas) : nothing
             for (si, sl) in enumerate(cross_labels)
                 # DDFM reconstruction
                 if is_self
@@ -628,7 +641,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                 end
 
                 is_self_sample = (out_meas == cond_meas)
-                own_model_s = is_self_sample && haskey(data_dict, out_meas) ? _own_groups(data_dict[out_meas]["quantiles"]["data"]) : nothing
+                own_model_s = is_self_sample && haskey(data_dict, out_meas) ? _own_model(out_meas) : nothing
                 for (si, sl) in enumerate(cross_labels)
                     col_name = "$(key)_$(sl)"
                     truth_col = is_self_sample ? Symbol("$(out_meas)_own_$(sl)") : Symbol(col_name)
