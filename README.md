@@ -371,8 +371,8 @@ tree (only `data_timeline.jl` writes there directly).
 | `fig:recon_missing2` — predictability re-estimating the model (3×3 panels) | `CreateTimeSeries.jl` exports of the three re-estimated specs | `DD_EXAMPLE=cex_every_4_years`, `no_recent_20q`, `no_housing_wealth` |
 | `fig:ow_shares` — information shares | `ObservationWeights(Plots).jl` | Stage 3, Step 8 |
 | `fig:ow_interp` — interpolation shares | `ObservationWeights(Plots).jl` | Stage 3, Step 8 |
-| `tab:hank_avg_corr` — model vs. HANK truth correlations | hand-written from HANK-package runs | HANK package (separate) |
-| `fig:hank_full_v_incomplete_income` — model estimates vs. HANK simulated truth | HANK replication package | separate package (not included) |
+| `tab:hank_avg_corr` — model vs. HANK truth correlations (average over 10 economies) | `plot_HANK.jl` (`generate_averaged_hank_avg_corr_table`) → `hank_avg_corr.tex` | `code/hank/README.md` (simulate, estimate 10 economies, `HANK_TABLE_ECONS=1-10`) |
+| `fig:hank_full_v_incomplete_income` — model estimates vs. HANK simulated truth | `plot_HANK.jl` own-group panels (economy 1), assembled by `doc/figure10_404020.tex` | `code/hank/README.md` |
 | fig. consumption dynamics across recessions (9 panels, `relcons*.jpg`) | `code/stata/consumption_recessions.do` (reads the synthetic-micro export) | standalone Stata, after Stage 3 |
 | `fig:cons_wealth_along_inc` — consumption over the latest business cycles (`IRFs_and_Trends/`) | Stata local projections (`prep_micro_data.do` + projection code) | standalone Stata |
 | `Tables/DataCoverage.tex` | hand-written | — |
@@ -397,7 +397,7 @@ tree (only `data_timeline.jl` writes there directly).
 ### Not produced by any script
 
 `Tables/DataCoverage.tex`, the inline hand-written tables (`tab:my_label`,
-`tab:hank_avg_corr`, transcriptions of the FEVD/correlation output), and the
+transcriptions of the FEVD/correlation output), and the
 TikZ diagrams are authored directly in the .tex sources.
 
 ## References

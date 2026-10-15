@@ -1938,7 +1938,7 @@ function compute_cross_conditional_means_continuous(
                         f = get(MAXENT_CACHE, h, nothing)
                         if f === nothing
                             f, λ, err = maxent_density_2d(Pn; λ0 = get(maxent_warm, c, nothing))
-                            if err < 1e-3
+                            if err < 2e-2
                                 MAXENT_CACHE[h] = f; maxent_warm[c] = λ
                             else
                                 f = nothing; maxent_fail[] += 1
@@ -2012,7 +2012,7 @@ function compute_cross_conditional_means_continuous(
                 pk = -(min(oi, ci) * 10 + max(oi, ci))        # warm-start key (negative: not an atom c)
                 if f === nothing
                     f, λ, err = maxent_density_2d(Mc; λ0 = get(maxent_warm, pk, nothing))
-                    if err < 1e-3
+                    if err < 2e-2
                         MAXENT_CACHE[h] = f; maxent_warm[pk] = λ
                     else
                         f = nothing; maxent_fail[] += 1
