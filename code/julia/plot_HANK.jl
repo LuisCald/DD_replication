@@ -50,7 +50,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
     # file_name_raw_data = "/home/luisc/Distributional_Dynamics/7_Results/illiqd_and_income_and_liquid HANK full $(economy_number)/from_mcmc/data/HANK_full_$(economy_number).jld2"
     # func_dict_full_hank = jldopen(file_name_raw_data, "r")["data"]
     # Import truth
-    truth_file = DATA_PROCESSING * "/HANK_truth_$(economy_number).csv"
+    truth_file = DATA_PROCESSING * "/HANK_truth$(get(ENV, "HANK_TRUTH_SUFFIX", ""))_$(economy_number).csv"   # _x50: 50/40/10 cross-conditional truth
     truth_data = CSV.read(truth_file, DataFrame)
     # Blank truth cells (e.g. a boundary row set to NaN in a merged truth file) arrive
     # as `missing`; the NaN tests below cannot take a Missing, so make them NaN here.

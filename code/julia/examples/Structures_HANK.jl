@@ -102,7 +102,13 @@ HANK_WRIDGE > 0 && @info "  whitening ridge: $(HANK_WRIDGE)"
 @info "  aggregate inputs: $(HANK_SHOCKS)$(HANK_SHOCKS == :levels ? " (shock states untransformed)" : " (ADF differencing, empirical-pipeline mirror)")" *
       (HANK_CAP > 0 ? ", stationarity cap $(HANK_CAP)" : "")
 
+# HANK_XSHARES=50: cross-conditional cells on 50/40/10 instead of 40/40/20 (needs a truth file
+# with matching columns, HANK_TRUTH_SUFFIX=_x50 → HANK_truth_x50_N.csv); tag suffix " x50".
+const HANK_XS = get(ENV, "HANK_XSHARES", "")
+HANK_XS in ("", "50") || error("HANK_XSHARES must be empty or 50, got $(HANK_XS)")
+
 const model_options = ModelOptions(
+    cross_conditional_shares = HANK_XS == "50" ? [0.5, 0.4, 0.1] : [0.4, 0.4, 0.2],
     tag = " HANK $(HANK_ECON)" * (HANK_TREND == :stochastic ? " stochastic trend" : "") *
           (HANK_NDF > 0 ? " $(HANK_NDF) factors" : "") * (HANK_PERS == :per_factor ? " pf" : "") *
           (HANK_TLS == 0.1 ? "" : " tls$(HANK_TLS)") * (HANK_NAF > 0 ? " naf$(HANK_NAF)" : "") *
@@ -111,7 +117,7 @@ const model_options = ModelOptions(
           (HANK_SHOCKS == :levels ? " lvl" : "") *
           (HANK_LOAD == :block ? " blk$(HANK_NMF)x$(HANK_NCB)" : "") *
           (isempty(HANK_OBJF) ? "" : " of" * replace(HANK_OBJF, ":" => "", "," => "-", "@" => "p", " " => "")) *
-          (HANK_WRIDGE > 0 ? " wr$(HANK_WRIDGE)" : ""),
+          (HANK_WRIDGE > 0 ? " wr$(HANK_WRIDGE)" : "") * (HANK_XS == "50" ? " x50" : ""),
     trend_spec = HANK_TREND,
     persistence_prior = HANK_PERS,
     trend_lambda_scale = HANK_TLS,

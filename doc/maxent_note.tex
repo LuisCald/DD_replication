@@ -1,0 +1,83 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,amsmath,amssymb,booktabs,enumitem}
+\setlength{\parindent}{0pt}\setlength{\parskip}{5pt}
+\setlist{itemsep=2pt,topsep=3pt}
+\newcommand{\E}{\mathbb{E}}
+\begin{document}
+{\Large\bfseries Group means from copula moments: the 2D maximum-entropy step}\par\smallskip
+{\small Technical note, 15 Oct 2026. Code: \texttt{CreateTimeSeries.jl} (\texttt{maxent\_density\_2d}, used in \texttt{compute\_cross\_conditional\_means\_continuous}).}
+
+\section*{1. The object}
+Many statistics we report are \emph{cross-conditional means}: the mean of an outcome $S$ (stocks, wealth, consumption, \dots) among households in a group $G$ of another variable $W$ (e.g.\ the bottom 50\% of wealth):
+\[
+\E[S \mid u_W \in G] \;=\; \frac{1}{|G|}\int_0^1\!\!\int_0^1 \mathbf 1\{u\in G\}\; V(v)\; c(u,v)\,du\,dv ,
+\]
+where $u$ and $v$ are the ranks of $W$ and $S$, $V$ is the quantile function of $S$, and $c$ is the copula density of $(u,v)$. For an item with a point mass at zero, $v$ is the rank \emph{among holders}, $c$ is the holders' density, and the result is multiplied by the holder share $1-\pi$.
+
+The model does not carry $c$ itself. It carries an order-$K$ Legendre representation ($K=12$, orders $0,\dots,11$): the $K\times K$ coefficients
+\[
+m_{kl} \;=\; \E\big[Q_k(u)\,Q_l(v)\big], \qquad Q_k \text{ the orthonormal shifted Legendre polynomials on } [0,1],
+\]
+which are exactly the low-order moments of $c$.
+
+\section*{2. What went wrong with the truncated series}
+The natural read-out replaces $c$ by its truncated expansion $c_K(u,v)=\sum_{k,l} m_{kl}Q_k(u)Q_l(v)$. By orthogonality this is the same as replacing the group indicator by its own truncated expansion,
+\[
+\textstyle \int\!\!\int \mathbf 1\{u\in G\}V(v)\,c_K \;=\; \int\!\!\int \tilde{\mathbf 1}_G(u)\,V(v)\,c, \qquad \tilde{\mathbf 1}_G(u)=\sum_{k<K} \Big(\int_G Q_k\Big) Q_k(u).
+\]
+$\tilde{\mathbf 1}_G$ is a degree-11 polynomial approximation of a step function: it rings (Gibbs), overshooting and undershooting by a few percent \emph{everywhere}, including at $u\to 1$. For a heavy-tailed outcome this is fatal: ``the bottom 50\% of wealth'' silently includes a few percent of the top 1\%'s holdings.
+
+\textbf{Test on SCF 2019 microdata} (exact moments, empirical $V$; no model involved): mean stocks per household by wealth group.
+\begin{center}\small
+\begin{tabular}{lrrr}\toprule
+ & Bottom 50\% & 50--90\% & Top 10\%\\\midrule
+Microdata (truth) & 619 & 19{,}700 & 1{,}289{,}138\\
+Truncated series, order 12 & 9{,}077 & 28{,}938 & 1{,}209{,}993\\
+Truncated series, order 40 & 2{,}549 & 18{,}390 & 1{,}284{,}777\\
+\textbf{2D maximum entropy, order 12} & \textbf{577} & \textbf{18{,}475} & \textbf{1{,}315{,}679}\\\bottomrule
+\end{tabular}\end{center}
+The error is a 15-fold overstatement for the bottom half, it grows with the stock market (the leaked tail grows), and it vanishes only slowly with the order. Clipping negative cell masses or stretching the rank axes made it worse; a 1D fix along $v$ does not help, because the leak is in the conditioning direction $u$.
+
+\section*{3. The idea}
+Many densities share the same $K^2$ moments; the truncated series is just one of them (the $L^2$-closest polynomial, which can be negative and oscillates). Instead, pick the \emph{maximum-entropy} density among those consistent with the moments:
+\[
+\max_{f\ge 0}\; -\!\int\!\!\int f\log f \quad \text{s.t.}\quad \int\!\!\int Q_k(u)Q_l(v)\, f(u,v)\,du\,dv = m_{kl}\quad (k,l<K).
+\]
+Its solution is an exponential family with exactly the same sufficient statistics,
+\[
+f_\lambda(u,v) \;=\; \exp\Big(\sum_{k,l<K}\lambda_{kl}\,Q_k(u)\,Q_l(v)\Big)\Big/ Z(\lambda),
+\]
+and the group mean is then computed with the \emph{exact} indicator:
+\[
+\E[S\mid u\in G] \;=\; \frac{1}{|G|}\int\!\!\int \mathbf 1\{u\in G\}\,V(v)\,f_\lambda(u,v)\,du\,dv .
+\]
+Why this works: $f_\lambda$ is positive everywhere and can approach zero smoothly, so it can put the top holders in the top corner of the wealth axis without negative lobes or ringing; and no information is added or discarded --- it uses exactly the $K^2$ coefficients the model already has, so nothing is re-estimated.
+
+\section*{4. Computation}
+\begin{itemize}
+\item \textbf{Dual problem.} $\lambda$ minimises the convex function $D(\lambda)=\log Z(\lambda)-\sum_{kl}\lambda_{kl}m_{kl}$, whose gradient is $\E_{f_\lambda}[Q_kQ_l]-m_{kl}$ and whose Hessian is the covariance of the basis products under $f_\lambda$. Solved by damped Newton with Armijo backtracking.
+\item \textbf{Regularisation.} We minimise $D(\lambda)+\tfrac{\varepsilon}{2}\|\lambda\|^2$ with $\varepsilon=10^{-6}$. The model's coefficients are smoothed state estimates and need not be \emph{exactly} the moments of any positive density; without the penalty Newton then diverges. With it the problem is strictly convex, always converges, and returns the closest positive density (moment error of order $\varepsilon\lambda$). For feasible moments the effect is negligible (SCF test: maximum moment error $2\cdot10^{-5}$).
+\item \textbf{Grid.} Gauss--Legendre, 12 nodes per segment, segments at $0, .2, .4, .5, .6, .8, .9, .95, .99, .999, 1$ in each dimension: dense at the top, aligned with every group edge used (50/40/10, 40/40/20, quintiles), so the indicator is integrated exactly.
+\item \textbf{Separable algebra.} With $Q$ the $K\times n$ basis matrix: $\log f = Q^\top\Lambda Q$, moments $=QfQ^\top$, and the Hessian is a reshaping of $PfP^\top$ with $P$ the $K^2\times n$ matrix of products $Q_kQ_{k'}$. Only small matrix products --- about 0.01\,s per warm-started fit on one thread (0.3\,s cold).
+\item \textbf{Warm starts and caching.} Quarters are fitted in sequence, each starting from the previous quarter's $\lambda$; one fit per (pair, quarter) is cached and shared by both conditioning directions and all group definitions.
+\item \textbf{Total.} The grid integrates the extreme top of $V$ slightly coarsely (about $+6\%$ for stocks); the group means are rescaled so that they add up to the exactly integrated mean $\int_0^1 V$ (which is anchored to the Financial Accounts anyway).
+\item \textbf{Fallback.} If the moment error exceeds $10^{-3}$, that quarter uses the truncated series; the log reports the count per call.
+\end{itemize}
+
+\section*{5. Where it is used}
+\begin{itemize}
+\item Items with a zero mass (stocks, business, real estate, pensions, mortgages, consumer credit) by wealth and income groups --- the DFA comparison.
+\item All pairwise cross-conditional means of the main run and HANK (wealth by income, consumption by wealth, \dots). SCF 2019, wealth by income group: truncated series $+5\%/{-9\%}/{+1\%}$ for bottom 40 / middle 40 / top 20, maximum entropy within $\pm1\%$.
+\item \emph{Not} used for the recession panels (consumption in income$\times$wealth boxes, a 3D object): there the truncated series is within about $\pm3\%$ (PSID 2007 and 2019), consumption being far less heavy-tailed, and the panels show changes, in which a stable level bias largely cancels.
+\item Marginal group means (e.g.\ wealth of the top 10\% of wealth) are unaffected: they come from the quantile function directly.
+\end{itemize}
+
+\section*{6. Caveats}
+\begin{itemize}
+\item Maximum entropy is a choice of how to fill in the density between the moments. It is the least-informative positive choice and validates well on microdata, but it is not the only one.
+\item The 50--90\% group for stocks is still about 8\% low in the SCF test, and the top 10\% about 1\% high after the total rescaling.
+\item Quarters falling back to the truncated series would show small level shifts; the fallback counts are monitored (target: near zero after the regularisation).
+\end{itemize}
+\end{document}
