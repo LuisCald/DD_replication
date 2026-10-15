@@ -1,0 +1,36 @@
+% Figure 10 on 40/40/20 groups: model (red) vs HANK simulated truth (blue), sample A.
+% Panels are written by plot_HANK.jl (own-group block, 2026-10-12) as
+%   <results>/plots/<meas>/quantiles_levels/HANK a 1_<meas>_own_<bot40|mid40|top20>A non-diag_.pdf
+% Set \resultsdir to the synced results folder, then: pdflatex figure10_404020.tex
+\documentclass[11pt]{article}
+\usepackage[margin=1.5cm]{geometry}
+\usepackage{graphicx,xcolor,booktabs,caption,amssymb}
+\usepackage[T1]{fontenc}
+\newcommand{\resultsdir}{../5 factors complete case HANK/plots}
+\newcommand{\panel}[2]{\includegraphics[width=0.32\textwidth]{"\resultsdir/#1/quantiles_levels/HANK a 1_#1_own_#2A non-diag_".pdf}}
+\newcommand{\rowhead}[1]{\midrule\multicolumn{3}{c}{\large\textbf{#1}}\\\midrule}
+\pagestyle{empty}
+\begin{document}
+\begin{figure}[ht]
+\centering
+\caption*{\large Model Estimates (in red) vs.\ HANK Simulated Truth (in blue)}
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{ccc}
+\toprule
+\multicolumn{3}{c}{\large\textbf{Bottom 40\%}}\\\midrule
+\panel{consum}{bot40} & \panel{income}{bot40} & \panel{wealth}{bot40}\\
+\rowhead{40--80\%}
+\panel{consum}{mid40} & \panel{income}{mid40} & \panel{wealth}{mid40}\\
+\rowhead{Top 20\%}
+\panel{consum}{top20} & \panel{income}{top20} & \panel{wealth}{top20}\\
+\large Consumption & \large Income & \large Wealth\\
+\end{tabular}
+
+\vspace{0.8em}
+\fbox{\begin{minipage}{0.9\textwidth}\centering\large
+\textcolor{red}{\rule[0.5ex]{2.2em}{2pt}}~DDFM \qquad
+\textcolor{blue!60}{\rule[0.5ex]{0.5em}{1.5pt}\,\rule[0.5ex]{0.5em}{1.5pt}\,\rule[0.5ex]{0.5em}{1.5pt}}~HANK Simulated Truth \qquad
+$\blacktriangle$~HANK Data Used
+\end{minipage}}
+\end{figure}
+\end{document}
