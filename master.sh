@@ -68,9 +68,6 @@ run_data() {
     echo "[1a] Python: converting monthly series to quarterly..."
     python3 "$PYTHON_DIR/convert_monthly_to_quarterly.py"
 
-    echo "[1a] Python: cleaning Brake data..."
-    python3 "$PYTHON_DIR/clean_brake_data.py"
-
     # 1b. Stata data cleaning (writes *_nogrowth.xlsx, SIPP1-3.csv, aggregates)
     echo "[1b] Stata: running master data pipeline..."
     cd "$PROJECT_ROOT"

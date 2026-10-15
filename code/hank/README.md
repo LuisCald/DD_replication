@@ -7,8 +7,10 @@ estimates with the simulated truth. Three steps:
 ## 1. Simulate the economies (BASEtoolbox)
 
 The economy is the baseline two-asset HANK model of Bayer, Born and Luetticke in
-[BASEtoolbox.jl](https://github.com/hildebrandecon/BASEtoolbox.jl), used at commit
-`dfb054246dc316cbc071d917ea76b400a9f0eda3` (Julia 1.10.4, its own `Manifest.toml`).
+[BASEtoolbox.jl](https://github.com/BASEforHANK/BASEtoolbox.jl). The simulations use commit
+`dfb054246dc316cbc071d917ea76b400a9f0eda3` of the authors' fork (branch `gen_microdata`, which adds
+the survey-replica export; Julia 1.10.4, its own `Manifest.toml`). That fork is not yet public;
+the simulated economies are available from the authors on request.
 Copy the drivers in this folder to `BASEtoolbox.jl/examples/baseline_micro/` and run from the
 BASEtoolbox root:
 
@@ -34,8 +36,7 @@ Copy the economy files into `2_Data_processing/` (`DATA_PROCESSING` in `code/jul
 DD_EXAMPLE=HANK HANK_ECON=N HANK_NDF=5 julia -t 18 --project=code/julia/env code/julia/run_estimation.jl
 ```
 
-for N = 1, …, 10 (`marvin/hank_array.sbatch`-style job arrays work well; about 45 minutes per
-economy). `HANK_NDF=5` fixes five distributional factors; the aggregate block uses eight factors.
+for N = 1, …, 10 (SLURM job arrays work well; about 45 minutes per economy). `HANK_NDF=5` fixes five distributional factors; the aggregate block uses eight factors.
 
 ## 3. Table and figure
 
