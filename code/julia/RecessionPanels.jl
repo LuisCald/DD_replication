@@ -95,6 +95,81 @@ function box_conditional_means(cop_coefs, split_pcfs, measures, corr_mat, outcom
 end
 
 """
+    cell_conditional_means(cop_coefs, split_pcfs, measures, corr_mat, edges; max_order, min_mass = 5e-5)
+
+Synthetic micro data values: the mean of each measure among the households in each
+cell of the rank grid `edges` (e.g. deciles), E[m | u_c ∈ U_i, u_y ∈ U_j, u_w ∈ U_k]
+= (1/w_ijk) ∫_cell V_m(u_m) c(u) du — the cell version of `box_conditional_means`
+(closed-form Legendre integrals on the conditioning side, Gauss–Legendre on the outcome
+side). A measure unobserved in a quarter is integrated out (only its order-0 copula
+slice is defined there). Cells with mass ≤ `min_mass` carry the cell's marginal
+average (their conditional mean is a ratio of near-zero integrals); values a truncated
+copula pushes outside the measure's range within the cell are clipped to that range.
+Returns V (G×G×G×D×T), NaN for an unobserved measure. Trivariate, no atom.
+Same numbers as DD_data's coefficients_to_micro_data (VALUES=cell).
+"""
+function cell_conditional_means(cop_coefs, split_pcfs, measures, corr_mat, edges;
+                                max_order::Int = size(split_pcfs[1], 1) - 1, min_mass = 5e-5)
+    D = length(measures)
+    D == 3 || error("cell_conditional_means is trivariate (got $D measures)")
+    T = size(split_pcfs[1], 2)
+    K = size(cop_coefs, 1)
+    G = length(edges) - 1
+    Iint = [integrate_legendre_polynomial(k, edges[g+1]) - integrate_legendre_polynomial(k, edges[g]) for k = 0:K-1, g = 1:G]
+    e1G = repeat([k == 0 ? 1.0 : 0.0 for k = 0:K-1], 1, G)
+    V = fill(NaN, G, G, G, D, T)
+    for t = 1:T
+        has = [!all(isnan, split_pcfs[m][:, t]) for m = 1:D]
+        any(has) || continue
+        κ = Array{Float64}(cop_coefs[:, :, :, t])
+        for d = 1:D
+            has[d] && continue
+            κ[ntuple(i -> i == d ? (2:K) : Colon(), 3)...] .= 0.0
+        end
+        any(isnan, κ) && continue
+        side = [has[d] ? Iint : e1G for d = 1:D]
+        mass = _contract3(κ, side...)
+        for m = 1:D
+            has[m] || continue
+            coefs, sc = split_pcfs[m][:, t], corr_mat[t, m]
+            Vf = u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(coefs, max_order, u))[1] * sc
+            # 64 Gauss–Legendre nodes per cell, as in DD_data's coefficients_to_micro_data
+            U = [(edges[g] + edges[g+1]) / 2 + (edges[g+1] - edges[g]) / 2 * x for g = 1:G, x in _GL64_X]
+            Wq = [(edges[g+1] - edges[g]) / 2 * w for g = 1:G, w in _GL64_W]
+            Vu = Vf.(U)
+            F = [sum(Q_m(k, U[g, n]) * Vu[g, n] * Wq[g, n] for n in axes(U, 2)) for k = 0:K-1, g = 1:G]
+            rng = [extrema(view(Vu, g, :)) for g = 1:G]      # range of the measure within the cell
+            avg = [F[1, g] / (edges[g+1] - edges[g]) for g = 1:G]
+            mats = copy(side); mats[m] = F
+            num = _contract3(κ, mats...)
+            for I in CartesianIndices(num)
+                g = I[m]
+                V[I, m, t] = mass[I] > min_mass ? clamp(num[I] / mass[I], rng[g]...) : avg[g]
+            end
+        end
+    end
+    return V
+end
+
+# Gauss–Legendre nodes/weights on [-1, 1] (Golub–Welsch)
+import LinearAlgebra   # stdlib; keeps run_recession_panels.jl's standalone include working
+function _gauss_legendre_nodes(n)
+    β = [k / sqrt(4k^2 - 1) for k in 1:n-1]
+    E = LinearAlgebra.eigen(LinearAlgebra.SymTridiagonal(zeros(n), β))
+    return E.values, 2 .* E.vectors[1, :] .^ 2
+end
+const _GL64_X, _GL64_W = _gauss_legendre_nodes(64)
+
+# X[i,j,k] = Σ_abc κ[a,b,c] A[a,i] B[b,j] C[c,k]
+function _contract3(κ, A, B, C)
+    K, G = size(A)
+    X = reshape(A' * reshape(κ, K, K * K), G, K, K)                       # [i,b,c]
+    Y = reshape(B' * reshape(permutedims(X, (2, 1, 3)), K, G * K), G, G, K)  # [j,i,c]
+    Z = reshape(C' * reshape(permutedims(Y, (3, 2, 1)), K, G * G), G, G, G)  # [k,i,j]
+    return permutedims(Z, (2, 3, 1))
+end
+
+"""
     recession_groups_table(cop_coefs, split_pcfs, measures, corr_mat, dates; ...)
 
 DataFrame with year, quarter, popmean_consum and <set>_g<i>_mean / _mass for the
