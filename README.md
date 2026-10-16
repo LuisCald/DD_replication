@@ -26,30 +26,47 @@ ships in `output/estimates/`, so Stage 2 can be skipped; the
 All data are publicly available. Some sources require free registration. No restricted or
 confidential data are used.
 
+Years follow the paper's coverage table (`Tables/DataCoverage.tex`).
+
 | Dataset | Provider | Access | Years | URL |
 |---|---|---|---|---|
-| Consumer Expenditure Survey (CEX) | Bureau of Labor Statistics | Public download | 1984–2021 | https://www.bls.gov/cex/ |
-| Current Population Survey (CPS) | Census Bureau / IPUMS | Free registration | 1967–2022 | https://cps.ipums.org/ |
-| Survey of Consumer Finances (SCF+, incl. historical files) | Federal Reserve Board | Public download | 1962–2022 | https://www.federalreserve.gov/econres/scfindex.htm |
+| Consumer Expenditure Survey (CEX), Interview Survey | Bureau of Labor Statistics | Public download | 1984Q4–2021Q4 | https://www.bls.gov/cex/ |
+| Current Population Survey (CPS), ASEC | Census Bureau, via IPUMS CPS (Flood et al. 2023) | Free registration | ASEC 1968–2023 = income years 1967–2022 (CPS2: 1967–1992, CPS: 1993–2022) | https://cps.ipums.org/ |
+| Survey of Consumer Finances (SCF), modern waves | Federal Reserve Board | Public download | 1989–2022 (triennial) | https://www.federalreserve.gov/econres/scfindex.htm |
+| SCF+ (historical SCF waves before 1989) | Kuhn, Schularick and Steins (2020) | Public (with the article) | 1962–1983 in the estimation (the file starts in 1950) | https://doi.org/10.1086/708815 |
+| Forbes 400 | Forbes (2021–2024); Fernholz and Hagler (2023) (1985–2020) | Public | 1985–2024 | https://www.forbes.com/forbes-400/ |
 | Panel Study of Income Dynamics (PSID) | University of Michigan | Free registration | 1968–2021 (wealth from 1984, consumption from 1999) | https://psidonline.isr.umich.edu/ |
-| Survey of Income and Program Participation (SIPP) | Census Bureau | Public download | 1983–2022 | https://www.census.gov/programs-surveys/sipp.html |
+| Survey of Income and Program Participation (SIPP) | Census Bureau | Public download | 1983Q3–2022Q4: panels 1984–1993, 1996, 2001, 2004, 2008, 2014 and the annual 2018–2023 releases | https://www.census.gov/programs-surveys/sipp.html |
 | World Inequality Database (WID) | WID.world | Public download | 1962–2023 | https://wid.world/ |
 | Distributional Financial Accounts (DFA) | Federal Reserve Board | Public download | 1989–2023 | https://www.federalreserve.gov/releases/z1/dataviz/dfa/ |
-| FRED Economic Data | Federal Reserve Bank of St. Louis | Public download | Various | https://fred.stlouisfed.org/ |
-| Forbes 400 | Forbes; Fernholz and Haslberger (2023) | Public | 1985–2024 | https://www.forbes.com/forbes-400/ |
+| FRED and FRED-QD | Federal Reserve Bank of St. Louis; McCracken and Ng (2020) | Public download | Various | https://fred.stlouisfed.org/ |
 
-**Forbes 400.** The SCF+ is augmented with the Forbes 400: data from Forbes for 2021–2024,
-and for 1985–2020 the per-capita dataset of Fernholz and Haslberger (2023), which covers nearly
-all 400 families each year (the Forbes website is incomplete from the 1990s to the late 2000s).
+**SCF.** The SCF series combines the Federal Reserve Board's public SCF files for 1989–2022
+(1989–2019 as harmonized in the SCF+ file `HSCF_2019.dta`, 2022 from the Fed's summary extract)
+with the historical waves of the SCF+ of Kuhn, Schularick and Steins (2020) before 1989.
+
+**Forbes 400.** The top tail of the SCF is augmented with the Forbes 400: data from Forbes for
+2021–2024, and for 1985–2020 the per-capita dataset of Fernholz and Hagler (2023), which covers
+nearly all 400 families each year (the Forbes website is incomplete from the 1990s to the late
+2000s). See `code/python/generateForbes400.py`.
+
+**Units and definitions.** Dollar values are in 2019Q4 US dollars, deflated with the CPI-U
+(FRED `CPIAUCSL`, indexed to 2019-10-01 = 100; see `code/stata/import_aggregates.do`; the PCE
+consumption anchor uses the NIPA price indices for nondurables and services). Income is
+pre-tax household income including transfers (Appendix "Data" of the paper).
 
 **Included:** the posterior-mode parameter vector (`output/estimates/`), which
 `run_postestimation.jl` loads when no Stage-2 run is present. The data product (factors,
 posterior draws, coefficient files, synthetic microdata, aggregate anchors, helper scripts) is
 published in [DD_data](https://github.com/LuisCald/DD_data).
 
-**Included:** the processed survey microdata that the estimation reads (Stage-1 output: SCF, PSID,
-CEX, CPS, CPS2, SIPP1–3), gzipped in [`data/processed/`](data/processed/README.md). Unzip them into
-`2_Data_processing/` to start at Stage 2 without re-running the data cleaning.
+**Included:** the processed inputs that the estimation reads (Stage-1 output), in
+[`data/processed/`](data/processed/README.md): the survey microdata (SCF, PSID, CEX, CPS, CPS2,
+SIPP1–3, gzipped CSV) and the two aggregate workbooks `aggregates_HHs_NPs.xlsx` (FRED, FRED-QD
+and Financial Accounts series; `code/julia/Structures.jl`, `retrieve_aggregate_data`) and
+`inflation_corrected_correction_series.xlsx` (per-household aggregate anchors;
+`retrieve_rgdp`). Unzip the CSV files and copy the two workbooks into `2_Data_processing/` to
+start at Stage 2 without re-running the data cleaning.
 
 **Not included:** the raw survey downloads. To rebuild the processed files from scratch, download
 the sources above following [`data/raw/DOWNLOAD_INSTRUCTIONS.md`](data/raw/DOWNLOAD_INSTRUCTIONS.md)
@@ -64,13 +81,13 @@ providers. Questions: luis.calderon@uni-bonn.de.
 - Julia 1.10.4 (pinned in `code/julia/env/Manifest.toml`): estimation and all quantitative analysis
 - Stata ≥ 17 (MP recommended): survey cleaning and local projections
 - Python ≥ 3.10: preprocessing (frequency conversion, stationarity, Forbes 400)
-- R ≥ 4.3: X-12 de-seasoning of the aggregate anchors (`code/R/X12_averages.R` → `averages_deseasoned.csv`, read by `import_aggregates.do`)
+- R ≥ 4.3 (optional, not run by `master.sh`): `code/R/X12_averages.R` de-seasons the Financial Accounts item series (stocks, real estate, pensions) and adds them as columns to `2_Data_processing/aggregates/averages_deseasoned.csv`. `import_aggregates.do` (Stage 1) reads that file, so it must already exist. The R script only adds the item columns and does not create the file.
 
 **Packages.**
 
 - Julia: pinned in `code/julia/env/Project.toml` and `Manifest.toml` (`Pkg.instantiate()`)
 - Python: pandas, numpy, scipy, statsmodels
-- R: seasonal, x12 (needs the X-13ARIMA-SEATS binary)
+- R (optional): x12 (needs the X-13ARIMA-SEATS binary)
 
 **Hardware.** Minimum 32 GB RAM and 8 cores; 64 GB and 16+ cores recommended for Stage 2.
 About 10 GB of storage. Stage 2 ran on a Linux cluster; Stages 1 and 3 run on a workstation.
@@ -111,6 +128,26 @@ the two Stage-3 steps that read them. All other exhibits are evaluated at the po
 ### Full run
 
 `bash master.sh all` runs Stages 1–3 (~50–75 h).
+
+### Small replication / smoke test
+
+To check that the estimation runs end to end without waiting days, cap the number of DIME
+sampler iterations with `DD_NITER` (default 400):
+
+```bash
+DD_NITER=5 DD_TAG=" smoke" DD_EXAMPLE=replication julia -t ${DD_THREADS:-auto} --project=code/julia/env code/julia/run_estimation.jl
+```
+
+The black-box pre-optimization before the sampler is time-budgeted at 3 seconds per parameter
+(`run_estimation.jl`), about 24 minutes for the 485-parameter baseline. Data preparation and the
+5 iterations add minutes. The resulting mode is not the paper's. `DD_TAG` appends a suffix to the
+run tag, so the output goes to its own `7_Results/` folder and does not overwrite a full run.
+
+### Threads (`DD_THREADS`)
+
+`master.sh` starts Julia with `julia -t ${DD_THREADS:-auto}` for Stages 2 and 3, so by default
+it uses all cores. Set `DD_THREADS=<n>` to limit it, e.g. `DD_THREADS=16 bash master.sh estimate`.
+Stata is called as `${STATA:-stata-mp}`. Set `STATA=stata-se` (or a full path) if needed.
 
 ### Configurations (`DD_EXAMPLE`)
 
@@ -184,7 +221,6 @@ that require the MCMC chains.
 | `fig:data_timeline`: coverage, sample sizes, publication lags | `count_observations.jl` → `data_timeline.jl` | standalone |
 | `fig:tails_wealth`, `fig:local_global_coefs`, `fig:local_global_pcf` | `SeriesEstimator.jl` | standalone |
 | `Tables/MDD.tex`: marginal data densities | `run_mdd.jl` → `run_mdd_table.jl` | needs Stage 2 for `replication`, `replication_6_factors`, `replication_7_factors` |
-| Drop-one-wave table (`dropwave_table.tex`) | `run_dropwave.jl` → `run_dropwave_table.jl` | standalone, at the posterior mode of each run |
 | `fig:likelihood_convergence_missing`: chain convergence | `DIMESampler.jl` | written during Stage 2 |
 | `fig:recon_data_SCF`: smoothed data vs. survey estimates | `CreateTimeSeries.jl` (`compare_to_data`) | Stage 3, Step 4 |
 | `Tables/ModelConservatism.tex` | `export_combined_stat_dict_to_latex` | Stage 3, Step 4 |
@@ -203,7 +239,7 @@ written by hand in the paper's LaTeX sources.
 Entry points: `master.sh`, `code/stata/00_master_data.do` (Stage 1), `code/julia/run_estimation.jl`
 (Stage 2), `code/julia/run_postestimation.jl` (Stage 3). Paths: `code/julia/config.jl`; model
 options: `code/julia/Structures.jl`. File-by-file tree and the anatomy (observation-weight) code:
-[`docs/CODE_MAP.md`](docs/CODE_MAP.md). Methodological notes: `doc/`.
+[`docs/CODE_MAP.md`](docs/CODE_MAP.md).
 
 ## Extensions
 
@@ -231,12 +267,15 @@ luis.calderon@uni-bonn.de.
 ## References
 
 - Bayer, Christian, Luis Calderon, and Moritz Kuhn. "Distributional Dynamics." CEPR Discussion Paper 19829, 2026.
-- Board of Governors of the Federal Reserve System. *Survey of Consumer Finances*. Various years (1962–2022). https://www.federalreserve.gov/econres/scfindex.htm.
+- Board of Governors of the Federal Reserve System. *Survey of Consumer Finances*. Public data, 1989–2022. https://www.federalreserve.gov/econres/scfindex.htm.
 - Board of Governors of the Federal Reserve System. *Distributional Financial Accounts*. https://www.federalreserve.gov/releases/z1/dataviz/dfa/.
 - Federal Reserve Bank of St. Louis. *FRED Economic Data*. https://fred.stlouisfed.org/.
-- Fernholz, Ricardo T., and Christoph Haslberger. "Rising Concentration and Group Lending: The Forbes 400 in General Equilibrium." *Journal of Economic Dynamics and Control*, 2023.
+- Fernholz, Ricardo T., and Kara Hagler. "Rising Inequality and Declining Mobility in the Forbes 400." *Economics Letters* 230 (2023): 111235.
+- Forbes. *The Forbes 400*. 2021–2024. https://www.forbes.com/forbes-400/.
 - Panel Study of Income Dynamics. *Public Use Dataset*. Survey Research Center, Institute for Social Research, University of Michigan, Ann Arbor, MI. Various years (1968–2021). https://psidonline.isr.umich.edu/.
-- Ruggles, Steven, Sarah Flood, Ronald Goeken, et al. *IPUMS CPS: Version 11.0*. Minneapolis, MN: IPUMS. Various years (1967–2022). https://cps.ipums.org/.
-- U.S. Bureau of Labor Statistics. *Consumer Expenditure Surveys*. Various years (1984–2021). https://www.bls.gov/cex/.
-- U.S. Census Bureau. *Survey of Income and Program Participation*. Various panels (1983–2022). https://www.census.gov/programs-surveys/sipp.html.
+- Flood, Sarah, Miriam King, Renae Rodgers, Steven Ruggles, J. Robert Warren, Daniel Backman, Annie Chen, Grace Cooper, Stephanie Richards, Megan Schouweiler, and Michael Westberry. *IPUMS CPS: Version 11.0* [dataset]. Minneapolis, MN: IPUMS, 2023. https://doi.org/10.18128/D030.V11.0.
+- Kuhn, Moritz, Moritz Schularick, and Ulrike I. Steins. "Income and Wealth Inequality in America, 1949–2016." *Journal of Political Economy* 128, no. 9 (2020): 3469–3519.
+- McCracken, Michael W., and Serena Ng. "FRED-QD: A Quarterly Database for Macroeconomic Research." NBER Working Paper 26872, 2020.
+- U.S. Bureau of Labor Statistics. *Consumer Expenditure Surveys*, Interview Survey. 1984–2021. https://www.bls.gov/cex/.
+- U.S. Census Bureau. *Survey of Income and Program Participation*. Panels 1984–1993, 1996, 2001, 2004, 2008, 2014 and 2018–2023 releases (reference years 1983–2022). https://www.census.gov/programs-surveys/sipp.html.
 - World Inequality Database. *WID.world*. https://wid.world/.
