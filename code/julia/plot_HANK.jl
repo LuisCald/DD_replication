@@ -1,3 +1,6 @@
+# Legend label for a correlation / R² held in percent: two decimals ("0.80"), "--" if undefined
+_dec2(x) = isfinite(x) ? Printf.@sprintf("%.2f", x / 100) : "--"
+
 
 function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_name, smin, smax, tmin, tmax, estimator, label, type, measures, time_params, select_series, gdp_series, posterior_bounds, compare_to_other_est, tag, freq)
 
@@ -322,8 +325,8 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                 end
 
                 # Plots.plot!([], [], ls=:dash, lc=:black, la=0.0, label=L"\textrm{Within\, \,  bounds: %$(within_stat)\%}",)
-                Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"\textrm{Corr.\, to\,\, Truth\,: %$(corr_n)\%}",)
-                Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"R^2\textrm{\, to\,\, Truth\,: %$(r2_val)\%}",)
+                Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"\textrm{Corr.\, to\,\, Truth\,: %$(_dec2(corr_n))}",)
+                Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"R^2\textrm{\, to\,\, Truth\,: %$(_dec2(r2_val))}",)
                 Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$meas" * "_$obj" * "_quantiles_$(j)" * detrended_or_not * label * ".pdf")
             end
         end
@@ -428,8 +431,8 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                 end
             end
 
-            Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"\textrm{Corr.\, to\,\, Truth\,: %$(corr_n)\%}",)
-            Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"R^2\textrm{\, to\,\, Truth\,: %$(r2_s)\%}",)
+            Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"\textrm{Corr.\, to\,\, Truth\,: %$(_dec2(corr_n))}",)
+            Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"R^2\textrm{\, to\,\, Truth\,: %$(_dec2(r2_s))}",)
             Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$meas" * "_share_$(sl)" * detrended_or_not * label * ".pdf")
         end
 
@@ -470,8 +473,8 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                         Plots.plot!(xaxis[oc], o_s[oc], la=0.5, lw=2, dpi=500, label="", ls=:dash)
                     end
                 end
-                Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"\textrm{Corr.\, to\,\, Truth\,: %$(c_n)\%}")
-                Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"R^2\textrm{\, to\,\, Truth\,: %$(r2_n)\%}")
+                Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"\textrm{Corr.\, to\,\, Truth\,: %$(_dec2(c_n))}")
+                Plots.plot!([], [], ls=:dot, lc=:black, la=0.0, label=L"R^2\textrm{\, to\,\, Truth\,: %$(_dec2(r2_n))}")
                 Plots.savefig(path * "$meas/" * "quantiles_levels/" * plot_name * "_$meas" * "_own_$(sl)" * detrended_or_not * label * ".pdf")
             end
         end
@@ -588,7 +591,7 @@ function generate_quantiles_shares_levels_HANK(data_dict, ty, func_data, data_na
                     dpi=500, ls=:dot, label=""
                 )
                 Plots.plot!([], [], ls=:dot, lc=:black, la=0.0,
-                    label=L"\textrm{Corr.\, to\,\, Truth\,: %$(corr_n)\%}",)
+                    label=L"\textrm{Corr.\, to\,\, Truth\,: %$(_dec2(corr_n))}",)
                 Plots.savefig(path * "cross_conditional/" * plot_name *
                     "_$(key)_$(sl)_" * detrended_or_not * label * ".pdf")
             end
@@ -1106,7 +1109,7 @@ function generate_averaged_hank_avg_corr_table(
     end
 
     # Build table with averaged correlations
-    _fmt(vals) = isempty(vals) ? "--" : string(round(Int, mean(vals)))
+    _fmt(vals) = isempty(vals) ? "--" : Printf.@sprintf("%.2f", mean(vals) / 100)   # stored in percent, shown as decimals
 
     # Map data_sources to column headers: data_sources[i] → measures[i] column
     source_label = Dict("a" => "\\textit{A}", "b" => "\\textit{B}",
