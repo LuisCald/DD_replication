@@ -250,7 +250,9 @@ options: `code/julia/Structures.jl`. File-by-file tree and the anatomy (observat
 ## Citation, license, contact
 
 Please cite the paper (BibTeX below; metadata in [`CITATION.cff`](CITATION.cff)). Code is
-released under the MIT License ([`LICENSE`](LICENSE)). Questions: Luis Calderon,
+released under the MIT License ([`LICENSE`](LICENSE)). The authors' estimates in `output/estimates/`
+are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The processed survey
+files in `data/processed/` remain subject to the original providers' terms. Questions: Luis Calderon,
 luis.calderon@uni-bonn.de.
 
 ```bibtex
