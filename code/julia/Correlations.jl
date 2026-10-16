@@ -1,4 +1,6 @@
-function create_micro_df(copula_obj, pcfs, data_tag, k, folder, time_params, method_options; return_df=false)
+function create_micro_df(copula_obj, pcfs, data_tag, k, folder, time_params, method_options; return_df=false, cell_values=nothing)
+    # cell_values (G×G×G×D×T, from cell_conditional_means): the mean of each measure among
+    # the cell's households; nothing ⇒ each cell carries the marginal decile averages `pcfs`
     @unpack measures, equivalized, bottom_coded, case, estimator, tag = method_options
     @unpack tmin, tmax = time_params
     @unpack confidence_intervals = func_data
@@ -35,7 +37,8 @@ function create_micro_df(copula_obj, pcfs, data_tag, k, folder, time_params, met
     for y in eachindex(q_dates)
         if any(isfinite, copula_obj[cop_ind..., y])
             # Make dataframe 
-            micro_df = construct_micro_dataset(copula_obj[cop_ind..., y], pcfs[:, y], grid_size_data_cop) #construct_micro_dataset_weighted(copula_y, pcfs_y, grid)
+            micro_df = construct_micro_dataset(copula_obj[cop_ind..., y], pcfs[:, y], grid_size_data_cop;
+                values = cell_values === nothing ? nothing : view(cell_values, :, :, :, :, y))
             micro_DF = DataFrame(micro_df, Symbol.(["cop_share", "grid_point", measures..., m_grid...])) # 
             micro_DF[!, "time"] .= q_dates[y]
 
@@ -780,8 +783,19 @@ end
 
 
 # TODO: only works if pcf_grid and cop_grid are the same
-function construct_micro_dataset(cop, pcfs, grid)
+function construct_micro_dataset(cop, pcfs, grid; values = nothing)
     dim = length(size(cop))
+    # values[i,j,k,m]: mean of measure m among the households in cell (i,j,k)
+    # (cell_conditional_means); without it each cell carries the decile averages
+    if dim == 3 && values !== nothing
+        dataset = zeros(prod(size(cop)), 2 * dim + 2)
+        for i in 1:grid, j in 1:grid, k in 1:grid
+            combined_element = parse(Int, string(i) * string(j) * string(k))
+            dataset[(i-1)*(grid*grid)+(j-1)*grid+k, :] = [cop[i, j, k], combined_element,
+                values[i, j, k, 1], values[i, j, k, 2], values[i, j, k, 3], i, j, k]
+        end
+        return dataset
+    end
 
     dataset = zeros(prod(size(cop)), 2 * dim + 2)
     if dim == 3

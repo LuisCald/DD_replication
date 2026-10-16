@@ -2346,7 +2346,18 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
     data_tag = ty == "normal" ? "" : "_detrended"
     if model_step != :forecast
         # Export micro-data
-        create_micro_df(copulas, data_pcf, data_tag, data_name, folder, time_params, model_options) #TODO: check that the order is correct for the pcfs 
+        # cell values: mean of each measure among the cell's households (trivariate
+        # series runs without an atom measure); otherwise the decile averages
+        cell_vals = nothing
+        if typeof(estimator) <: SeriesEstimator && D == 3 && atom_dim === nothing && @isdefined(copulas_coefs)
+            try
+                cell_vals = cell_conditional_means(copulas_coefs, split_pcfs, sort(measures), corr_mat,
+                                                   collect(0:integral_pcf_grid) ./ integral_pcf_grid; max_order = max_order)
+            catch e
+                @warn "cell-mean micro data failed, falling back to decile averages: $e"
+            end
+        end
+        create_micro_df(copulas, data_pcf, data_tag, data_name, folder, time_params, model_options; cell_values = cell_vals) #TODO: check that the order is correct for the pcfs 
 
         init_path = BASE_PATH
         path = init_path * "/7_Results/$m_label" * "$tag" * "/$folder/data"
