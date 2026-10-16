@@ -132,6 +132,9 @@ hank_avg_corr_*.tex
 # Processed survey inputs shipped with the package (gzipped Stage-1 output; see data/processed/README.md)
 !data/processed/*.csv.gz
 !data/processed/MD5SUMS_uncompressed.txt
+# Aggregate workbooks read by the estimation (Structures.jl), shipped so Stage 2 can start without Stage 1
+!data/processed/aggregates_HHs_NPs.xlsx
+!data/processed/inflation_corrected_correction_series.xlsx
 
 ## ----------------------
 ## Kept on disk, not distributed (internal notes, exploratory scripts, editor settings)

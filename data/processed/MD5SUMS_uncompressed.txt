@@ -6,3 +6,5 @@ a8796b04af048b570eba619d69676e95  SCF.csv
 1113b868d849da8b30b3dd86138d62be  SIPP1.csv
 243cd2672fc163347298ec95eaabe398  SIPP2.csv
 e5ff6e212e590e0d64a65d5f9684c41e  SIPP3.csv
+7ace0c0ae24c12d1dd50de2b861427dd  aggregates_HHs_NPs.xlsx
+5975507bd5f366b6c790c728d5755577  inflation_corrected_correction_series.xlsx
