@@ -8,20 +8,28 @@
 #   bash master.sh [stage]
 #
 # Stages:
-#   data       Stage 1: Clean raw survey data (Stata + Python + R)
+#   data       Stage 1: Clean raw survey data (Stata + Python + Julia)
 #   estimate   Stage 2: MCMC estimation (Julia, ~48-72 hrs)
-#   results    Stages 3-5: Post-estimation analysis, figures, tables
+#   results    Stage 3: Post-estimation analysis, figures, tables
 #   all        Run everything end-to-end (default)
 #
 # Requirements:
-#   - Julia >= 1.10  (with project environment in code/julia/env/)
-#   - Stata >= 17
+#   - Julia 1.10.4   (pinned; project environment in code/julia/env/)
+#   - Stata >= 17    (called as ${STATA:-stata-mp})
 #   - Python >= 3.10 (with pandas, statsmodels, numpy)
-#   - R >= 4.3       (with seasonal, x12)
+#   - R is not used by this script (code/R/X12_averages.R is an optional,
+#     manual step for the DFA item anchors; see README)
+#
+# Environment:
+#   DD_THREADS   Julia threads for Stages 2-3 (default: auto = all cores)
+#   STATA        Stata executable (default: stata-mp)
+#   DD_EXAMPLE   configuration (default: replication)
 #
 # Notes:
-#   - Run from the project root (parent of 5_Code/)
-#   - Pre-computed estimates in 7_Results/ allow skipping Stage 2
+#   - Can be called from any directory: paths are resolved from this
+#     script's location (<root>/5_Code/master.sh); the stages run in <root>.
+#   - The pre-computed posterior mode in 5_Code/output/estimates/ is loaded
+#     by Stage 3 when no Stage-2 run exists, so Stage 2 can be skipped.
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -49,6 +57,8 @@ echo "  Started:      $(date)"
 echo "════════════════════════════════════════════════════════════"
 
 STAGE="${1:-all}"
+STATA="${STATA:-stata-mp}"
+JULIA_THREADS="${DD_THREADS:-auto}"
 
 # ── Helper ────────────────────────────────────────────────────
 run_stage() {
@@ -59,7 +69,7 @@ run_stage() {
 }
 
 # ══════════════════════════════════════════════════════════════
-# Stage 1: Data cleaning (Stata + Python + R)
+# Stage 1: Data cleaning (Stata + Python + Julia)
 # ══════════════════════════════════════════════════════════════
 run_data() {
     run_stage "Stage 1: Data cleaning and preparation"
@@ -71,17 +81,15 @@ run_data() {
     # 1b. Stata data cleaning (writes *_nogrowth.xlsx, SIPP1-3.csv, aggregates)
     echo "[1b] Stata: running master data pipeline..."
     cd "$PROJECT_ROOT"
-    stata-mp -b do "$STATA_DIR/00_master_data.do"
+    "$STATA" -b do "$STATA_DIR/00_master_data.do"
 
     # 1c. Growth correction (Julia): align PSID/SCF income to the wealth date
     #     *_nogrowth.xlsx -> PSID_new.csv + SCF_noForbes_new.csv
-    #     (was missing from this script; Forbes below depends on its output)
     echo "[1c] Julia: growth correction..."
     julia --project="$JULIA_DIR/env" "$JULIA_DIR/GrowthCorrection.jl"
 
     # 1d. Forbes-400 augmentation: SCF_noForbes_new.csv -> SCF_new.csv
-    #     (moved AFTER Stata + growth correction — it consumes their output;
-    #      previously ran first and used stale inputs)
+    #     (runs after Stata and the growth correction, whose output it reads)
     echo "[1d] Python: generating Forbes 400 data..."
     python3 "$PYTHON_DIR/generateForbes400.py"
 
@@ -90,11 +98,10 @@ run_data() {
     python3 "$PYTHON_DIR/make_stationary.py"
     python3 "$PYTHON_DIR/make_stationary_x12.py"
 
-    # (R is not part of the baseline data stage. HermiteSeriesEstimator.R and
-    #  NonParametricCopula.R were output-less estimator explorations, and
-    #  X12_script.R belonged to the Distributional_Oil project — all removed
-    #  2026-07. code/R/X12_averages.R remains for the optional DFA-component
-    #  anchor deseasoning; run it manually when enabling component anchors.)
+    # (R is not part of Stage 1. import_aggregates.do reads
+    #  2_Data_processing/aggregates/averages_deseasoned.csv, which must already
+    #  exist; code/R/X12_averages.R only adds the de-seasoned DFA item columns
+    #  to it and is run manually.)
 
     echo "Stage 1 complete."
 }
@@ -106,35 +113,35 @@ run_estimate() {
     run_stage "Stage 2: MCMC estimation (~48-72 hours)"
 
     cd "$PROJECT_ROOT"
-    DD_EXAMPLE="${DD_EXAMPLE:-replication}" julia --project="$JULIA_DIR/env" "$JULIA_DIR/run_estimation.jl"
+    DD_EXAMPLE="${DD_EXAMPLE:-replication}" julia -t "$JULIA_THREADS" --project="$JULIA_DIR/env" "$JULIA_DIR/run_estimation.jl"
 
     echo "Stage 2 complete."
 }
 
 # ══════════════════════════════════════════════════════════════
-# Stages 3-5: Post-estimation (results, figures, tables)
+# Stage 3: Post-estimation (results, figures, tables)
 # ══════════════════════════════════════════════════════════════
 run_results() {
-    run_stage "Stages 3-5: Post-estimation analysis, figures, and tables"
+    run_stage "Stage 3: Post-estimation analysis, figures, and tables"
 
     cd "$PROJECT_ROOT"
-    DD_EXAMPLE="${DD_EXAMPLE:-replication}" julia --project="$JULIA_DIR/env" "$JULIA_DIR/run_postestimation.jl"
+    DD_EXAMPLE="${DD_EXAMPLE:-replication}" julia -t "$JULIA_THREADS" --project="$JULIA_DIR/env" "$JULIA_DIR/run_postestimation.jl"
 
     # Post-estimation Stata analysis (local projections, Ginis)
     echo "[Post-estimation] Stata: preparing micro data for local projections..."
-    stata-mp -b do "$STATA_DIR/prep_micro_data.do"
-    stata-mp -b do "$STATA_DIR/prep_micro_3D.do"
-    stata-mp -b do "$STATA_DIR/prep_macro_3D.do"
-    stata-mp -b do "$STATA_DIR/prep_functional_data.do"
-    stata-mp -b do "$STATA_DIR/prep_actualCEX.do"
-    stata-mp -b do "$STATA_DIR/ginis_and_consumption_trends.do"
+    "$STATA" -b do "$STATA_DIR/prep_micro_data.do"
+    "$STATA" -b do "$STATA_DIR/prep_micro_3D.do"
+    "$STATA" -b do "$STATA_DIR/prep_macro_3D.do"
+    "$STATA" -b do "$STATA_DIR/prep_functional_data.do"
+    "$STATA" -b do "$STATA_DIR/prep_actualCEX.do"
+    "$STATA" -b do "$STATA_DIR/ginis_and_consumption_trends.do"
 
     # Multidimensional inequality (Python)
     echo "[Post-estimation] Python: multidimensional inequality..."
     python3 "$PYTHON_DIR/multidim_inequality.py"
     python3 "$PYTHON_DIR/MEILC_MEGC.py"
 
-    echo "Stages 3-5 complete."
+    echo "Stage 3 complete."
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -158,7 +165,7 @@ case "$STAGE" in
     *)
         echo "Usage: bash master.sh [data|estimate|results|all]"
         echo ""
-        echo "  data       Clean raw survey data (Stata + Python + R)"
+        echo "  data       Clean raw survey data (Stata + Python + Julia)"
         echo "  estimate   Run MCMC estimation (Julia, ~48-72 hrs)"
         echo "  results    Post-estimation: analysis, figures, tables"
         echo "  all        Everything end-to-end (default)"
