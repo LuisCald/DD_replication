@@ -129,3 +129,7 @@ external_correlations_*.tex
 avg_corr_hank.tex
 hank_avg_corr.tex
 hank_avg_corr_*.tex
+
+# Processed survey inputs shipped with the package (gzipped Stage-1 output; see data/processed/README.md)
+!data/processed/*.csv.gz
+!data/processed/MD5SUMS_uncompressed.txt

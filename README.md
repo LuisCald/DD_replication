@@ -31,7 +31,7 @@ confidential data are used.
 | Consumer Expenditure Survey (CEX) | Bureau of Labor Statistics | Public download | 1984–2021 | https://www.bls.gov/cex/ |
 | Current Population Survey (CPS) | Census Bureau / IPUMS | Free registration | 1967–2022 | https://cps.ipums.org/ |
 | Survey of Consumer Finances (SCF+, incl. historical files) | Federal Reserve Board | Public download | 1962–2022 | https://www.federalreserve.gov/econres/scfindex.htm |
-| Panel Study of Income Dynamics (PSID) | University of Michigan | Free registration | 1968–2021 (wealth from 1983, consumption from 1999) | https://psidonline.isr.umich.edu/ |
+| Panel Study of Income Dynamics (PSID) | University of Michigan | Free registration | 1968–2021 (wealth from 1984, consumption from 1999) | https://psidonline.isr.umich.edu/ |
 | Survey of Income and Program Participation (SIPP) | Census Bureau | Public download | 1983–2022 | https://www.census.gov/programs-surveys/sipp.html |
 | World Inequality Database (WID) | WID.world | Public download | 1962–2023 | https://wid.world/ |
 | Distributional Financial Accounts (DFA) | Federal Reserve Board | Public download | 1989–2023 | https://www.federalreserve.gov/releases/z1/dataviz/dfa/ |
@@ -47,8 +47,15 @@ all 400 families each year (the Forbes website is incomplete from the 1990s to t
 posterior draws, coefficient files, synthetic microdata, aggregate anchors, helper scripts) is
 published in [DD_data](https://github.com/LuisCald/DD_data).
 
-**Not included:** the raw survey microdata. Download them from the sources above, following
-[`data/raw/DOWNLOAD_INSTRUCTIONS.md`](data/raw/DOWNLOAD_INSTRUCTIONS.md).
+**Included:** the processed survey microdata that the estimation reads (Stage-1 output: SCF, PSID,
+CEX, CPS, CPS2, SIPP1–3), gzipped in [`data/processed/`](data/processed/README.md). Unzip them into
+`2_Data_processing/` to start at Stage 2 without re-running the data cleaning.
+
+**Not included:** the raw survey downloads. To rebuild the processed files from scratch, download
+the sources above following [`data/raw/DOWNLOAD_INSTRUCTIONS.md`](data/raw/DOWNLOAD_INSTRUCTIONS.md)
+and run Stage 1. The processed files are derived from data whose providers set their own terms
+(PSID and IPUMS-CPS require registration); users should also obtain the original data from the
+providers. Questions: luis.calderon@uni-bonn.de.
 
 ## Computational Requirements
 
