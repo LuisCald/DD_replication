@@ -207,7 +207,7 @@ options: `code/julia/Structures.jl`. File-by-file tree and the anatomy (observat
 
 ## Extensions
 
-- **DFA balance-sheet items:** real estate, mortgages, consumer credit and pensions are published in DD_data `data/items/`, built by `code/python/build_items_ddata.py`. Stocks and private business are estimated but not published. See [`docs/DFA_ITEMS.md`](docs/DFA_ITEMS.md).
+- **DFA balance-sheet items:** real estate, mortgages, consumer credit, pensions and stocks are published in DD_data `data/items/`, built by `code/python/build_items_ddata.py`; stocks only for the next-40% and top-10% wealth groups. See [`docs/DFA_ITEMS.md`](docs/DFA_ITEMS.md).
 - **Own settings or own data:** [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md).
 - **HANK validation:** [`code/hank/README.md`](code/hank/README.md).
 
