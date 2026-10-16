@@ -85,7 +85,7 @@ When you bump `tag` to something new, the pipeline writes to a brand-new tree (t
 * If you set `compare_to_other_est = true`, the baseline run with the comparison tag must already exist
 * `data_to_mute` keys match an actual dataset name in `obs_data.files`
 
-When the run finishes, the pipeline writes the regenerated `*_coefficients_*.csv`, `*_functional_data*.csv`, and `smoothed_factors.csv` to `data/synthetic/` (untracked here). To publish them, run `bash publish_to_DD_data.sh` from the repo root — it copies the canonical file set into a DD_data checkout for review and commit there.
+When the run finishes, the pipeline writes the regenerated `*_coefficients_*.csv`, `*_functional_data*.csv`, and `smoothed_factors.csv` to `data/synthetic/` (untracked here); they have the same layout as the files published in [DD_data](https://github.com/LuisCald/DD_data).
 
 ---
 
