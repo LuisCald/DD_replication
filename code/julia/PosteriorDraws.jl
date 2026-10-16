@@ -46,14 +46,16 @@ Keyword arguments
 - `iteration = :last`: `:last` pools the final iteration of every chain
   (matches `generate_microdata_implicates`); `:all` pools every stored
   iteration × chain for more nearly-independent draws.
-- `state_uncertainty = true`: per θ-draw, add a draw of the *state* around the
-  smoothed mean, `x_t ~ N(x̂_{t|T}, Σ_{t|T})`, using the smoother's own
-  `sigma_smoothed`. With `false` you get mean paths only (parameter uncertainty
-  alone — the bands are then ~0 in data-rich periods, overselling precision).
-  Note: the state draws are *marginal per quarter* — exact for pointwise bands
-  and any per-date moment, which is what the downstream helpers compute. Joint
-  cross-date statistics (e.g. the change in a share between two dates within
-  one draw) would need a joint simulation smoother (Durbin–Koopman) instead.
+- `state_draws = :joint`: how the *state* is drawn around each θ-draw.
+  `:joint` (default since Oct 2026) draws a whole path from p(x_{1:T} | y, θ) by
+  forward-filtering backward-sampling (Carter–Kohn), so changes between dates
+  within one draw carry the right uncertainty — needed for implicates.
+  `:pointwise` draws x_t ~ N(x̂_{t|T}, Σ_{t|T}) independently per quarter (the
+  pre-Oct-2026 behaviour; right for per-date bands only). `:none` keeps the
+  smoothed mean paths (parameter uncertainty alone — bands ~0 in data-rich
+  periods). `:joint` falls back to `:pointwise` for the :as_inputs and
+  stochastic-trend specifications.
+- `state_uncertainty = true`: legacy switch; `false` is the same as `state_draws = :none`.
 - `filename = "smoothed_factor_draws.csv"`: output file name (handy for
   writing a comparison file without overwriting the default).
 - `digits = 6`: decimal rounding of the written values — keeps the CSV
@@ -67,7 +69,7 @@ Returns the path of the written CSV.
 function export_factor_draws(
     param_sizes, hyperpriors, Σ_ids, model_elements, model_options, time_params;
     n_draws::Int = 200, seed::Int = 12345, iteration::Symbol = :last,
-    state_uncertainty::Bool = true, filename::String = "smoothed_factor_draws.csv",
+    state_uncertainty::Bool = true, state_draws::Symbol = :joint, filename::String = "smoothed_factor_draws.csv",
     digits::Union{Int,Nothing} = 6, out_dir = nothing, draws_file = nothing,
 )
     @unpack measures, tag = model_options
@@ -97,6 +99,13 @@ function export_factor_draws(
     @unpack tmin, tmax = time_params
     dts = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
 
+    state_uncertainty || (state_draws = :none)
+    state_draws in (:joint, :pointwise, :none) || error("state_draws = $(state_draws): use :joint, :pointwise or :none")
+    if state_draws == :joint && !_ffbs_supported(model_options)
+        @warn "state_draws = :joint is not wired for this specification (:as_inputs or stochastic trend); using :pointwise"
+        state_draws = :pointwise
+    end
+
     long = DataFrame()
     R = 0
     pb = Progress(n_draws, desc = "Smoothing posterior draws")
@@ -106,7 +115,11 @@ function export_factor_draws(
                                        Σ_ids, model_options; smooth = true)
         @unpack x_smoothed = smoother_output          # (factor_count, T)
         X = copy(x_smoothed)
-        if state_uncertainty
+        if state_draws == :joint
+            L, r = _transition_matrix(θ, param_sizes, model_options)
+            s == 1 && _ffbs_check(L, r, smoother_output)   # one-off sanity check in the log
+            X = ffbs_draw(L, r, smoother_output)
+        elseif state_draws == :pointwise
             # add the smoother's own state uncertainty: x_t ~ N(x̂_{t|T}, Σ_{t|T})
             @unpack sigma_smoothed = smoother_output
             for t in 1:size(X, 2)
@@ -126,9 +139,69 @@ function export_factor_draws(
     mkpath(out_dir)
     out = joinpath(out_dir, filename)
     CSV.write(out, long)
-    unc = state_uncertainty ? "θ + state" : "θ only"
+    unc = state_draws == :joint ? "θ + joint state paths" : state_draws == :pointwise ? "θ + pointwise state" : "θ only"
     @info "Wrote $n_draws posterior factor draws ($unc; $R factors × $(length(dts)) quarters) → $out"
     return out
+end
+
+_ffbs_supported(mo) = !(hasproperty(mo, :aggregate_rep) && mo.aggregate_rep == :as_inputs) &&
+                      !(hasproperty(mo, :trend_spec) && mo.trend_spec == :stochastic)
+
+# Companion transition of the :as_states filter (recurse_kalman_filter_smoother):
+# state [f_t, f_{t-1}, f_{t-2}, f_{t-3}, Y_t], f_{t+1} = A f_t + B Y_t, Y_{t+1} = C f_t + D Y_t.
+function _transition_matrix(θ, param_sizes, model_options)
+    n_hyper = param_sizes[end][1]
+    A, B, C, D = matrisize(θ[1:end-n_hyper], param_sizes)[1:4]
+    r, q = size(B)
+    L = zeros(eltype(A), 4r + q, 4r + q)
+    L[1:r, 1:r] .= A;            L[1:r, 4r+1:end] .= B
+    L[r+1:2r, 1:r] .= I(r);      L[2r+1:3r, r+1:2r] .= I(r);  L[3r+1:4r, 2r+1:3r] .= I(r)
+    L[4r+1:end, 1:r] .= C;       L[4r+1:end, 4r+1:end] .= D
+    return L, r
+end
+
+"""
+    ffbs_draw(L, r, smoother_output; rng = Random.default_rng())
+
+One draw of the whole state path from p(x_{1:T} | y, θ) — forward-filtering
+backward-sampling (Carter and Kohn 1994; Frühwirth-Schnatter 1994). Uses the
+filter output the smoother already returns: x_{t|t}, P_{t|t} (`x_updated`,
+`sigma_updated`) and x_{t+1|t}, P_{t+1|t} (`x_filtered`, `sigma_filtered`).
+x_T ~ N(x_{T|T}, P_{T|T}); then backwards
+x_t | x_{t+1} ~ N(x_{t|t} + J_t (x_{t+1} - x_{t+1|t}), P_{t|t} - J_t L P_{t|t}),
+J_t = P_{t|t} L' P_{t+1|t}^{-1}. The lag block of x_{t+1} pins f_t, f_{t-1},
+f_{t-2} of x_t exactly; those rows are copied over so the path is consistent.
+"""
+function ffbs_draw(L, r, smoother_output; rng = Random.default_rng())
+    @unpack x_filtered, sigma_filtered, x_updated, sigma_updated = smoother_output
+    n, T = size(x_updated)
+    X = zeros(n, T)
+    X[:, T] = x_updated[:, T] .+ _psd_sqrt(sigma_updated[T]) * randn(rng, n)
+    for t in (T-1):-1:1
+        P = Matrix(sigma_updated[t])
+        S = Symmetric(Matrix(sigma_filtered[t+1]))
+        J = (pinv(S; rtol = 1e-12) * (L * P))'           # P L' S⁻¹
+        m = x_updated[:, t] .+ J * (X[:, t+1] .- x_filtered[:, t+1])
+        V = P .- J * L * P
+        X[:, t] = m .+ _psd_sqrt((V .+ V') ./ 2) * randn(rng, n)
+        X[1:3r, t] .= X[r+1:4r, t+1]                      # f_t, f_{t-1}, f_{t-2} are known exactly
+    end
+    return X
+end
+
+# Logged once per export: the mean of many joint draws should reproduce the
+# smoothed mean, and their spread the smoothed SDs.
+function _ffbs_check(L, r, smoother_output; n = 100)
+    @unpack x_smoothed, sigma_smoothed = smoother_output
+    rng = MersenneTwister(7)
+    D = cat([ffbs_draw(L, r, smoother_output; rng = rng) for _ in 1:n]...; dims = 3)
+    M = dropdims(mean(D; dims = 3); dims = 3); Sd = dropdims(std(D; dims = 3); dims = 3)
+    sd_sm = reduce(hcat, [sqrt.(max.(diag(sigma_smoothed[t]), 0.0)) for t in axes(x_smoothed, 2)])
+    k = 1:r
+    rel_mean = maximum(abs.(M[k, :] .- x_smoothed[k, :])) / maximum(sd_sm[k, :])
+    ratio = median(vec(Sd[k, 5:end] ./ sd_sm[k, 5:end]))
+    @info "FFBS check ($n paths, first θ-draw): max |mean − smoothed| = $(round(rel_mean; digits = 3)) × max smoothed SD " *
+          "(≈ 3/√$n expected); median draw SD / smoothed SD = $(round(ratio; digits = 2)) (≈ 1 expected)"
 end
 
 # Robust PSD square root: the smoothed state covariance can be numerically
