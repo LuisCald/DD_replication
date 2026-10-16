@@ -97,8 +97,7 @@ tmp/
 *.svg
 *.eps
 
-# Keep slide deck PDFs (these are intentionally tracked)
-!slides/**/*.pdf
+# (slides/ is no longer distributed; see the end of this file)
 
 # Animations
 *.mp4
@@ -133,3 +132,32 @@ hank_avg_corr_*.tex
 # Processed survey inputs shipped with the package (gzipped Stage-1 output; see data/processed/README.md)
 !data/processed/*.csv.gz
 !data/processed/MD5SUMS_uncompressed.txt
+
+## ----------------------
+## Kept on disk, not distributed (internal notes, exploratory scripts, editor settings)
+## ----------------------
+.vscode/
+slides/
+publish_to_DD_data.sh
+doc/hank_campaign_overview.md
+doc/stocks_atom_design.md
+doc/transfer_old_vs_new.tex
+doc/copula_identification.tex
+doc/em_*
+doc/object_factors.tex
+doc/maxent_note.tex
+doc/HANK_fig10_new/
+code/julia/doc/
+code/julia/estimate_bias.jl
+code/julia/run_kalman_em.jl
+code/julia/in_basis_cells.jl
+code/julia/st_posterior_summary.jl
+code/julia/just_intervals.jl
+code/julia/run_all_economies.sh
+code/julia/run_all_intervals.sh
+code/julia/examples/Structures_business.jl
+code/julia/examples/Structures_replication_business.jl
+code/julia/examples/Structures_stochastic_trend.jl
+code/julia/examples/Structures_hp_control.jl
+# belongs to another project
+code/python/clean_brake_data.py

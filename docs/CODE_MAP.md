@@ -16,7 +16,7 @@ Package contents and the main entry points. Paths are relative to the repository
 │   │   ├── run_estimation.jl           Stage 2: MCMC estimation
 │   │   ├── run_postestimation.jl       Stage 3: results, figures, tables
 │   │   ├── run_mdd.jl, run_mdd_table.jl  Marginal data densities → Tables/MDD.tex
-│   │   ├── run_dropwave.jl, run_dropwave_table.jl  Drop-one-wave exercise → dropwave_table.tex
+│   │   ├── run_dropwave.jl, run_dropwave_table.jl  Drop-one-wave exercise (diagnostic; not in the paper)
 │   │   ├── run_recession_panels.jl     Re-plot the recession panels
 │   │   ├── run_proof_of_concept.jl     Proof-of-concept figures
 │   │   ├── RecessionPanels.jl          Recession panels (consumption by income × wealth)
@@ -87,30 +87,19 @@ Package contents and the main entry points. Paths are relative to the repository
 │   │   └── X12_averages.R             X-12 deseasoning of DFA-component anchors (optional)
 │   └── hank/                          HANK validation: BASEtoolbox drivers + README
 │
-├── publish_to_DD_data.sh              Copy regenerated outputs to a DD_data checkout
-│
 ├── docs/                              USER_GUIDE.md, DFA_ITEMS.md, CODE_MAP.md (this file)
 │
 ├── data/raw/DOWNLOAD_INSTRUCTIONS.md  Where to get the raw survey data
 ├── output/estimates/                  Pre-computed posterior-mode parameter vector
 │
-├── slides/                            Conference / seminar slide decks
-│   └── brazil/                        Brazil 2026 (full + short 20-min version)
-│
-├── doc/                               Methodological notes
-│   ├── maxent_note.tex                2D maximum-entropy group means
-│   ├── copula_identification.tex      Copula identification
-│   ├── object_factors.tex, em_*.tex   Factor-extraction notes
+├── doc/
 │   ├── figure10_404020.tex            Assembles the HANK Figure 10 panels
-│   └── linearization_notes.tex
+│   └── linearization_notes.tex        Note on linearization in the microdata generation
 │
 └── CITATION.cff                       Machine-readable citation
 ```
 
 Files not listed are development or diagnostic scripts not needed for the paper's exhibits.
-
-`publish_to_DD_data.sh [path-to-DD_data-checkout]` copies regenerated outputs from
-`data/synthetic/` into a DD_data checkout and stages them there; review and commit in DD_data.
 
 ## Anatomy of the synthetic data (information and interpolation shares)
 
