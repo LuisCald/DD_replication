@@ -518,8 +518,8 @@ function get_priors(model_elements, model_options, hyper_params)
     dimension = length(measures)
 
     if aggregate_rep == :as_inputs
-        hasproperty(model_options, :persistence_prior) && model_options.persistence_prior == :per_factor &&
-            error("persistence_prior = :per_factor is not implemented for aggregate_rep = :as_inputs")
+        hasproperty(model_options, :persistence_prior) && model_options.persistence_prior in (:per_factor, :per_factor_agg) &&
+            error("persistence_prior = $(model_options.persistence_prior) is not implemented for aggregate_rep = :as_inputs")
         # ─── :as_inputs ─── 4 hyperparameters: κ_1, κ_5, σ_ϕ, ν ────────────
         hyper_params[1] = inv_logit(hyper_params[1], 0.2, 0.99)   # κ_1
         hyper_params[2] = inv_logit(hyper_params[2], -0.99, 0.99)  # κ_5
@@ -558,7 +558,9 @@ function get_priors(model_elements, model_options, hyper_params)
     else
         # ─── :as_states (default) ─── 6 hyperparameters (:common) or r+5 (:per_factor) ─
 
-        pf = hasproperty(model_options, :persistence_prior) && model_options.persistence_prior == :per_factor
+        pf = hasproperty(model_options, :persistence_prior) && model_options.persistence_prior in (:per_factor, :per_factor_agg)
+        pfa = pf && model_options.persistence_prior == :per_factor_agg   # H layout [κ₁, ρ_F(1..r), ρ_Y(1..q), σ_ϕ, σ_ϕY, ν]
+        nY = pfa ? agg_count : 1
         local prior_mean, V_prior, priors
         n_objs = (dimension + 1)
         if pf
@@ -566,19 +568,21 @@ function get_priors(model_elements, model_options, hyper_params)
             # NON-mutating: hyper_params stays RAW (the hyperpriors are stated on the
             # raw scale under this spec — see estimate_prior), locals hold transforms.
             r_pf = factor_count
-            length(hyper_params) == r_pf + 5 ||
-                error("persistence_prior = :per_factor expects $(r_pf + 5) hyperparameters, got $(length(hyper_params))")
+            length(hyper_params) == r_pf + nY + 4 ||
+                error("persistence_prior = $(model_options.persistence_prior) expects $(r_pf + nY + 4) hyperparameters, got $(length(hyper_params))")
             ρ_F_vec = [inv_logit(hyper_params[1+j], -0.99, 0.99) for j in 1:r_pf]
-            ρ_Y = inv_logit(hyper_params[r_pf+2], -0.99, 0.99)
-            σ_ϕ = log(exp(hyper_params[r_pf+3]) + 1)
-            σ_ϕ_Y = log(exp(hyper_params[r_pf+4]) + 1)
-            corr_Ω_shape = 1 + log(1 + exp(hyper_params[r_pf+5]))
+            ρ_Y_vec = [inv_logit(hyper_params[r_pf+1+k], -0.99, 0.99) for k in 1:nY]
+            ρ_Y = ρ_Y_vec[1]
+            σ_ϕ = log(exp(hyper_params[r_pf+nY+2]) + 1)
+            σ_ϕ_Y = log(exp(hyper_params[r_pf+nY+3]) + 1)
+            corr_Ω_shape = 1 + log(1 + exp(hyper_params[r_pf+nY+4]))
 
             hyperparameters[1] = 0.05
             hyperparameters[2] = inv_logit(hyper_params[1], 0.2, 0.99)
             hyperparameters[6] = ρ_F_vec[1]   # scalar slot kept in-range; A_mean uses own_lag
-            hyperparameters[7] = ρ_Y
-            prior_mean, _, _, _, _, V_prior = minnesota_prior(hyperparameters, pcs, u, lags, estimator; own_lag=ρ_F_vec)
+            hyperparameters[7] = ρ_Y          # scalar slot; D_mean uses own_lag_agg under :per_factor_agg
+            prior_mean, _, _, _, _, V_prior = minnesota_prior(hyperparameters, pcs, u, lags, estimator; own_lag=ρ_F_vec,
+                                                              own_lag_agg=(pfa ? ρ_Y_vec : nothing))
 
             ϕ_Y = log(exp(1 - ρ_Y^2) - 1)
             priors = Any[
@@ -587,7 +591,7 @@ function get_priors(model_elements, model_options, hyper_params)
                 # call, silently swallowed into -1e12 (review 2026-09-10)
                 MvNormal(prior_mean, Matrix(Hermitian(V_prior)) + 1e-8 * I),
                 [Normal(log(exp(1 - ρ^2) - 1), σ_ϕ) for ρ in ρ_F_vec],  # per-factor Ω_f prior centers 1-ρ_j²
-                Normal(ϕ_Y, σ_ϕ_Y),
+                pfa ? [Normal(log(exp(1 - ρ^2) - 1), σ_ϕ_Y) for ρ in ρ_Y_vec] : Normal(ϕ_Y, σ_ϕ_Y),
                 LKJCholesky(factor_count + agg_count, corr_Ω_shape),
             ]
         else

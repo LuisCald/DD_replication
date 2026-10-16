@@ -16,7 +16,8 @@ function set_shock_priors(priors, factor_count, agg_count, n_param)
     if priors[2] isa AbstractVector
         # persistence_prior = :per_factor — one Normal per factor
         Ωf_mode = [StatsBase.mode(d) for d in priors[2]]
-        Ωy_mode = repeat([StatsBase.mode(priors[3])], agg_count)
+        Ωy_mode = priors[3] isa AbstractVector ? [StatsBase.mode(d) for d in priors[3]] :   # :per_factor_agg
+                  repeat([StatsBase.mode(priors[3])], agg_count)
         Σ_mode = [StatsBase.mode(priors[4+i]) for i in 1:n_param]
         Ω_var = vcat(Ωf_mode, Ωy_mode)
         Ω_corr = lower_offdiag(diagm(ones(length(Ω_var))))

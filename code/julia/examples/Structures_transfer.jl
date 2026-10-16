@@ -63,6 +63,9 @@ const TR_AGG_EXCL  = TR_XCOVID ? ["2020-Q1", "2020-Q2", "2020-Q3", "2020-Q4", "2
 const TR_NAF  = parse(Int, get(ENV, "DD_NAF", "0"))
 const TR_TW   = parse(Float64, get(ENV, "DD_TW", "0"))
 const TR_MUTE = get(ENV, "DD_MUTE", "")
+# DD_PERS_AGG=1 (Oct 2026): persistence_prior = :per_factor_agg — one persistence target ρ_Y,k per AGGREGATE
+#   factor as well (H block r+5 → r+q+4); tag " pfa" instead of " pf". Default 0 = the published :per_factor spec.
+const TR_PERS_AGG = get(ENV, "DD_PERS_AGG", "0") == "1"
 const TR_MUTE_SPEC = Dict(
     "" => ("", Dict("begin" => "", "end" => "")),
     "cex_every_4_years" => (" every 4 years",
@@ -81,7 +84,7 @@ const TR_MEASURES = !isempty(TR_ITEM) ? sort(["income", "wealth", TR_ITEM]) :
                     !isempty(TR_MEAS_ENV) ? sort(String.(strip.(split(TR_MEAS_ENV, ",")))) :
                     sort(["consum", "income", "wealth"])
 
-const TR_TAG = " transfer" * (TR_TREND == :stochastic ? " stochastic trend" : " hp") * " $(TR_NDF) factors pf" *
+const TR_TAG = " transfer" * (TR_TREND == :stochastic ? " stochastic trend" : " hp") * " $(TR_NDF) factors pf" * (TR_PERS_AGG ? "a" : "") *
                (TR_PCA == :em ? " em" : TR_PCA == :kalman_em ? " em kem" : "") *
                (TR_WRIDGE > 0 ? " wr$(TR_WRIDGE)" : "") *
                (TR_AGG_SHEET == "stationary_series_infl" ? " infl" : TR_AGG_SHEET == "stationary_series" ? "" : " $(TR_AGG_SHEET)") *
@@ -103,7 +106,7 @@ const TR_TAG = " transfer" * (TR_TREND == :stochastic ? " stochastic trend" : " 
 const model_options = ModelOptions(
     trend_spec        = TR_TREND,
     trend_lambda_scale = 0.1,
-    persistence_prior = :per_factor,
+    persistence_prior = TR_PERS_AGG ? :per_factor_agg : :per_factor,
     stationarity_cap  = 0.995,
     factor_selection  = :fixed,
     n_dist_factors    = TR_NDF,

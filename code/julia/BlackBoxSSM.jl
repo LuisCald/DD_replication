@@ -64,8 +64,9 @@ function define_step_ranges(param_sizes, priors, param_vector)
     end
 
     # For Ωy
-    for i in (l_A+l_B+l_C+l_D+l_Ωf+1):(l_A+l_B+l_C+l_D+l_Ωf+l_Ωy)
-        step_ranges[i] = (-3 * priors[3].σ + priors[3].μ, 3 * priors[3].σ + priors[3].μ)
+    for (q, i) in enumerate((l_A+l_B+l_C+l_D+l_Ωf+1):(l_A+l_B+l_C+l_D+l_Ωf+l_Ωy))
+        dΩy = priors[3] isa AbstractVector ? priors[3][q] : priors[3]   # per aggregate under :per_factor_agg
+        step_ranges[i] = (-3 * dΩy.σ + dΩy.μ, 3 * dΩy.σ + dΩy.μ)
     end
 
     # For Ω_corr (unconstrained → tanh maps to correlations; tanh(3)=0.995, tanh(10)≈1 causes degeneracy)
