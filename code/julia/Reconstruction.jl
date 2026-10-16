@@ -167,11 +167,17 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
     X̄_norm = similar(X_dict["normal"][1])
     X̄_avg = similar(X_dict["average"][1])
 
-    # Take the average of the 3 dimensions, skipping over NaN, element by element
+    # Dataset weights per coefficient: equal, or 1/(measurement-error SD) of that
+    # dataset and object at θ (consensus_weights = :inv_me_sd). Coefficients a
+    # dataset does not observe are NaN and drop out either way.
+    W = consensus_weight_matrix(par_final, param_sizes, Σ_ids, model_options, agg_count,
+                                size(X_dict["normal"][1], 1), number_of_dfs)
+
+    # Weighted average over datasets, skipping over NaN, element by element
     for i in axes(X_dict["normal"][1], 1)
         for j in axes(X_dict["normal"][1], 2)
-            X̄_norm[i, j] = mean(filter(!isnan, X_array_norm[i, j, :]))
-            X̄_avg[i, j] = mean(filter(!isnan, X_array_avg[i, j, :]))
+            X̄_norm[i, j] = _nan_wmean(view(X_array_norm, i, j, :), view(W, i, :))
+            X̄_avg[i, j] = _nan_wmean(view(X_array_avg, i, j, :), view(W, i, :))
         end
     end
 
@@ -213,6 +219,48 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
     end
 end
 
+
+# Weighted mean over the entries that are not NaN (all-NaN → NaN, as mean(filter(...)) gave).
+function _nan_wmean(x, w)
+    num = 0.0; den = 0.0
+    for k in eachindex(x)
+        (isnan(x[k]) || isnan(w[k])) && continue
+        num += w[k] * x[k]; den += w[k]
+    end
+    return den > 0 ? num / den : NaN
+end
+
+"""
+    consensus_weight_matrix(par_final, param_sizes, Σ_ids, model_options, agg_count, n_coef, n_dfs)
+
+Weights (n_coef × n_dfs) for the cross-dataset consensus. `:equal` gives ones.
+`:inv_me_sd` gives 1/σ, with σ² the measurement-error variance of that dataset
+and object at θ — the same Σ the Kalman filter uses (apply_measurement_criteria,
+softplus, copula-row weights). Unobserved objects get NaN.
+"""
+function consensus_weight_matrix(par_final, param_sizes, Σ_ids, model_options, agg_count, n_coef, n_dfs)
+    mode = hasproperty(model_options, :consensus_weights) ? model_options.consensus_weights : :equal
+    mode == :equal && return ones(n_coef, n_dfs)
+    mode == :inv_me_sd || error("consensus_weights = $(mode): use :equal or :inv_me_sd")
+    if hasproperty(model_options, :trend_spec) && model_options.trend_spec == :stochastic
+        @warn "consensus_weights = :inv_me_sd is not wired for trend_spec = :stochastic; using equal weights"
+        return ones(n_coef, n_dfs)
+    end
+    aggregate_rep = hasproperty(model_options, :aggregate_rep) ? model_options.aggregate_rep : :as_states
+    n_hyper = param_sizes[end][1]
+    Σ = matrisize(par_final[1:end-n_hyper], param_sizes; aggregate_rep = aggregate_rep)[end]
+    n_agg = aggregate_rep == :as_inputs ? 0 : agg_count
+    v = apply_measurement_criteria(Σ, Σ_ids, model_options, n_agg)
+    small = v .<= 10
+    v[small] .= log.(exp.(v[small]) .+ 1)          # softplus, as in likeli
+    aggregate_rep == :as_inputs || apply_copula_error_weights!(v, model_options, n_agg)
+    length(v) - n_agg == n_coef * n_dfs ||
+        error("measurement-error vector ($(length(v) - n_agg)) ≠ n_coef·n_dfs ($(n_coef * n_dfs))")
+    W = reshape(1 ./ sqrt.(v[1:n_coef*n_dfs]), n_coef, n_dfs)
+    @info "Consensus weights: inverse measurement-error SDs (median weight by dataset: " *
+          join(round.([median(filter(!isnan, W[:, j])) for j in 1:n_dfs]; digits = 2), ", ") * ")"
+    return W
+end
 
 function select_trend(trend, type)
     new_trend = Vector{Vector{Float64}}(undef, length(trend))

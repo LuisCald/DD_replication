@@ -66,6 +66,9 @@ const TR_MUTE = get(ENV, "DD_MUTE", "")
 # DD_PERS_AGG=1 (Oct 2026): persistence_prior = :per_factor_agg — one persistence target ρ_Y,k per AGGREGATE
 #   factor as well (H block r+5 → r+q+4); tag " pfa" instead of " pf". Default 0 = the published :per_factor spec.
 const TR_PERS_AGG = get(ENV, "DD_PERS_AGG", "0") == "1"
+# DD_CONSENSUS=inv_me_sd: weight the cross-dataset consensus by inverse measurement-error SDs
+#   (post-estimation only; default "equal" = the plain average).
+const TR_CONSENSUS = get(ENV, "DD_CONSENSUS", "equal") == "inv_me_sd" ? :inv_me_sd : :equal
 const TR_MUTE_SPEC = Dict(
     "" => ("", Dict("begin" => "", "end" => "")),
     "cex_every_4_years" => (" every 4 years",
@@ -107,6 +110,7 @@ const model_options = ModelOptions(
     trend_spec        = TR_TREND,
     trend_lambda_scale = 0.1,
     persistence_prior = TR_PERS_AGG ? :per_factor_agg : :per_factor,
+    consensus_weights = TR_CONSENSUS,
     stationarity_cap  = 0.995,
     factor_selection  = :fixed,
     n_dist_factors    = TR_NDF,
