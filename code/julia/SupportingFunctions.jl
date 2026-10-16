@@ -287,7 +287,9 @@ function draw_from_prior(param_sizes, priors, nchain)
     Ωf      = priors[2] isa AbstractVector ?
               hcat([rand.(priors[2]) for _ in 1:nchain]...) :
               hcat([rand(priors[2], nf) for _ in 1:nchain]...)
-    Ωy      = hcat([rand(priors[3], ny) for _ in 1:nchain]...)
+    Ωy      = priors[3] isa AbstractVector ?          # one Normal per aggregate under :per_factor_agg
+              hcat([rand.(priors[3]) for _ in 1:nchain]...) :
+              hcat([rand(priors[3], ny) for _ in 1:nchain]...)
 
     # Draw the full Cholesky from the LKJ prior, then map back to the
     # unconstrained u-parameterization via `Lcorr_to_u` (defined in Model.jl).
@@ -348,19 +350,22 @@ function report_mode_dynamics(par_final, param_sizes, model_options; label::Abst
         # the struct's (which holds whatever draw was evaluated last).
         Hraw = st_hyper_params(par_final, param_sizes)
         local ρtxt, iY, iσ
-        if length(Hraw) == 6
+        pp = hasproperty(model_options, :persistence_prior) ? model_options.persistence_prior : :common
+        nY = pp == :per_factor_agg ? length(Ωd) - r : 1
+        local ρY_ix
+        if length(Hraw) == 6 && pp == :common
             ρtxt = "ρ_F = $(round(inv_logit(Hraw[2], -0.99, 0.99); digits = 2))"
-            iY, iσ = 3, 4
-        else  # persistence_prior = :per_factor: [κ₁, ρ_F(1..r), ρ_Y, σ_ϕ, σ_ϕY, ν]
-            rH = length(Hraw) - 5
+            ρY_ix, iσ = 3:3, 4
+        else  # :per_factor [κ₁, ρ_F(1..r), ρ_Y, σ_ϕ, σ_ϕY, ν]; :per_factor_agg [κ₁, ρ_F(1..r), ρ_Y(1..q), σ_ϕ, σ_ϕY, ν]
+            rH = length(Hraw) - nY - 4
             ρv = [inv_logit(Hraw[1+j], -0.99, 0.99) for j in 1:rH]
             ρtxt = "per-factor ρ_F = $(round.(ρv; digits = 2))"
-            iY, iσ = rH + 2, rH + 3
+            ρY_ix, iσ = (rH+2):(rH+1+nY), rH + nY + 2
         end
-        ρ_Y = inv_logit(Hraw[iY], -0.99, 0.99)
+        ρ_Y = [inv_logit(Hraw[i], -0.99, 0.99) for i in ρY_ix]
         σϕ = spd(Hraw[iσ])
         @info "$(label): dist-factor |eig(A)| = $(round.(ev; digits = 3)) " *
-              "(estimated persistence target $(ρtxt), σ_ϕ = $(round(σϕ; digits = 2)); agg ρ_Y = $(round(ρ_Y; digits = 2)))"
+              "(estimated persistence target $(ρtxt), σ_ϕ = $(round(σϕ; digits = 2)); agg ρ_Y = $(length(ρ_Y) == 1 ? round(ρ_Y[1]; digits = 2) : round.(ρ_Y; digits = 2)))"
         @info "$(label): innovation sds — dist $(round.(spd.(Ωd[1:r]); digits = 2)), " *
               "agg $(round.(spd.(Ωd[r+1:end]); digits = 2)); agg AR diag(D) $(round.(D isa AbstractMatrix ? diag(D) : D; digits = 2))"
         if st_is_stochastic(param_sizes)
