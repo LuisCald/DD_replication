@@ -10,16 +10,18 @@ If you only need the data, go to [DD_data](https://github.com/LuisCald/DD_data) 
 
 ## Overview
 
-This package reproduces every computational exhibit of the paper in three stages: data
-cleaning, MCMC estimation (DIME ensemble sampler), and post-estimation. The posterior mode
-ships in `output/estimates/`, so Stage 2 can be skipped; the
+This package reproduces every computational exhibit of the paper in two stages, MCMC estimation
+(DIME ensemble sampler) and post-estimation, starting from the processed survey files and
+aggregate series that ship in `data/processed/`. Rebuilding those inputs from the raw surveys
+(Stage 1) is documented but is not part of the replication. The posterior mode ships in
+`output/estimates/`, so Stage 2 can be skipped; the
 [quick start](#quick-start-without-stage-2) lists what then cannot be reproduced.
 
 | Stage | Command | What | Hardware | Runtime |
 |---|---|---|---|---|
-| 1: Data | `bash master.sh data` | Clean the surveys and aggregates (Stata, Python, Julia) | Workstation | ~1 h |
-| 2: Estimation | `bash master.sh estimate` | MCMC estimation | 16 cores, 64 GB RAM | ~48–72 h |
-| 3: Results | `bash master.sh results` | Post-estimation, figures, tables | Workstation | ~3 h |
+| 1: Data (not part of the replication) | `bash master.sh data` | Rebuild the processed inputs from the raw surveys and aggregates (Stata, Python, Julia) | Workstation | — |
+| 2: Estimation | `bash master.sh estimate` | MCMC estimation | 16 cores, 64 GB RAM | up to 24 h |
+| 3: Results | `bash master.sh results` | Post-estimation, figures, tables | Workstation | under 30 min |
 
 ## Data Availability Statement
 
@@ -113,11 +115,14 @@ Run the individual `julia` commands below from `<root>/5_Code`.
 ### Quick start (without Stage 2)
 
 1. Install the software above and run `julia --project=code/julia/env -e 'using Pkg; Pkg.instantiate()'`.
-2. Download the raw data into `1_Data/` following `data/raw/DOWNLOAD_INSTRUCTIONS.md`.
+2. Copy the processed inputs into place (see `data/processed/README.md`):
+   ```bash
+   for f in data/processed/*.csv.gz; do gunzip -c "$f" > ../2_Data_processing/$(basename "$f" .gz); done
+   cp data/processed/*.xlsx ../2_Data_processing/
+   ```
 3. Run:
    ```bash
-   bash master.sh data                         # Stage 1, ~1 h
-   DD_SKIP=bands,draws bash master.sh results  # Stage 3, ~3 h
+   DD_SKIP=bands,draws bash master.sh results  # Stage 3, under 30 min
    ```
 
 The quick start uses the shipped posterior mode. Posterior draws, credible bands, the
