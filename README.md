@@ -20,8 +20,12 @@ aggregate series that ship in `data/processed/`. Rebuilding those inputs from th
 | Stage | Command | What | Hardware | Runtime |
 |---|---|---|---|---|
 | 1: Data (not part of the replication) | `bash master.sh data` | Rebuild the processed inputs from the raw surveys and aggregates (Stata, Python, Julia) | Workstation | — |
-| 2: Estimation | `bash master.sh estimate` | MCMC estimation | 16 cores, 64 GB RAM | up to 24 h |
-| 3: Results | `bash master.sh results` | Post-estimation, figures, tables | Workstation | under 30 min |
+| 2: Estimation | `bash master.sh estimate` | MCMC estimation | 16 cores, 64 GB RAM | up to 24 h (baseline) |
+| 3: Results | `bash master.sh results` | Post-estimation, figures, tables | Workstation | under 30 min (baseline) |
+
+The runtimes are for the baseline estimates. The full replication also re-estimates the robustness
+runs (`examples/Structures_replication_*.jl`, the MDD table) and the HANK simulation exercise, one
+model each; it takes several days, depending on the number of cores.
 
 ## Data Availability Statement
 
