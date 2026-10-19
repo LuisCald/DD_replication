@@ -680,7 +680,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
     # " new data" vintage namespace — PSID_new/SCF_new — was removed 2026-09-22:
     # the regenerated files are the data now, so the caches are simply rebuilt
     # under the baseline names; see run_prep.jl.)
-    ci_tag_global = tag == " higher order15" ? tag : ""
+    ci_tag_global = (tag == " higher order15" ? tag : "") * coef_option_tag(model_options)
     # The whitening matrix is cached; a nonzero whitening_ridge is part of its
     # definition, so it gets its own cache file (otherwise a ridge would silently
     # never apply — the cached un-ridged matrix would be loaded).
@@ -703,7 +703,7 @@ function define_data_intervals(df_vec, model_options, init_path, time_p, obs_dat
         confidence_intervals[source] = Dict()
 
         # Per-source cache namespace (see above)
-        ci_tag = tag == " higher order15" ? tag : ""
+        ci_tag = (tag == " higher order15" ? tag : "") * coef_option_tag(model_options)
 
         # File name for the confidence intervals and noise distributions
         ci_file_name = init_path * "/confidence_intervals/ci_draws_" * m_label * grid_tag * "_" * ci_source * "_$end_year" * ci_tag * ".jld2"

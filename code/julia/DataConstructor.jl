@@ -440,6 +440,18 @@ function data_constructor(obs_data::ObservedData, model_options)
 end
 
 
+# Cache-name suffix for options that change the coefficients themselves (Oct 2026): zero-mass measures, the
+# zero share carried in the state, positive-part anchoring. Empty for the published runs, so their cache names
+# (ci_draws_*, noise_draws_*, sigma_*) are unchanged; any other run cannot load a cache built without its options.
+function coef_option_tag(model_options)
+    t = ""
+    atom = !isempty(model_options.atom_measures)
+    atom && (t *= "_atom")
+    atom && hasproperty(model_options, :participation_in_state) && model_options.participation_in_state && (t *= "_pis")
+    hasproperty(model_options, :positive_scale_measures) && !isempty(model_options.positive_scale_measures) && (t *= "_pos")
+    return t
+end
+
 function infer_noise_paths(files::Dict{String,String}, model_options::ModelOptions)
     isempty(files) && return Dict{String,String}()
 
@@ -450,7 +462,7 @@ function infer_noise_paths(files::Dict{String,String}, model_options::ModelOptio
     m_label = _noise_measures_label(model_options.measures)
     grid_tag = _noise_grid_tag(model_options.estimator)
     end_year = get(model_options.data_cutoffs, "end", "") != "" ? String(model_options.data_cutoffs["end"])[1:4] : "all"
-    ci_tag = model_options.tag == " higher order15" ? model_options.tag : ""
+    ci_tag = (model_options.tag == " higher order15" ? model_options.tag : "") * coef_option_tag(model_options)
 
     out = Dict{String,String}()
     for src in infer_empirical_sources(files)
@@ -1247,6 +1259,9 @@ function assign_quantile_groups_for_copula!(df, obs_meas, grid, grid_type)
 end
 
 function scale_to_aggregates(non_missing, rv, correction)
+    if hasproperty(model_options, :positive_scale_measures) && String(rv) in model_options.positive_scale_measures
+        return scale_positive_to_aggregates(non_missing, rv, correction)
+    end
     # Anchors the micro distribution's weighted mean to the per-HH aggregate `correction`,
     # preserving ranks/shape. The result is micro * correction / mean(micro) (the additive
     # `tot_scale` below is exactly 0 for the weighted mean), so this is SCALE-INVARIANT in
@@ -1359,7 +1374,13 @@ function treat_quantile_functions(non_missing, rv, grid, grid_points, correction
             end
             sort!(holders, rv)
             t_rv = inverse_hyperbolic_sine(holders[:, rv] ./ correction)
-            coefs = series_estimator(t_rv, holders[:, :weight], grid - 1)
+            if hasproperty(model_options, :participation_in_state) && model_options.participation_in_state
+                # participation in the state: orders 0..grid-2 for the holders, logit(π̂) in the last slot
+                coefs = vcat(series_estimator(t_rv, holders[:, :weight], grid - 2),
+                             log(clamp(π̂, 1e-4, 1 - 1e-4) / (1 - clamp(π̂, 1e-4, 1 - 1e-4))))   # logit
+            else
+                coefs = series_estimator(t_rv, holders[:, :weight], grid - 1)
+            end
             return (coefs = coefs, π = π̂)
         end
 
@@ -1645,6 +1666,28 @@ function chebyshev_nodes(n)
     return [0.5 * (1 + cos((2i - 1) * π / (2n))) for i in n:-1:1]
 end
 
+
+# Positive-part anchoring (ModelOptions.positive_scale_measures; Oct 2026, liquidity products).
+# Net liquid wealth = assets − consumer debt is negative for 30–45% of households, and the
+# survey mean is far below the Z.1 anchor (PSID $67k vs $295k in 2019, mostly equities). The
+# proportional anchor above multiplies EVERY value by anchor/mean, so debts were inflated by the
+# same ×4 as assets. Here only the positive values are stretched, by m = (A − E[x⁻]) / E[x⁺],
+# so the weighted mean still equals A; negative values keep their survey-dollar level. Ranks are
+# unchanged. Same 20× guard as the proportional version.
+function scale_positive_to_aggregates(non_missing, rv, correction)
+    A = correction isa AbstractArray ? first(correction) : correction
+    x = non_missing[!, rv]
+    w = weights(non_missing[:, :weight])
+    pos = mean(max.(x, 0.0), w)
+    neg = mean(min.(x, 0.0), w)
+    multiplier = (A - neg) / pos
+    if !(multiplier > 0) || multiplier > 20
+        non_missing[!, rv] .= NaN
+        return non_missing
+    end
+    non_missing[!, rv] .= ifelse.(x .> 0, x .* multiplier, x)
+    return non_missing
+end
 
 function perform_percentile_corrections!(df, rv, df_name, estimator, pcf=false, correction=false; record_pi::Union{Nothing,QuarterlyDate}=nothing)
     non_missing = filter(rv => !isnan, df)

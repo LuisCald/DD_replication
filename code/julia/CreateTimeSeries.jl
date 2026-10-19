@@ -2217,6 +2217,14 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
         _am = model_options.atom_measures[1]
         atom_ser = atom_series_at(gdp_series.date, _am)
         atom_dim = atom_ser === nothing ? nothing : findfirst(==(_am), sort(measures))
+        # participation_in_state: π_t comes from the state — logit(π) rides in the last Legendre slot of the
+        # atom marginal (reconstructed like every coefficient: factors, loadings, trend). Read it, then zero
+        # the slot so the holders' quantile function uses orders 0..grid_pcf-2, as in the fit. The holder
+        # (Y,W) slices still come from the surveys (atom_series_at).
+        sp = split_atom_slot!(split_pcfs, measures)
+        if atom_dim !== nothing && sp !== nothing
+            atom_ser = (π = sp[2], hyw = atom_ser.hyw)
+        end
     end
 
     local data_cop
@@ -2365,6 +2373,13 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
 
         # Export functional data. For 'detrended', the marginals itself are uninformative. It is later divided by the average, which is when its informative.
         CSV.write(path * "/" * data_name * "_functional_data" * data_tag * "$label" * ".csv", select(E, "time", :))
+
+        # participation_in_state: the model's quarterly share of zeros for the atom measure (this survey view)
+        if atom_ser !== nothing && hasproperty(model_options, :participation_in_state) && model_options.participation_in_state &&
+           length(atom_ser.π) == nrow(E)
+            CSV.write(path * "/" * data_name * "_participation_" * model_options.atom_measures[1] * data_tag * "$label" * ".csv",
+                DataFrame(time = E.time, share_zero = atom_ser.π))
+        end
     end
 
     # Place data in a dictionary for time series plotting
@@ -2894,6 +2909,21 @@ function get_implicate!(data_vector, q_dict, draw, data_name, type, obs_data, fu
     select_series = select(gdp_series, correction_names)
     split_pcfs = [data_pcf[I, :] for I in Iterators.partition(axes(data_pcf, 1), grid_pcf)]  # split by measure 
 
+    # Atom (zero-mass) measures: the same mixture treatment as export_functional_data (Oct 2026). π from the
+    # state under participation_in_state (split_atom_slot! also zeroes the slot), else the surveys' interpolated
+    # π̂. Inert for runs without atom measures.
+    atom_dim = nothing
+    atom_ser = nothing
+    if !isempty(model_options.atom_measures)
+        _am = model_options.atom_measures[1]
+        atom_ser = atom_series_at(gdp_series.date, _am)
+        atom_dim = atom_ser === nothing ? nothing : findfirst(==(_am), sort(measures))
+        sp = split_atom_slot!(split_pcfs, measures)
+        if atom_dim !== nothing && sp !== nothing
+            atom_ser = (π = sp[2], hyw = atom_ser.hyw)
+        end
+    end
+
     local data_cop
     if typeof(estimator) <: HistogramEstimator
         if model_step != :forecast
@@ -2911,6 +2941,11 @@ function get_implicate!(data_vector, q_dict, draw, data_name, type, obs_data, fu
             for t in 1:T
                 if all(isnan.(split_pcfs[m][:, t]))
                     new_data_pcf[m][:, t] .= NaN
+                elseif m == atom_dim && atom_ser !== nothing
+                    for i in 1:integral_pcf_grid
+                        new_data_pcf[m][i, t] = atom_bin_mean(split_pcfs[m][:, t], grid_pcf - 1, atom_ser.π[t],
+                            intervals[i], intervals[i+1], select_series[t, correction_names[m]])
+                    end
                 else
                     for i in 1:integral_pcf_grid
                         # Using coefs, generate pcf function and then integrate pcf function over diff. intervals 
@@ -2931,7 +2966,9 @@ function get_implicate!(data_vector, q_dict, draw, data_name, type, obs_data, fu
         end
 
         data_pcf = vcat([new_data_pcf[m] for m in eachindex(new_data_pcf)]...)
-        copulas = generate_copula_densities(copulas, measures, integral_cop_grid)
+        copulas = generate_copula_densities(copulas, measures, integral_cop_grid;
+            atom_dim = atom_dim, atom_π = atom_ser === nothing ? nothing : atom_ser.π,
+            atom_hyw = atom_ser === nothing ? nothing : atom_ser.hyw)
     end
 
     # Generate microdata 
