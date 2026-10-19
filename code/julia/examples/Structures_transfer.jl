@@ -41,6 +41,11 @@
 #              item as semicontinuous (atom at zero, atom_measures). Tag suffix " <item> economy".
 #   DD_MEASURES comma list overriding the measure set (e.g. income,wealth): used by
 #              run_proof_of_concept.jl for the SCF (Y,W) and CEX (C,Y) proof-of-concept panels.
+#   DD_LIQUIDITY 1 = the liquidity products (with DD_MEASURES): consumption × illiquid × liquid
+#              (Structures_replication_liquidity.jl), consumption × income × liquid
+#              (Structures_replication_liquidity_income.jl) and consumption × gross liquid × debt
+#              (Structures_replication_liquidity_gross.jl): PSID/SCF/CEX *_liq.csv files and Z.1 anchors;
+#              liquid anchored on its positive part (tag " pos"), debt with the atom treatment.
 #   DD_COMPARE 1 = compare to the robustness runs in post-estimation (compare_to_other_est).
 #   These serve the paper's robustness/MDD runs (examples/Structures_replication_*.jl).
 #
@@ -87,6 +92,29 @@ const TR_MEASURES = !isempty(TR_ITEM) ? sort(["income", "wealth", TR_ITEM]) :
                     !isempty(TR_MEAS_ENV) ? sort(String.(strip.(split(TR_MEAS_ENV, ",")))) :
                     sort(["consum", "income", "wealth"])
 
+# Liquidity products (DD_LIQUIDITY=1, see obs_data below). Net liquid wealth is anchored on its positive
+# part (ModelOptions.positive_scale_measures; tag " pos"), consumer debt has a point mass at zero
+# (32% of SCF, 55% of PSID households) and gets the atom treatment, with its share of zeros carried in the
+# state (participation_in_state; tag " pis") so the model tracks it quarterly.
+const TR_LIQUIDITY = get(ENV, "DD_LIQUIDITY", "0") == "1"
+const TR_POSSCALE  = TR_LIQUIDITY && "liquid" in TR_MEASURES
+const TR_DEBT_ATOM = TR_LIQUIDITY && "debt" in TR_MEASURES
+# Illiquid wealth has a point mass at zero at the bottom too (8% of SCF, 13% of PSID households; almost no
+# negatives), so it gets the atom treatment in consumption × illiquid × liquid (Oct 18). Liquid does not: its
+# zeros sit inside the distribution (30–44% are negative), a flat stretch that rearrangement handles. One atom
+# measure per model for now (DD_replication issue #1), so debt and illiquid never share a product.
+# Debt products (Oct 18): total debt (29% of SCF, 37% of PSID households have none) and mortgage debt (60%, 62%)
+# get the same treatment. Total assets have no atom: 4–7% exact zeros at the bottom, a flat stretch for rearrangement.
+const TR_LIQ_ATOMS = TR_LIQUIDITY ? intersect(["debt", "illiquid", "totdebt", "mortdebt"], TR_MEASURES) : String[]
+length(TR_LIQ_ATOMS) <= 1 || error("only one atom measure per model is supported (issue #1): $(TR_LIQ_ATOMS)")
+# Zero share carried in the state (participation_in_state; tag " pis") for the atom measures of the liquidity and
+# debt products and for the stocks item (re-estimated Oct 18). The other DFA items (real estate, mortgages,
+# consumer credit, pensions) keep the published treatment (share interpolated between SCF waves outside the
+# model) until they are re-estimated, so their configs reproduce DD_data. DD_PIS=0 / DD_PIS=1 override.
+const TR_NEW_ITEM = !isempty(TR_ITEM) && TR_ATOM && TR_ITEM == "stocks"
+const TR_PIS = get(ENV, "DD_PIS", (!isempty(TR_LIQ_ATOMS) || TR_NEW_ITEM) ? "1" : "0") == "1" &&
+               (!isempty(TR_LIQ_ATOMS) || (!isempty(TR_ITEM) && TR_ATOM))
+
 const TR_TAG = " transfer" * (TR_TREND == :stochastic ? " stochastic trend" : " hp") * " $(TR_NDF) factors pf" * (TR_PERS_AGG ? "a" : "") *
                (TR_PCA == :em ? " em" : TR_PCA == :kalman_em ? " em kem" : "") *
                (TR_WRIDGE > 0 ? " wr$(TR_WRIDGE)" : "") *
@@ -97,6 +125,8 @@ const TR_TAG = " transfer" * (TR_TREND == :stochastic ? " stochastic trend" : " 
                TR_MUTE_SPEC[TR_MUTE][1] *
                (isempty(TR_ITEM) ? "" : " $(TR_ITEM) economy") *
                (isempty(TR_MEAS_ENV) || !isempty(TR_ITEM) ? "" : " " * join(TR_MEASURES, "_")) *
+               (TR_POSSCALE ? " pos" : "") *
+               (TR_PIS ? " pis" : "") *
                get(ENV, "DD_TAG", "")
 
 @info "TRANSFER spec: $(TR_NDF) distributional factors, per-factor persistence, joint cap 0.995, $(TR_TREND) trend, " *
@@ -122,7 +152,10 @@ const model_options = ModelOptions(
     tw_ratio          = TR_TW,
     data_to_mute      = TR_MUTE_SPEC[TR_MUTE][2],
     measures          = TR_MEASURES,
-    atom_measures     = (isempty(TR_ITEM) || !TR_ATOM) ? String[] : [TR_ITEM],
+    atom_measures     = !isempty(TR_LIQ_ATOMS) ? TR_LIQ_ATOMS : (isempty(TR_ITEM) || !TR_ATOM) ? String[] : [TR_ITEM],
+    positive_scale_measures = TR_POSSCALE ? ["liquid"] : String[],
+    rearrange_quantiles     = TR_LIQUIDITY || TR_NEW_ITEM,   # liquidity/debt products and the stocks item: rearrange non-monotone quantile functions (flat regions, zero mass); reconstruction only. Other items: published behavior
+    participation_in_state  = TR_PIS,         # zero share observed and tracked quarterly by the model (tag " pis")
     compare_to_other_est = get(ENV, "DD_COMPARE", "0") == "1",   # post-estimation: compare to the robustness runs (recon_missing2, corr_outsample)
     # cross_conditional_shares = [0.4, 0.4, 0.2] is the ModelOptions default
     tag               = TR_TAG,
@@ -130,4 +163,38 @@ const model_options = ModelOptions(
 
 # The paper's data: all eight surveys (retrieve_data_files) and the per-household
 # means (rgdp) are the defaults; the aggregates sheet is selectable (DD_AGG_SHEET).
-const obs_data = ObservedData(agg_data = retrieve_aggregate_data(TR_AGG_SHEET))
+# DD_LIQUIDITY=1 (Oct 2026; examples/Structures_replication_liquidity.jl): the second data product,
+# consumption × illiquid × liquid. Surveys PSID, SCF, CEX from {SCF,PSID,CEX}_liq.csv
+# (code/python/make_liquidity_data.py: liquid = net liquid + stocks/mutual funds, Kaplan–Violante
+# style; illiquid = net real estate + bonds + life insurance + vehicles + business, no pensions).
+# Anchors from the Z.1 series already in the workbook:
+#   liquid_per_hh   = deposits + Treasury securities + equities/mutual funds − consumer credit
+#   illiquid_per_hh = real estate − home mortgages + noncorporate business
+#   grossliq_per_hh = deposits + Treasury securities + equities/mutual funds
+#   debt_per_hh     = consumer credit
+#   mortdebt_per_hh = home mortgages;   totdebt_per_hh = home mortgages + consumer credit
+#   totassets_per_hh = net worth + totdebt_per_hh (so assets − debt matches the CIW wealth anchor)
+function liquidity_anchors()
+    a = retrieve_rgdp()
+    a[!, "grossliq_per_hh"] = a.liquid_per_hh .+ a.stocks_per_hh
+    a[!, "debt_per_hh"]     = a.pdebt_per_hh
+    a[!, "liquid_per_hh"]   = a.liquid_per_hh .+ a.stocks_per_hh .- a.pdebt_per_hh
+    a[!, "illiquid_per_hh"] = a.real_estate_per_hh .- a.hdebt_per_hh .+ a.business_per_hh
+    a[!, "mortdebt_per_hh"] = a.hdebt_per_hh
+    a[!, "totdebt_per_hh"]  = a.hdebt_per_hh .+ a.pdebt_per_hh
+    a[!, "totassets_per_hh"] = a.wealth_per_hh .+ a.totdebt_per_hh   # assets − debt = the CIW wealth anchor
+    return a
+end
+# With income in the measure set (consumption × income × liquid, Structures_replication_liquidity_income.jl)
+# the income-only surveys CPS, CPS2 and SIPP1–3 enter as in the paper; otherwise only PSID, SCF, CEX.
+function liquidity_files()
+    f = retrieve_data_files()
+    "income" in TR_MEASURES || filter!(kv -> kv.first in ("SCF", "PSID", "CEX"), f)
+    for k in ("SCF", "PSID", "CEX")
+        f[k] = joinpath(DATA_PROCESSING, "$(k)_liq.csv")
+    end
+    return f
+end
+const obs_data = TR_LIQUIDITY ?
+    ObservedData(files = liquidity_files(), gdp_series = liquidity_anchors(), agg_data = retrieve_aggregate_data(TR_AGG_SHEET)) :
+    ObservedData(agg_data = retrieve_aggregate_data(TR_AGG_SHEET))
