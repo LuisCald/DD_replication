@@ -107,6 +107,10 @@ const TR_DEBT_ATOM = TR_LIQUIDITY && "debt" in TR_MEASURES
 # get the same treatment. Total assets have no atom: 4–7% exact zeros at the bottom, a flat stretch for rearrangement.
 const TR_LIQ_ATOMS = TR_LIQUIDITY ? intersect(["debt", "illiquid", "totdebt", "mortdebt"], TR_MEASURES) : String[]
 length(TR_LIQ_ATOMS) <= 1 || error("only one atom measure per model is supported (issue #1): $(TR_LIQ_ATOMS)")
+# Known lower bound (Oct 19): gross liquid assets, total assets and illiquid wealth are >= 0, but without the atom
+# treatment the smooth fit dips below zero in the bottom decile (2-19% of households at or near zero). Their quantile
+# functions are cut at 0 in the reconstruction (ModelOptions.nonnegative_measures; no re-estimation needed).
+const TR_NONNEG = TR_LIQUIDITY ? setdiff(intersect(["grossliq", "totassets", "illiquid"], TR_MEASURES), TR_LIQ_ATOMS) : String[]
 # Zero share carried in the state (participation_in_state; tag " pis") for the atom measures of the liquidity and
 # debt products and for the stocks item (re-estimated Oct 18). The other DFA items (real estate, mortgages,
 # consumer credit, pensions) keep the published treatment (share interpolated between SCF waves outside the
@@ -154,6 +158,7 @@ const model_options = ModelOptions(
     measures          = TR_MEASURES,
     atom_measures     = !isempty(TR_LIQ_ATOMS) ? TR_LIQ_ATOMS : (isempty(TR_ITEM) || !TR_ATOM) ? String[] : [TR_ITEM],
     positive_scale_measures = TR_POSSCALE ? ["liquid"] : String[],
+    nonnegative_measures    = TR_NONNEG,      # reconstruction only: quantile functions cut at 0
     rearrange_quantiles     = TR_LIQUIDITY || TR_NEW_ITEM,   # liquidity/debt products and the stocks item: rearrange non-monotone quantile functions (flat regions, zero mass); reconstruction only. Other items: published behavior
     participation_in_state  = TR_PIS,         # zero share observed and tracked quarterly by the model (tag " pis")
     compare_to_other_est = get(ENV, "DD_COMPARE", "0") == "1",   # post-estimation: compare to the robustness runs (recon_missing2, corr_outsample)

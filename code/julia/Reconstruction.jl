@@ -1116,6 +1116,7 @@ blocks as vectors or matrices (coefficients × time). `nothing`, and no change, 
 the option is off — the published runs never take this path.
 """
 function split_atom_slot!(split_pcfs, measures)
+    register_nonneg_blocks!(split_pcfs, measures)   # every reconstruction entry point passes through here
     isempty(model_options.atom_measures) && return nothing
     (hasproperty(model_options, :participation_in_state) && model_options.participation_in_state) || return nothing
     a = findfirst(==(model_options.atom_measures[1]), sort(String.(measures)))
@@ -2561,10 +2562,47 @@ end
 
 
 function eval_quantile_function(coefficients, order, u)
-    if hasproperty(model_options, :rearrange_quantiles) && model_options.rearrange_quantiles
-        return rearranged_quantile(coefficients, order, u)
+    v = (hasproperty(model_options, :rearrange_quantiles) && model_options.rearrange_quantiles) ?
+        rearranged_quantile(coefficients, order, u) : eval_quantile_raw(coefficients, order, u)
+    if hasproperty(model_options, :nonnegative_measures) && !isempty(model_options.nonnegative_measures) &&
+       hash(coefficients) in _NONNEG_KEYS[]
+        return max(v, 0.0)        # asinh scale: asinh(x/mean) >= 0  <=>  x >= 0
     end
-    return eval_quantile_raw(coefficients, order, u)
+    return v
+end
+
+# ── Known lower bound of the support (ModelOptions.nonnegative_measures; Oct 2026) ────────────────────────────
+# Measures known to be >= 0 without the zero-mass treatment (gross liquid assets, total assets): the smooth quantile
+# fit dips below zero in the bottom decile (households at or near zero). Their quantile functions are cut at 0, a
+# projection onto the support like the rearrangement. eval_quantile_function does not know which measure a
+# coefficient vector belongs to, so every reconstruction entry point registers the content hashes of those measures'
+# coefficient vectors (one per quarter) here; vectors and views of equal content hash alike. Copy-on-write, so the
+# hot path reads without a lock. Published runs (empty option) never register or check.
+const _NONNEG_KEYS = Ref(Set{UInt64}())
+const _NONNEG_LOCK = ReentrantLock()
+
+function register_nonneg_blocks!(split_pcfs, measures)
+    (hasproperty(model_options, :nonnegative_measures) && !isempty(model_options.nonnegative_measures)) || return nothing
+    ms = sort(String.(measures))
+    keys_new = UInt64[]
+    for (m, meas) in enumerate(ms)
+        meas in model_options.nonnegative_measures || continue
+        B = split_pcfs[m]
+        if ndims(B) == 1
+            push!(keys_new, hash(B))
+        else
+            for t in axes(B, 2)
+                push!(keys_new, hash(view(B, :, t)))
+            end
+        end
+    end
+    isempty(keys_new) && return nothing
+    lock(_NONNEG_LOCK) do
+        s = length(_NONNEG_KEYS[]) > 200_000 ? Set{UInt64}() : copy(_NONNEG_KEYS[])
+        union!(s, keys_new)
+        _NONNEG_KEYS[] = s
+    end
+    return nothing
 end
 
 function eval_quantile_raw(coefficients, order, u)

@@ -2207,6 +2207,7 @@ function export_functional_data(data_vector, ty, data_name, type, obs_data, func
 
     select_series = select(gdp_series, correction_names)
     split_pcfs = [data_pcf[I, :] for I in Iterators.partition(axes(data_pcf, 1), grid_pcf)]  # split by measure 
+    register_nonneg_blocks!(split_pcfs, measures)   # nonnegative_measures: their quantile functions are cut at 0
 
     # ── Atom (semicontinuous) measures: π and holder-YW series on this block's
     #    time axis (gdp_series is filtered to [tmin, tmax], aligned with the
@@ -2908,6 +2909,7 @@ function get_implicate!(data_vector, q_dict, draw, data_name, type, obs_data, fu
 
     select_series = select(gdp_series, correction_names)
     split_pcfs = [data_pcf[I, :] for I in Iterators.partition(axes(data_pcf, 1), grid_pcf)]  # split by measure 
+    register_nonneg_blocks!(split_pcfs, measures)   # nonnegative_measures: their quantile functions are cut at 0
 
     # Atom (zero-mass) measures: the same mixture treatment as export_functional_data (Oct 2026). π from the
     # state under participation_in_state (split_atom_slot! also zeroes the slot), else the surveys' interpolated
