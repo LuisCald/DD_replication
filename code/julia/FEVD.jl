@@ -157,6 +157,11 @@ function fevd_dist_vs_agg(
     grid_points_pcf = select_grid_points(grid_data_size_pcf)
     intervals = vcat([0.0] .+ 1e-6, grid_points_pcf)
 
+    # participation_in_state: the atom block's last slot is the response of logit(π), not an order-11 Legendre
+    # coefficient — integrate that block over orders 0..grid_pcf-2 only (nothing changes without atom measures)
+    pis_m = (!isempty(model_options.atom_measures) && hasproperty(model_options, :participation_in_state) &&
+             model_options.participation_in_state) ? findfirst(==(model_options.atom_measures[1]), sort(String.(measures))) : nothing
+
     # We need to generate new data_pcf, which are the average quantiles over the intervals (e.g., deciles)
     for h in 1:horizon
         for s in 1:r+q
@@ -172,7 +177,7 @@ function fevd_dist_vs_agg(
                         # integral, _ = quadgk(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(split_pcfs[m][:, h, s], grid_pcf - 1, u))[1] .* select_series[s, correction_names[m]], intervals[i], intervals[i+1], rtol=1e-8)
                         # integral, _ = quadgk(u -> eval_quantile_function(split_pcfs[m], grid_pcf - 1, u)[1], intervals[i], intervals[i+1], rtol=1e-8)
                         # Pure polynomial integrand → exact via the closed-form Legendre integrals
-                        integral = sum(split_pcfs[m][o+1] * (integrate_legendre_polynomial(o, intervals[i+1]) - integrate_legendre_polynomial(o, intervals[i])) for o in 0:grid_pcf-1)
+                        integral = sum(split_pcfs[m][o+1] * (integrate_legendre_polynomial(o, intervals[i+1]) - integrate_legendre_polynomial(o, intervals[i])) for o in 0:(m == pis_m ? grid_pcf - 2 : grid_pcf - 1))
 
                         # Undo treatment of data => gives us average quantile within the interval
                         new_data_pcf[m][i, s, h] = integral / (intervals[i+1] - intervals[i]) #reverse_inverse_hyperbolic_sine(integral)[1] .* select_series[t, correction_names[m]] #./ (intervals[i+1] - intervals[i])

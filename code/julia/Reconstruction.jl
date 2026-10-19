@@ -157,6 +157,28 @@ function reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids,
         df_avg[!, "time"] = collect(dts)
         CSV.write(save_dir * "/$(ds)_coefficients_average.csv", select(df_avg, "time", :))
     end
+    # Runs with an atom (zero-mass) measure: say what the coefficient columns are (Oct 2026). Layout: copula
+    # block first, then one block of grid_pcf per measure in sorted order; under participation_in_state the
+    # atom block's LAST column is logit(share of zeros), not a Legendre coefficient. Not written otherwise.
+    if !isempty(model_options.atom_measures) && !isempty(data_sources)
+        meas_s = sort(String.(model_options.measures))
+        K = model_options.estimator.grid_pcf
+        n_coeff = size(X_dict["normal"][1], 1)
+        cop_rows = n_coeff - length(meas_s) * K
+        am = model_options.atom_measures[1]
+        a = findfirst(==(am), meas_s)
+        pis = hasproperty(model_options, :participation_in_state) && model_options.participation_in_state
+        meta = DataFrame(key = String[], value = String[])
+        push!(meta, ("measures (block order)", join(meas_s, ",")))
+        push!(meta, ("copula columns", "x1-x$(cop_rows)"))
+        for (j, m) in enumerate(meas_s)
+            push!(meta, ("$(m) marginal columns", "x$(cop_rows + (j - 1) * K + 1)-x$(cop_rows + j * K)"))
+        end
+        push!(meta, ("atom measure", am))
+        push!(meta, ("participation_in_state", string(pis)))
+        pis && a !== nothing && push!(meta, ("logit share of zeros column", "x$(cop_rows + a * K)"))
+        CSV.write(save_dir * "/coefficients_meta.csv", meta)
+    end
     end  # !state_draw
 
 
@@ -803,8 +825,10 @@ function perform_proof_of_concept_reconstruction(df, source, years, gdp_series, 
                     end
                 end
 
-                # Integration (max_order truncates Legendre series for smoothing)
-                integrate_quantile_functions!(new_data_pcf, split_pcfs, grid_pcf, intervals, correction_vec; max_order = max_order)
+                # Integration (max_order truncates Legendre series for smoothing); participation_in_state: π from the slot
+                sp = split_atom_slot!(split_pcfs, measures)
+                integrate_quantile_functions!(new_data_pcf, split_pcfs, grid_pcf, intervals, correction_vec; max_order = max_order,
+                    atom_m = sp === nothing ? nothing : sp[1], atom_π = sp === nothing ? nothing : sp[2])
                 dv[2] = vcat([new_data_pcf[m] for m in eachindex(new_data_pcf)]...)
 
                 # Integrate densities
@@ -1083,6 +1107,100 @@ function atom_copula_cell_masses(A::AbstractArray{<:Real,3}, holder_yw::Abstract
 end
 
 """
+    split_atom_slot!(split_pcfs, measures) -> (atom_dim, π) or nothing
+
+Under `participation_in_state` the atom measure's marginal block carries logit(π) (share of zeros) in its LAST
+slot. Returns the block index and π per column (NaN where unobserved) and ZEROES the slot in `split_pcfs`, so no
+caller evaluates it as a Legendre coefficient (the holders' quantile function uses orders 0..grid_pcf-2). Accepts
+blocks as vectors or matrices (coefficients × time). `nothing`, and no change, when there is no atom measure or
+the option is off — the published runs never take this path.
+"""
+function split_atom_slot!(split_pcfs, measures)
+    isempty(model_options.atom_measures) && return nothing
+    (hasproperty(model_options, :participation_in_state) && model_options.participation_in_state) || return nothing
+    a = findfirst(==(model_options.atom_measures[1]), sort(String.(measures)))
+    a === nothing && return nothing
+    B = split_pcfs[a]
+    lπ = ndims(B) == 1 ? [B[end]] : B[end, :]
+    ndims(B) == 1 ? (B[end] = 0.0) : (B[end, :] .= 0.0)
+    return (a, [isnan(x) ? NaN : 1 / (1 + exp(-x)) for x in lπ])
+end
+
+# ── Bootstrap draws for atom / positive-part measures (used by estimate_confidence_intervals!) ──
+boot_special_measure(meas) = String(meas) in model_options.atom_measures ||
+    (hasproperty(model_options, :positive_scale_measures) && String(meas) in model_options.positive_scale_measures)
+
+"""
+    boot_special_marginal!(coef_boot, sub_boot_dict, rows, count, s, non_missing, meas, avg_aggr, source, yr,
+                           grid_pcf, estimator, intervals, integral_pcf_grid)
+
+One bootstrap draw's marginal coefficients for an atom or positive-part measure, through the point-data
+transform `treat_quantile_functions` (positive-part anchoring, conditional fit on holders, logit(π̂) in the last
+slot under `participation_in_state`). SCF waves before 1983 average the five implicates, like the inline branch;
+later SCF waves pool them, also like the inline branch. Also fills the draw's decile means for the bands
+(mixture means for atom measures; the logit slot is never evaluated as a Legendre coefficient).
+"""
+function boot_special_marginal!(coef_boot, sub_boot_dict, rows, count, s, non_missing, meas, avg_aggr, source, yr,
+                                grid_pcf, estimator, intervals, integral_pcf_grid)
+    is_atom = String(meas) in model_options.atom_measures
+    pis = is_atom && hasproperty(model_options, :participation_in_state) && model_options.participation_in_state
+    fit(df) = begin
+        out = treat_quantile_functions(copy(df), meas, grid_pcf, zeros(grid_pcf), avg_aggr, estimator; atom = is_atom)
+        is_atom ? (Vector{Float64}(out.coefs), Float64(out.π)) : (Vector{Float64}(vec(out)), NaN)
+    end
+    local cf, πb
+    if occursin("SCF", source) && yr < 1983
+        parts = [fit(filter(x -> x.impnum == ip, non_missing)) for ip in 1:5]
+        cf = mean(first.(parts))
+        πb = mean(last.(parts))
+    else
+        cf, πb = fit(non_missing)
+    end
+    coef_boot[rows, count, s] .= cf
+    q = copy(cf)
+    pis && (q[end] = 0.0)
+    for i in 1:integral_pcf_grid
+        sub_boot_dict[meas]["quantiles"][i, s, count] = try
+            is_atom ? atom_bin_mean(q, grid_pcf - 1, πb, intervals[i], intervals[i+1], avg_aggr) :
+                gauss_legendre_integrate(u -> reverse_inverse_hyperbolic_sine(eval_quantile_function(q, grid_pcf - 1, u))[1] * avg_aggr,
+                    intervals[i], intervals[i+1]) / (intervals[i+1] - intervals[i])
+        catch
+            NaN
+        end
+    end
+    return nothing
+end
+
+# Rearranged mixture for atom measures (rearrange_quantiles; Oct 2026). The mixed quantile function is zero on
+# [0, π] and the holders' conditional quantile function above. When the fitted holders' function starts slightly
+# below zero, those values sit just above the zeros and a decile mean dips below the one before (SCF debt, early
+# quarters). Rearranging the whole mixture on the 10,000-point check grid sorts them below the zeros. Returns
+# `nothing` when the mixture is already monotone, so atom_bin_mean then uses its exact formula, unchanged.
+const _RQA_CACHE = Dict{UInt64,Union{Nothing,Vector{Float64}}}()
+const _RQA_LOCK = ReentrantLock()
+
+function atom_bin_mean_rearranged(coefs_cond, use_order, π, lo, hi, corr)
+    πc = clamp(π, 0.0, 1.0)
+    key = hash(πc, hash(use_order, hash(coefs_cond)))
+    found, vals = lock(_RQA_LOCK) do
+        haskey(_RQA_CACHE, key) ? (true, _RQA_CACHE[key]) : (false, nothing)
+    end
+    if !found
+        g = [(k - 0.5) / _RQ_N for k in 1:_RQ_N]
+        raw = [u <= πc ? 0.0 : eval_quantile_function(coefs_cond, use_order, (u - πc) / (1 - πc)) for u in g]
+        vals = (any(isnan, raw) || issorted(raw)) ? nothing : sort!(raw)
+        lock(_RQA_LOCK) do
+            length(_RQA_CACHE) >= _RQ_MAX && empty!(_RQA_CACHE)
+            _RQA_CACHE[key] = vals
+        end
+    end
+    vals === nothing && return nothing
+    k1 = clamp(floor(Int, lo * _RQ_N) + 1, 1, _RQ_N)          # grid cells whose midpoints lie in (lo, hi]
+    k2 = clamp(floor(Int, hi * _RQ_N + 0.5), k1, _RQ_N)
+    return mean(reverse_inverse_hyperbolic_sine(v)[1] for v in @view vals[k1:k2]) * corr
+end
+
+"""
     atom_bin_mean(coefs_cond, use_order, π, lo, hi, corr)
 
 Average of the mixed quantile function over the population-rank interval
@@ -1093,6 +1211,10 @@ of `integrate_quantile_functions!` for atom measures.
 function atom_bin_mean(coefs_cond::AbstractVector, use_order::Int, π::Real,
     lo::Real, hi::Real, corr::Real)
 
+    if hasproperty(model_options, :rearrange_quantiles) && model_options.rearrange_quantiles
+        r = atom_bin_mean_rearranged(coefs_cond, use_order, π, lo, hi, corr)
+        r === nothing || return r          # nothing = the mixture is already monotone: exact formula below
+    end
     πc = clamp(π, 0.0, 1.0)
     hi <= πc && return 0.0
     lo_eff = max(lo, πc)
@@ -1143,9 +1265,18 @@ function atom_series_at(dates::AbstractVector, meas::AbstractString; prefer::Abs
     π_series = [1 / (1 + exp(-_interp(tnum(d), zx, zy))) for d in dates]
 
     hyw = nothing
-    kh = pick(ATOM_HOLDER_YW)
-    if kh !== nothing && !isempty(ATOM_HOLDER_YW[kh])
-        hd = ATOM_HOLDER_YW[kh]
+    # Holder slices of FULL dimension only (Oct 2026). A survey wave that observes fewer measures records
+    # a shorter slice (e.g. consumption × gross liquid × debt: the SCF never sees consumption, the PSID not
+    # before 1999 — K instead of K² coefficients); the reconstruction needs the K² slice of the other two.
+    hstore = Dict(k => Dict(d => v for (d, v) in ATOM_HOLDER_YW[k]) for k in keys(ATOM_HOLDER_YW) if endswith(k, "/" * meas))
+    Lfull = maximum((length(v) for st in values(hstore) for v in values(st)); init = 0)
+    for st in values(hstore)
+        filter!(dv -> length(dv.second) == Lfull, st)
+    end
+    filter!(kv -> !isempty(kv.second), hstore)
+    kh = pick(hstore)
+    if kh !== nothing && !isempty(hstore[kh])
+        hd = hstore[kh]
         hobs = sort(collect(keys(hd)); by = tnum)
         hx = [tnum(d) for d in hobs]
         H = Matrix{Float64}(undef, length(hd[hobs[1]]), length(dates))
@@ -1471,13 +1602,19 @@ function move_data_to_dict(df, periods, gdp_series, model_options, time_p, data_
             end
         end
 
-        integrate_quantile_functions!(new_data_pcf, split_pcfs, grid_pcf, intervals, correction_vec; max_order = max_order)
+        # participation_in_state: π from the atom block's last slot (zeroed here; no-op otherwise)
+        sp = split_atom_slot!(split_pcfs, measures)
+        sp_m, sp_π = sp === nothing ? (nothing, nothing) : sp
+
+        integrate_quantile_functions!(new_data_pcf, split_pcfs, grid_pcf, intervals, correction_vec; max_order = max_order,
+            atom_m = sp_m, atom_π = sp_π)
 
         # Share-group integration: bot50/mid40/top10
         share_spec = [0.5, 0.4, 0.1]
         share_intervals = vcat([0.0 + 1e-6], cumsum(share_spec)[1:end-1], [1.0 - 1e-6])
         share_data_pcf = [zeros(length(share_spec), T) for _ in 1:D]
-        integrate_quantile_functions!(share_data_pcf, split_pcfs, grid_pcf, share_intervals, correction_vec; max_order = max_order)
+        integrate_quantile_functions!(share_data_pcf, split_pcfs, grid_pcf, share_intervals, correction_vec; max_order = max_order,
+            atom_m = sp_m, atom_π = sp_π)
 
         # We need to generate new data_pcf, which are the average quantiles over the intervals
         # for m in eachindex(new_data_pcf)
@@ -2171,7 +2308,14 @@ function estimate_confidence_intervals!(data, objects, series, years, time_dict,
                             # Find multiplier s.t. average in FRED is equal to average in the sample
                             avg_aggr = avg_aggr_cache[(yr, actual_period, meas)]
 
-                            if occursin("SCF", source)
+                            # Atom / positive-part measures (Oct 2026): the draws go through the SAME transform as the
+                            # point data (treat_quantile_functions: scaling, conditional fit, logit(π̂) slot), so Σ̂ is
+                            # the noise of the coefficients the model actually sees. Every other measure keeps the
+                            # published inline code below, so its bootstrap stays bit-identical.
+                            if boot_special_measure(meas)
+                                boot_special_marginal!(coef_boot, sub_boot_dict, pcf_rows[m], count, s, non_missing, meas,
+                                    avg_aggr, source, yr, grid_pcf, estimator, intervals, integral_pcf_grid)
+                            elseif occursin("SCF", source)
                                 # Over imputations
                                 if yr < 1983
                                     imp_boot = zeros(grid_pcf, 5)
@@ -2417,11 +2561,51 @@ end
 
 
 function eval_quantile_function(coefficients, order, u)
+    if hasproperty(model_options, :rearrange_quantiles) && model_options.rearrange_quantiles
+        return rearranged_quantile(coefficients, order, u)
+    end
+    return eval_quantile_raw(coefficients, order, u)
+end
+
+function eval_quantile_raw(coefficients, order, u)
     val = 0.0
     @inbounds for j in 0:order
         val += coefficients[j+1] * Q_m(j, u)
     end
     return val
+end
+
+# ── Rearrangement of quantile functions (ModelOptions.rearrange_quantiles; Oct 2026) ─────────────────────────
+# Chernozhukov, Fernández-Val & Galichon (2010): sort the function's values on a fine grid. The paper verifies
+# monotonicity ex post on 10,000 points and names rearrangement as the remedy for measures with a flat region in
+# the support (net liquid wealth near zero). Each coefficient vector is checked once on that grid: if its quantile
+# function is already monotone it is flagged and evaluated exactly as before (rearrangement is the identity);
+# otherwise its sorted values are cached and evaluated by linear interpolation. Every consumer goes through
+# eval_quantile_function, so decile means, shares, cross-conditional means, recession groups, bands and micro
+# data all see the same rearranged function.
+const _RQ_N = 10_000
+const _RQ_CACHE = Dict{UInt64,Union{Nothing,Vector{Float64}}}()
+const _RQ_LOCK = ReentrantLock()
+const _RQ_MAX = 4_000          # cached non-monotone functions (≈ 80 kB each); cleared when full
+
+function rearranged_quantile(coefficients, order, u)
+    key = hash(order, hash(coefficients))   # content hash (vectors and views of equal values hash alike)
+    found, vals = lock(_RQ_LOCK) do
+        haskey(_RQ_CACHE, key) ? (true, _RQ_CACHE[key]) : (false, nothing)
+    end
+    if !found
+        raw = [eval_quantile_raw(coefficients, order, (k - 0.5) / _RQ_N) for k in 1:_RQ_N]
+        vals = (any(isnan, raw) || issorted(raw)) ? nothing : sort!(raw)
+        lock(_RQ_LOCK) do
+            length(_RQ_CACHE) >= _RQ_MAX && empty!(_RQ_CACHE)
+            _RQ_CACHE[key] = vals
+        end
+    end
+    vals === nothing && return eval_quantile_raw(coefficients, order, u)   # monotone: exact, unchanged
+    x = clamp(u * _RQ_N + 0.5, 1.0, Float64(_RQ_N))
+    i = min(floor(Int, x), _RQ_N - 1)
+    w = x - i
+    return (1 - w) * vals[i] + w * vals[i+1]
 end
 
 
@@ -2609,8 +2793,10 @@ function perform_proof_of_concept_Γ_comparison(MV, df_vec, gdp_series, time_p, 
                 end
             end
 
-            # Integration 
-            integrate_quantile_functions!(new_data_pcf, split_pcfs, grid_pcf, intervals, correction_vec)
+            # Integration (participation_in_state: π from the slot)
+            sp = split_atom_slot!(split_pcfs, measures)
+            integrate_quantile_functions!(new_data_pcf, split_pcfs, grid_pcf, intervals, correction_vec;
+                atom_m = sp === nothing ? nothing : sp[1], atom_π = sp === nothing ? nothing : sp[2])
             dv[2] = vcat([new_data_pcf[m] for m in eachindex(new_data_pcf)]...)
 
             # Integrate densities 

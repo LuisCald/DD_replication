@@ -31,6 +31,12 @@ function verify_monotonicity_X(X::AbstractMatrix, measures, estimator;
     for (m, meas) in enumerate(measures)
         rows = (cop_rows + (m - 1) * grid_pcf + 1):(cop_rows + m * grid_pcf)
         coefs = X[rows, :]                                   # grid_pcf × T
+        # participation_in_state: the atom block's last slot is logit(π), not a Legendre coefficient
+        if String(meas) in model_options.atom_measures && hasproperty(model_options, :participation_in_state) &&
+           model_options.participation_in_state
+            coefs = copy(coefs)
+            coefs[end, :] .= 0.0
+        end
         nviol = 0
         nseries = 0
         worst = 0.0
