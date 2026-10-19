@@ -226,7 +226,7 @@ fin_df  = fin_df.rename(columns={"weight_adj": "weight"})
 
 fin_df = fin_df.drop(columns=["bin", "RF", "Fmin", "source"])
 # fin_df.to_csv("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF.csv", index=False)
-fin_df.to_csv("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF_new.csv", index=False)
+fin_df.to_csv("/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/SCF.csv", index=False)   # the SCF file the model reads
 
 
 # # Plotting the top 1% wealth
