@@ -164,3 +164,9 @@ code/julia/examples/Structures_stochastic_trend.jl
 code/julia/examples/Structures_hp_control.jl
 # belongs to another project
 code/python/clean_brake_data.py
+
+# Local working folders (cluster scripts, review pages, factor files, backups): never committed
+marvin/
+review/
+ind factors/
+archive/
