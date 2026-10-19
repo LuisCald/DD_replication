@@ -1434,7 +1434,11 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
             # Case of removing wealth/income/other observations during the housing cycle
 
             # First, find wealth indices
-            meas_to_remove = tag[end-5:end]
+            # the muted measure is the last word of the tag before any DD_TAG suffix (Structures_transfer.jl appends
+            # DD_TAG last, e.g. " ... excluding housing cycle wealth scf22")
+            _dt = get(ENV, "DD_TAG", "")
+            _t0 = (!isempty(_dt) && endswith(tag, _dt)) ? tag[1:end-length(_dt)] : tag
+            meas_to_remove = String(split(_t0)[end])
             meas_to_remove_loc = findfirst(x -> x == meas_to_remove, measures)
             cop_end = grid_cop^length(measures) - (grid_cop + (length(measures) - 1) * (grid_cop - 1))
             meas_to_remove_ids = (cop_end+grid_pcf*(meas_to_remove_loc-1)+1):(cop_end+grid_pcf*meas_to_remove_loc)
@@ -1473,7 +1477,11 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
             # Case of removing wealth/income/other observations during the housing cycle
 
             # First, find wealth indices
-            meas_to_remove = tag[end-5:end]
+            # the muted measure is the last word of the tag before any DD_TAG suffix (Structures_transfer.jl appends
+            # DD_TAG last, e.g. " ... excluding housing cycle wealth scf22")
+            _dt = get(ENV, "DD_TAG", "")
+            _t0 = (!isempty(_dt) && endswith(tag, _dt)) ? tag[1:end-length(_dt)] : tag
+            meas_to_remove = String(split(_t0)[end])
             meas_to_remove_loc = findfirst(x -> x == meas_to_remove, measures)
             cop_end = grid_cop^length(measures) - (grid_cop + (length(measures) - 1) * (grid_cop - 1))
             meas_to_remove_ids = (cop_end+grid_pcf*(meas_to_remove_loc-1)+1):(cop_end+grid_pcf*meas_to_remove_loc)

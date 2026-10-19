@@ -650,6 +650,21 @@ function plot_forecasts(data_dt, data_dt_r, ty, func_data, obs_data, avg_series,
                         Plots.plot()
                         intd = plot_name == "CEX" || occursin("SIPP", plot_name) ? 20 : 40
 
+                        # Oct 2026 (Fig. 6): the CEX data band (95% sampling interval) in dark grey, drawn first so the
+                        # lines and dots sit on top; the less-data line is dark blue and dashed (greyscale-friendly),
+                        # drawn last.
+                        if plot_name == "CEX"
+                            Plots.plot!(xaxis[cond],
+                                dist[1][source]["lb"][obj][meas][cond],
+                                fillrange=dist[1][source]["ub"][obj][meas][cond],
+                                fillalpha=0.4,
+                                fillcolor=RGB(0.35, 0.35, 0.35),
+                                la=0.0,
+                                lw=4, dpi=500,
+                                label=""
+                            )
+                        end
+
                         # if data_bounds != false
                         Plots.plot!(p_xaxis,
                             p_data,
@@ -664,35 +679,13 @@ function plot_forecasts(data_dt, data_dt_r, ty, func_data, obs_data, avg_series,
                             legendfontsize=16,
                             guidefontsize=16,
                             lc=:red,
-                            lw=4,
+                            lw=6,
                             # yerror = (dist[1][source][obj][meas] - dist[1][source]["lb"][obj][meas], dist[1][source]["ub"][obj][meas] - dist[1][source][obj][meas]),
                             # label=L"\textrm{Baseline}"
                             label=""
                         )
 
-                        # define difference condition 
-                        # diff_cond = findall(dist[1][source][obj][meas] .- dist[2][source][obj][meas] .!= 0)
-
-                        Plots.plot!(p_xaxis,
-                            p_data2,
-                            lc=:blue,
-                            ls=:dot,
-                            la=0.5,
-                            lw=4,
-                            # label=L"\textrm{Less\,\,data}"
-                            label=""
-                        )
-
                         if plot_name == "CEX"
-                            Plots.plot!(xaxis[cond],
-                                dist[1][source]["lb"][obj][meas][cond],
-                                fillrange=dist[1][source]["ub"][obj][meas][cond],
-                                fillalpha=0.35,
-                                fillcolor=:red,
-                                la=0.0,
-                                lw=4, dpi=500,
-                                label=""
-                            )
                             Plots.scatter!(xaxis[cond], # findall(!isnan, top[source * "_obs"][obj][meas])
                                 c_data,
                                 marker=:dot,
@@ -727,6 +720,15 @@ function plot_forecasts(data_dt, data_dt_r, ty, func_data, obs_data, avg_series,
                             mc=:white, msc=:black, msw=5,
                             la=0.5,
                             lw=4, dpi=500,
+                            label=""
+                        )
+
+                        # Less data (drawn on top)
+                        Plots.plot!(p_xaxis,
+                            p_data2,
+                            lc=RGB(0.043, 0.165, 0.435),
+                            ls=:dash,
+                            lw=5,
                             label=""
                         )
 
