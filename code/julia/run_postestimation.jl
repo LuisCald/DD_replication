@@ -381,4 +381,12 @@ end
 
 end  # run_full
 
+# For the Python step of the Marvin job (5_Code/marvin/postestimation.sbatch): this run's results folder and measures.
+let jobfile = BASE_PATH * "/logs/postestimation_" * get(ENV, "SLURM_JOB_ID", "local") * ".txt"
+    mkpath(dirname(jobfile))
+    open(jobfile, "w") do io
+        println(io, BASE_PATH * "/7_Results/" * m_label * tag * "/from_mcmc/data")
+        println(io, join(sort(measures), ","))
+    end
+end
 @info "═══ Stages 3-5 finished ═══"

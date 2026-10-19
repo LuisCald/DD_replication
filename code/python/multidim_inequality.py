@@ -1,9 +1,16 @@
 """ Generating multidimensional lorenz and gini-coefficients"""
+import os
 import MEILC_MEGC as megcmeilc
 import pandas as pd
 
+# Paths (Oct 2026): the results folder of the run comes from DD_RESULTS_DIR (written by run_postestimation.jl and
+# passed on by the Marvin job), the project root from DD_ROOT (default: the working directory). The defaults are the
+# published consumption × income × wealth layout.
+ROOT = os.environ.get("DD_ROOT", os.getcwd())
+RES = os.environ.get("DD_RESULTS_DIR", os.path.join(ROOT, "7_Results", "consum_and_income_and_wealth", "from_mcmc", "data"))
+
 # Import data 
-data = pd.read_csv(r"/Users/lc/Dropbox/Distributional_Dynamics/7_Results/consum_and_income_and_wealth/from_mcmc/data/SCF_micro_data_A non-diag_.csv")
+data = pd.read_csv(os.path.join(RES, "SCF_micro_data_A non-diag_.csv"))
 # data = data.dropna(subset=["cop_share"])
 # data = data[data["cop_share"] >= 0]
 # data = data[data["time"] >= "1999-Q2"]
@@ -38,11 +45,12 @@ def generate_and_export_mv_gini(data, combinations):
         grid1, grid2, var1, var2 = combo
         
         if var1 == 'income' and var2 == 'consum':
-            data = pd.read_csv(r"/Users/lc/Dropbox/Distributional_Dynamics/7_Results/consum_and_income_and_wealth/from_mcmc/data/CEX_all_micro_data_A non-diag_.csv")
+            cex = os.path.join(RES, "CEX_all_micro_data_A non-diag_.csv")   # older runs pooled CEX as "CEX_all"
+            data = pd.read_csv(cex if os.path.exists(cex) else os.path.join(RES, "CEX_micro_data_A non-diag_.csv"))
         elif var1 == 'wealth' and var2 == 'consum':
-            data = pd.read_csv(r"/Users/lc/Dropbox/Distributional_Dynamics/7_Results/consum_and_income_and_wealth/from_mcmc/data/PSID_micro_data_A non-diag_.csv")
+            data = pd.read_csv(os.path.join(RES, "PSID_micro_data_A non-diag_.csv"))
         else:
-            data = pd.read_csv(r"/Users/lc/Dropbox/Distributional_Dynamics/7_Results/consum_and_income_and_wealth/from_mcmc/data/SCF_micro_data_A non-diag_.csv")
+            data = pd.read_csv(os.path.join(RES, "SCF_micro_data_A non-diag_.csv"))
         
         data = data.dropna(subset=["cop_share"])
         data = data[data["cop_share"] >= 0]
@@ -78,7 +86,7 @@ def generate_and_export_mv_gini(data, combinations):
     gini_results_df = pd.DataFrame(gini_results)
     
     # Export to CSV
-    gini_results_df.to_csv('/Users/lc/Dropbox/Distributional_Dynamics/2_Data_processing/multivariate_gini_results.csv', index=False)
+    gini_results_df.to_csv(os.path.join(ROOT, '2_Data_processing', 'multivariate_gini_results.csv'), index=False)
 
 generate_and_export_mv_gini(data, combinations)
 
