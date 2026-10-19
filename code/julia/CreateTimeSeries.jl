@@ -411,7 +411,9 @@ one change, as in examples/Structures_replication_*.jl. Old baseline: "<measures
 """
 function comparison_folder(meas_folder, current_tag, esttag)
     if startswith(current_tag, " transfer")
-        b = current_tag
+        # Structures_transfer.jl appends DD_TAG last (after the DD_MUTE suffix): look for "<base><change><DD_TAG>"
+        dt = get(ENV, "DD_TAG", "")
+        b = (!isempty(dt) && endswith(current_tag, dt)) ? current_tag[1:end-length(dt)] : current_tag
         t = esttag == "every 4 years" ? b * " every 4 years" :
             esttag == "excluding recent 20 quarters" ? b * " excluding recent 20 quarters" :
             esttag == "excluding housing cycle wealth" ? b * " excluding housing cycle wealth" :
@@ -420,7 +422,7 @@ function comparison_folder(meas_folder, current_tag, esttag)
             esttag == "more AF" ? b * " 15 af" :
             esttag == "less DF and AF" ? replace(b, r" \d+ factors" => " 3 factors") * " 3 af" :
             b * " " * esttag
-        return meas_folder * t
+        return meas_folder * t * ((!isempty(dt) && endswith(current_tag, dt)) ? dt : "")
     end
     return meas_folder * " " * esttag
 end
@@ -1081,34 +1083,31 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                         linewidth = 0, linealpha = 0)   # no outline: a seamless band
                                 end
 
+                                # Oct 2026 (Fig. 7, as Fig. 6): CEX data band (95% sampling interval) in dark grey, drawn
+                                # first so the lines and dots sit on top; the less-data line is dark blue and dashed
+                                # (greyscale-friendly) and drawn last.
+                                if ty == "normal" && plot_name == "CEX"
+                                    Plots.plot!(xaxis[cond_cex],
+                                        sum(qu_o[2][g..., cond_cex], dims=1)' ./ n_lines,
+                                        fillrange=sum(qu_o[3][g..., cond_cex], dims=1)' ./ n_lines,
+                                        la=0.0,
+                                        fillalpha=0.4,
+                                        fillcolor=RGB(0.35, 0.35, 0.35),
+                                        dpi=500,
+                                        label=""
+                                    )
+                                    data_ci_series = length(Plots.current().series_list)   # hidden in the credible-band version (one band per panel)
+                                end
+
                                 Plots.plot!(s_axis,
                                     cex_all_est,
                                     lc=:red,
                                     # label=L"\textrm{Baseline}",
                                     label="",
-                                    lw=4, dpi=500, ls=:solid,
+                                    lw=6, dpi=500, ls=:solid,
                                     legend=false
                                 )
 
-                                Plots.plot!(s_axis,
-                                    outside_est,
-                                    ylabel=k != "bottom" ? "" :
-                                           M == "Consum" ? L"\textrm{Consumption\, \, rel.\,  to\,\,  average}" : L"\textrm{%$(M)\, \, rel.\,  to\,\,  average}",
-                                    lc=:blue,
-                                    xformatter=:latex,
-                                    yformatter=:latex,
-                                    lw=4,
-                                    la=0.5,
-                                    xtickfontsize=16,
-                                    ytickfontsize=16,
-                                    legendfontsize=16,
-                                    guidefontsize=16,
-                                    xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
-                                    legend=:best, # BUG: with twinx(), legend=:outertopright widens the plot in a weird way
-                                    # label=esttag == "7 factors" ? L"\textrm{7 \,\, Factors}" : esttag == "6 factors" ? L"\textrm{6 \,\, Factors}" : esttag == "less factors" ? L"\textrm{Less \,\, Factors}" : esttag == "higher order15" ? L"\textrm{Higher \,\, Order}" : esttag == "less AF" ? L"\textrm{Less \,\,Agg.\,\, Factors}" : esttag == "less DF and AF" ? L"\textrm{Compact\,\, Model}" : esttag == "Γ estimated" ? L"\textrm{Γ\,\, estimated}" : esttag == "Γ all" ? L"\textrm{Γ-10}" : esttag == "more AF" ? L"\textrm{More\,\,Agg.\,\,Factors}" : esttag == "Γ all 85" ? L"\textrm{Γ-12}" : esttag == "PP CEX" ? L"\textrm{\Gamma_{aug}\,\, CEX}" : esttag == "PP SCF" ? L"\textrm{\Gamma_{aug}\,\, SCF}" : esttag == "PP CEX SCF" ? L"\textrm{\Gamma_{aug}\,\, CEX-SCF}" : L"\textrm{Less \,\, Data}",
-                                    label="",
-                                    dpi=500, ls=:dot,
-                                )
 
 
                                 # Perform the within stat thing, once for the data and once for the cycle
@@ -1184,17 +1183,6 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
 
                                     # First plot everything as is 
                                     if plot_name == "CEX"
-                                        Plots.plot!(xaxis[cond_cex],
-                                            c_int_lb(cond_cex),
-                                            fillrange=c_int_ub(cond_cex),
-                                            la=0.0,
-                                            fillalpha=0.35,
-                                            fillcolor=:red,
-                                            dpi=500,
-                                            label=""
-                                        )
-                                        data_ci_series = length(Plots.current().series_list)   # hidden in the credible-band version (one band per panel)
-
                                         Plots.scatter!(xaxis[cond_cex],
                                             c_data(cond_cex),
                                             marker=:dot,
@@ -1240,6 +1228,26 @@ function generate_quantiles_shares_levels_plots(data_dict, ty, func_data, data_n
                                         end
                                     end
                                 end
+
+                                # Less data, drawn on top (axis labels and ticks are set here too)
+                                Plots.plot!(s_axis,
+                                    outside_est,
+                                    ylabel=k != "bottom" ? "" :
+                                           M == "Consum" ? L"\textrm{Consumption\, \, rel.\,  to\,\,  average}" : L"\textrm{%$(M)\, \, rel.\,  to\,\,  average}",
+                                    lc=RGB(0.043, 0.165, 0.435),
+                                    xformatter=:latex,
+                                    yformatter=:latex,
+                                    lw=5,
+                                    xtickfontsize=16,
+                                    ytickfontsize=16,
+                                    legendfontsize=16,
+                                    guidefontsize=16,
+                                    xticks=(s_axis[1:40:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(s_dts[1:40:end])]),
+                                    legend=:best, # BUG: with twinx(), legend=:outertopright widens the plot in a weird way
+                                    # label=esttag == "7 factors" ? L"\textrm{7 \,\, Factors}" : esttag == "6 factors" ? L"\textrm{6 \,\, Factors}" : esttag == "less factors" ? L"\textrm{Less \,\, Factors}" : esttag == "higher order15" ? L"\textrm{Higher \,\, Order}" : esttag == "less AF" ? L"\textrm{Less \,\,Agg.\,\, Factors}" : esttag == "less DF and AF" ? L"\textrm{Compact\,\, Model}" : esttag == "Γ estimated" ? L"\textrm{Γ\,\, estimated}" : esttag == "Γ all" ? L"\textrm{Γ-10}" : esttag == "more AF" ? L"\textrm{More\,\,Agg.\,\,Factors}" : esttag == "Γ all 85" ? L"\textrm{Γ-12}" : esttag == "PP CEX" ? L"\textrm{\Gamma_{aug}\,\, CEX}" : esttag == "PP SCF" ? L"\textrm{\Gamma_{aug}\,\, SCF}" : esttag == "PP CEX SCF" ? L"\textrm{\Gamma_{aug}\,\, CEX-SCF}" : L"\textrm{Less \,\, Data}",
+                                    label="",
+                                    dpi=500, ls=:dash,
+                                )
 
                                 # Two versions of every comparison panel: plain, and "_zoom" with
                                 # a bare inset on the removal window (rows 2-3: the muted window;
