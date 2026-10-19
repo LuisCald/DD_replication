@@ -1,7 +1,7 @@
 **# Cleaning the new wave of the SCF
 use "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022.dta", clear 
 
-// May have to run: max setvar 10000
+set maxvar 10000   // the full public file has more than 5,000 variables
 
 * Generate ID variable 
 rename y1 id 
@@ -36,7 +36,7 @@ save "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022_income.dta"
 use "/Users/lc/Dropbox/Distributional_Dynamics/1_Data/SCF+/SCF_2022_wealth.dta", replace
 drop income
 rename y1 id
-gen wealth = nfin + fin - debt
+gen wealth = nfin + fin - debt - retqliq   // pensions out, as in the SCF+ waves (wealth - pen); see issue #9
 
 * DFA balance-sheet components (SCF summary-extract names) — match the SCF+ block.
 * `stocks` is also a raw var (directly-held equities), so build into a temp and rename.
@@ -62,10 +62,14 @@ gen id = year + id_string
 drop year 
 gen year = 2022 
 
-* Put in 2019 dollars
-foreach var in income wealth stocks real_estate business pension vehicles {
-	replace `var' = `var' * .83
+* Put in 2019 dollars (CPI-U annual averages, FRED CPIAUCSL, as the other surveys' 2019 = 1 factors; issue #9).
+* Balance-sheet values are at the 2022 survey date: CPI 2019 / CPI 2022 = 0.8737.
+* Income refers to 2021:                         CPI 2019 / CPI 2021 = 0.9435.
+* (Before Oct 2026 all were multiplied by .83.)
+foreach var in wealth stocks real_estate business pension vehicles {
+	replace `var' = `var' * 0.8737
 }
+replace income = income * 0.9435
 
 keep id weight income wealth year stocks real_estate business pension vehicles
 

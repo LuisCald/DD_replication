@@ -18,7 +18,8 @@ redefined/added. The CIW files are not touched.
 
 SCF 2022: the processed file lacks the split, so it is built from the Fed's public summary
 extract (rscfp2022.dta, 1_Data/SCF_2022_extract/) with the same definitions and deflated with the
-row's processed-wealth / extract-NETWORTH ratio (the 2019Q4 CPI-U factor):
+row's processed-wealth / extract (NETWORTH − RETQLIQ) ratio (processed 2022 wealth excludes retirement accounts
+since issue #9; the factor converts the extract's dollars to the processed files' 2019 dollars):
   liquid   = liq + cds + savbnd + stocks + nmmf − (ccbal + install + odebt + othloc)
   grossliq = liq + cds + savbnd + stocks + nmmf;   debt = ccbal + install + odebt + othloc
   illiquid = houses − mrthel + oresre + nnresre − resdbt + bond + cashli + vehic + bus
@@ -65,12 +66,13 @@ def scf():
     x["ta22"] = x.asset - x.retqliq
     x["td22"] = x.debt
     x["md22"] = x.mrthel
-    m = d.loc[d.year == 2022, ["id", "wealth"]].merge(x[["id", "networth", "liq22", "ill22", "gl22", "debt22", "ta22", "td22", "md22"]],
+    x["nw22"] = x.networth - x.retqliq
+    m = d.loc[d.year == 2022, ["id", "wealth"]].merge(x[["id", "nw22", "liq22", "ill22", "gl22", "debt22", "ta22", "td22", "md22"]],
                                                       on="id", how="left")
-    ok = m.networth.abs() > 1e4
-    ratio = (m.wealth[ok] / m.networth[ok]).median()
-    spread = (m.wealth[ok] / m.networth[ok]).quantile([0.1, 0.9]).round(4).tolist()
-    print(f"SCF 2022: {m.networth.notna().sum()} of {len(m)} rows matched the extract; deflator {ratio:.4f} (p10/p90 {spread})")
+    ok = m.nw22.abs() > 1e4
+    ratio = (m.wealth[ok] / m.nw22[ok]).median()
+    spread = (m.wealth[ok] / m.nw22[ok]).quantile([0.1, 0.9]).round(4).tolist()
+    print(f"SCF 2022: {m.nw22.notna().sum()} of {len(m)} rows matched the extract; deflator {ratio:.4f} (p10/p90 {spread})")
     idx = d.index[d.year == 2022]
     d.loc[idx, "liquid"] = (m.liq22 * ratio).values
     d.loc[idx, "illiquid"] = (m.ill22 * ratio).values
