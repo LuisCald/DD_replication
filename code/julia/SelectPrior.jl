@@ -661,7 +661,7 @@ function hyper_prioreval(par, priors)
 end
 
 
-function prioreval(par, priors, param_sizes; aggregate_rep=:as_states)
+function prioreval(par, priors, param_sizes; aggregate_rep=:as_states, agg_meas_tight=false)
     """Evaluates the parameters at their prior distribution.
 
     p(A, Π) = p(A) * p(Π)
@@ -713,7 +713,16 @@ function prioreval(par, priors, param_sizes; aggregate_rep=:as_states)
                   all([insupport(priors[3][i], σ²_Ωy[i]) for i in eachindex(σ²_Ωy)]) :
                   all([insupport(priors[3], σ²_Ωy[i]) for i in eachindex(σ²_Ωy)])
         Ω_corr_cond = insupport(priors[4], par[3])
-        Σ_cond = all([insupport(priors[4+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
+        # Σ priors: entry i ↔ priors[4+i]. get_priors pushes one generic prior per dataset × object
+        # (number_of_dfs · n_objs) BEFORE the agg_count tight aggregate priors, but Σ only carries the
+        # ESTIMATED entries (fewer), so under this pairing the aggregate entries land on the loose survey
+        # prior Normal(ϕₘ, 2) and the tight Normal(φ*, 0.02) entries are never read (found 2026-10-21,
+        # aggregate_block_diagnostics.jl: at the mode the aggregate error variances are 0.2–1.4 on
+        # unit-variance series). agg_meas_tight (ModelOptions.agg_meas_prior = :tight) pairs the last
+        # agg_count Σ entries with the tight block instead; default = published behaviour.
+        nh = length(par[5]); q_agg = param_sizes[2][2]; nΣ = length(σ²_Σ)
+        Σ_priors = agg_meas_tight ? vcat(priors[4 .+ (1:nΣ-q_agg)], priors[end-nh-q_agg+1:end-nh]) : priors[4 .+ (1:nΣ)]
+        Σ_cond = all([insupport(Σ_priors[i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
 
         hyper_cond = all([insupport(priors[end-length(par[5])+i], par[5][i]) for i in eachindex(par[5])])
 
@@ -731,7 +740,7 @@ function prioreval(par, priors, param_sizes; aggregate_rep=:as_states)
                             sum([logpdf(priors[3][i], σ²_Ωy[i]) for i in eachindex(σ²_Ωy)]) :
                             sum([logpdf(priors[3], σ²_Ωy[i]) for i in eachindex(σ²_Ωy)])
             log_priorval += logpdf(priors[4], par[3])
-            log_priorval += sum([logpdf(priors[4+i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
+            log_priorval += sum([logpdf(Σ_priors[i], σ²_Σ[i]) for i in eachindex(σ²_Σ)])
 
             # Log-hyperprior value
             log_priorval += sum([logpdf(priors[end-length(par[5])+i], par[5][i]) for i in eachindex(par[5])])

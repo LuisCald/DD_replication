@@ -33,6 +33,9 @@
 #   Both address the near-white aggregate factors of run #1 (doc/aggregates_diagnostic.pdf).
 #   DD_NAF     aggregate factor count (default 0 = the pinned 11). Tag suffix " <k> af".
 #   DD_TW      Tall–Wide loadings at this variance ratio (default 0 = PCA). Tag suffix " tw<r>".
+#   DD_AGG_MEAS tight (default) | published — prior on the aggregate measurement error (see below).
+#   DD_AGG_MODE pca | blocks | targeted, DD_AGG_SPEC — aggregate block construction (AggregateBlocks.jl).
+#              Tag suffix " agg-<spec>".
 #   DD_MUTE    cex_every_4_years | no_recent_20q | no_housing_wealth — the paper's data-removal
 #              robustness runs (same muting as the old examples). Tag suffix " every 4 years" /
 #              " excluding recent 20 quarters" / " excluding housing cycle wealth".
@@ -67,6 +70,22 @@ const TR_AGG_EXCL  = TR_XCOVID ? ["2020-Q1", "2020-Q2", "2020-Q3", "2020-Q4", "2
 
 const TR_NAF  = parse(Int, get(ENV, "DD_NAF", "0"))
 const TR_TW   = parse(Float64, get(ENV, "DD_TW", "0"))
+# DD_AGG_MODE / DD_AGG_SPEC (Oct 2026, AggregateBlocks.jl): how the aggregate block is built. pca = published
+#   (variance-ranked PCA, default); blocks = one PC per FRED-QD group, orthogonalised (spec b11 / b13 / b11gs / b2x
+#   or "1+5,2,…[:gs]"); targeted = PCA on series screened for predicting distributional data (spec = name of
+#   aggregate_blocks/targeted_<spec>.csv). Tag suffix " agg-<spec>" (nothing under pca).
+const TR_AGG_MODE = Symbol(lowercase(get(ENV, "DD_AGG_MODE", "pca")))
+const TR_AGG_SPEC = get(ENV, "DD_AGG_SPEC", "")
+# DD_AGG_MEAS (Oct 2026): prior on the aggregate rows' measurement error. tight (default) = the intended 1/2000 prior;
+#   published = the prioreval pairing bug that left those entries on the loose survey prior (variance ≈ 1 on unit-variance
+#   series), so the smoother absorbed most of the non-persistent aggregate PCs as noise (aggregate_block_diagnostics.jl).
+#   Every run before 2026-10-21 is "published". Tag " aggtight" while the comparison is open.
+const TR_AGG_MEAS = Symbol(lowercase(get(ENV, "DD_AGG_MEAS", "tight")))
+TR_AGG_MEAS in (:published, :tight) || error("DD_AGG_MEAS must be published or tight")
+TR_AGG_MODE in (:pca, :blocks, :targeted) || error("DD_AGG_MODE must be pca, blocks or targeted")
+(TR_AGG_MODE == :pca || !isempty(TR_AGG_SPEC)) || error("DD_AGG_SPEC is required with DD_AGG_MODE=$(TR_AGG_MODE)")
+const TR_AGG_TAG = TR_AGG_MODE == :pca ? "" :
+                   " agg-" * replace(lowercase(strip(TR_AGG_SPEC)), "," => "_", "+" => "p", "@" => "x", ":" => "-")
 const TR_MUTE = get(ENV, "DD_MUTE", "")
 # DD_PERS_AGG=1 (Oct 2026): persistence_prior = :per_factor_agg — one persistence target ρ_Y,k per AGGREGATE
 #   factor as well (H block r+5 → r+q+4); tag " pfa" instead of " pf". Default 0 = the published :per_factor spec.
@@ -126,6 +145,7 @@ const TR_TAG = " transfer" * (TR_TREND == :stochastic ? " stochastic trend" : " 
                (TR_XCOVID ? " xcovid" : "") *
                (TR_NAF > 0 ? " $(TR_NAF) af" : "") *
                (TR_TW > 0 ? " tw$(TR_TW)" : "") *
+               TR_AGG_TAG * (TR_AGG_MEAS == :tight ? " aggtight" : "") *
                TR_MUTE_SPEC[TR_MUTE][1] *
                (isempty(TR_ITEM) ? "" : " $(TR_ITEM) economy") *
                (isempty(TR_MEAS_ENV) || !isempty(TR_ITEM) ? "" : " " * join(TR_MEASURES, "_")) *
@@ -136,8 +156,8 @@ const TR_TAG = " transfer" * (TR_TREND == :stochastic ? " stochastic trend" : " 
 @info "TRANSFER spec: $(TR_NDF) distributional factors, per-factor persistence, joint cap 0.995, $(TR_TREND) trend, " *
       "pca $(TR_PCA), whitening ridge $(TR_WRIDGE)$(TR_WRIDGE == 0 ? " (published whitening — read cond(Σ̂) in the prep log before deciding)" : "")"
 @info "  aggregates: sheet $(TR_AGG_SHEET); PCA loadings fit " * (TR_XCOVID ? "EXCLUDING 2020Q1–2021Q1 (all quarters projected)" : "on all quarters")
-(TR_NAF > 0 || TR_TW > 0 || !isempty(TR_MUTE)) &&
-    @info "  variant: aggregate factors $(TR_NAF > 0 ? TR_NAF : "pinned (11)"), Tall–Wide $(TR_TW > 0 ? TR_TW : "off"), muting $(isempty(TR_MUTE) ? "none" : TR_MUTE)"
+(TR_NAF > 0 || TR_TW > 0 || !isempty(TR_MUTE) || TR_AGG_MODE != :pca) &&
+    @info "  variant: aggregate factors $(TR_NAF > 0 ? TR_NAF : "pinned (11)"), Tall–Wide $(TR_TW > 0 ? TR_TW : "off"), muting $(isempty(TR_MUTE) ? "none" : TR_MUTE), aggregate block $(TR_AGG_MODE)$(TR_AGG_MODE == :pca ? "" : " " * repr(TR_AGG_SPEC))"
 @info "  tag: $(repr(TR_TAG))"
 
 const model_options = ModelOptions(
@@ -154,6 +174,9 @@ const model_options = ModelOptions(
     aggregate_pca_exclude = TR_AGG_EXCL,
     n_agg_factors     = TR_NAF,
     tw_ratio          = TR_TW,
+    agg_mode          = TR_AGG_MODE,
+    agg_spec          = TR_AGG_SPEC,
+    agg_meas_prior    = TR_AGG_MEAS,
     data_to_mute      = TR_MUTE_SPEC[TR_MUTE][2],
     measures          = TR_MEASURES,
     atom_measures     = !isempty(TR_LIQ_ATOMS) ? TR_LIQ_ATOMS : (isempty(TR_ITEM) || !TR_ATOM) ? String[] : [TR_ITEM],
