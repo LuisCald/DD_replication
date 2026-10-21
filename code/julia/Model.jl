@@ -705,7 +705,8 @@ function likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_ids, 
     if aggregate_rep == :as_inputs
         log_P, alarm = prioreval([[A..., B...], Ω_var, Ω_corr, Matrix(Σ), hyper_params], priors, param_sizes; aggregate_rep=:as_inputs)
     else
-        log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Ω_var, Ω_corr, Matrix(Σ), hyper_params], priors, param_sizes)
+        log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Ω_var, Ω_corr, Matrix(Σ), hyper_params], priors, param_sizes;
+                                 agg_meas_tight = hasproperty(model_options, :agg_meas_prior) && model_options.agg_meas_prior == :tight)
     end
     # Stationarity guard (stationarity_cap; Inf = off, baseline behavior):
     # explosive A invalidates lyapd initialization, forecasts, FEVD and HD

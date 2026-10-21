@@ -2261,33 +2261,8 @@ end
 
 function select_aggregates(aggregates, measures, tot_periods, tmin, tmax, agg_lags, tag, best_aggs; until=false)
 
-    aggregates[:, "date"] = QuarterlyDate.(aggregates[:, "time"])
-
-    # # Since aggregates require a lag
-    # q_correction = tmin["quarter"] > 1 ? tmin["quarter"] - 1 : 4
-    # y_correction = tmin["quarter"] > 1 ? tmin["year"] : tmin["year"] - 1
-
-    # Calculate the quarter correction
-    q_correction = tmin["quarter"] > agg_lags ? tmin["quarter"] - agg_lags : 4 - (agg_lags - tmin["quarter"]) % 4 # eg,
-
-    # Calculate the year correction
-    y_correction = tmin["quarter"] > agg_lags ? tmin["year"] : trunc(tmin["year"] - ((agg_lags + 3 - 1) / 4) + 1)
-
-    filter!(row -> row.date >= QuarterlyDate(y_correction, q_correction), aggregates)
-    # a = filter(row -> row.date >= QuarterlyDate(y_correction, q_correction), aggregates)
-    # tot_rows_lb = nrow(a)
-
-    # dropped_rows_lb = tot_rows - tot_rows_lb
-
-    # filter!(row -> row.date <= QuarterlyDate(tmax["year"], tmax["quarter"]), aggregates)
-    local b
-    if until != false
-        b = filter(row -> row.date <= QuarterlyDate(until["year"], until["quarter"]), aggregates)
-    else
-        b = filter(row -> row.date <= QuarterlyDate(tmax["year"], tmax["quarter"]), aggregates)
-    end
-
-    dropped_rows_ub = nrow(aggregates) - nrow(b)
+    # date filtering (moved verbatim to AggregateBlocks.jl so the diagnostics build the same panel)
+    dropped_rows_ub = filter_agg_dates!(aggregates, tmin, tmax, agg_lags; until = until)
 
     data_only_aggs = select(aggregates, Not(["date", "time", "year", "quarter"]))
 
@@ -2308,27 +2283,23 @@ function select_aggregates(aggregates, measures, tot_periods, tmin, tmax, agg_la
         agg_count = size(agg_pcs, 1)
         return u_proj, agg_pcs, agg_count
     else
-        super_aggs = data_only_aggs[:, 1:end-agg_lags] # N by T
-
-        for i in 1:agg_lags
-            super_aggs = vcat(super_aggs, data_only_aggs[:, i+1:end-agg_lags+i])
-        end
-
-        standardize_aggs!(super_aggs)
-
-        # Column j of super_aggs stacks dates j … j+agg_lags; its contemporaneous
-        # date is row j+agg_lags of `aggregates`. Quarters listed in
-        # ModelOptions.aggregate_pca_exclude are kept out of the PCA FIT only
+        # series + 4 lags stacked and standardised (AggregateBlocks.jl, moved verbatim). Column j of
+        # super_aggs stacks dates j … j+agg_lags; its contemporaneous date is row j+agg_lags of
+        # `aggregates`. Quarters in ModelOptions.aggregate_pca_exclude are kept out of every FIT
         # (loadings); every quarter is still projected.
-        excl = hasproperty(model_options, :aggregate_pca_exclude) ? Set(String.(model_options.aggregate_pca_exclude)) : Set{String}()
-        fit_mask = if isempty(excl)
-            nothing
-        else
-            col_dates = aggregates[!, "date"][agg_lags+1:end]
-            [!("$(Dates.year(d))-Q$(Dates.quarterofyear(d))" in excl) for d in col_dates]
-        end
+        super_aggs = stack_lagged_aggs(data_only_aggs, agg_lags)
+        fit_mask = agg_fit_mask(aggregates, agg_lags)
 
-        u_proj, agg_pcs, _ = perform_pca(super_aggs, measures, :aggs, tag; fit_mask = fit_mask)
+        # ModelOptions.agg_mode (Oct 2026): :pca = published variance-ranked PCA (unchanged);
+        # :blocks / :targeted = AggregateBlocks.jl (one PC per FRED-QD group, orthogonalised /
+        # PCA on series screened for predicting distributional data). Same count, unit variance.
+        agg_mode = hasproperty(model_options, :agg_mode) ? model_options.agg_mode : :pca
+        if agg_mode == :pca
+            u_proj, agg_pcs, _ = perform_pca(super_aggs, measures, :aggs, tag; fit_mask = fit_mask)
+        else
+            u_proj, agg_pcs = alternative_agg_block(agg_mode, super_aggs, agg_series_names(aggregates), agg_lags, agg_factor_count(tag);
+                                                    fit_mask = fit_mask, spec = model_options.agg_spec)
+        end
 
         agg_pcs = agg_pcs[:, 1:end-dropped_rows_ub]
         agg_count = size(agg_pcs, 1)

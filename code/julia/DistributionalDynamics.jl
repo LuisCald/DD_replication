@@ -103,6 +103,7 @@ include("Structures.jl")
 include("DataConstructor.jl")
 include("AllPlots.jl")
 include("ModelPrep.jl")
+include("AggregateBlocks.jl")       # aggregate block alternatives (agg_mode = :blocks / :targeted) + diagnostics helpers
 include("SupportingFunctions.jl")
 include("DIMES.jl")
 include("SeparationStrategy.jl")
