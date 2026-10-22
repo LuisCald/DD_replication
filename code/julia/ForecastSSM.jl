@@ -19,9 +19,9 @@ function create_stat_dict(data_sources, measures)
 end
 
 
-function perform_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type, forecast_type)
+function perform_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type, forecast_type; nowcast::Bool=false)
     if forecast_type[1] == "iterative"
-        return perform_iterative_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, type)
+        return perform_iterative_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, type; nowcast = nowcast)
 
     elseif forecast_type[1] == "clumpy"
         perform_clumpy_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, filtering_criteria, obs_data, model_options, model_elements, time_params, user_params, func_data, type)
@@ -929,7 +929,10 @@ end
 
 
 
-function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, opttag)
+# nowcast = true (2026-10-22): besides dropping the wave, drop EVERY observation dated after it (all surveys and the
+# aggregate rows), so the estimate at the wave date is the filtered (real-time) one rather than the full-sample smoother's
+# leave-one-out interpolation. Surveys dated before the wave but published after it are still used (publication lags ignored).
+function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, opttag; nowcast::Bool=false)
     @unpack y, MV = model_elements
     @unpack data_sources, func_dict = func_data
     @unpack case, measures, estimator = model_options
@@ -980,6 +983,7 @@ function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hype
 
             # Remove one observation in MV for this dataset 
             y[data_indices, id] .= NaN
+            nowcast && id < size(y, 2) && (y[:, id+1:end] .= NaN)
 
             # Define this MV as our new measurement vector 
             @pack! model_elements = y
@@ -1020,14 +1024,15 @@ function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hype
     # Now we toss this into the plotting function and plot the estimated model predictions, the data and the predictions from removing the observation 
     # dv[dataset_choice] = export_functional_data(dv[dataset_choice], dataset_choice, opttag, obs_data, func_data, time_params, user_t, model_options, false, false, :forecast)     
 
-    plot_iterative_forecasts(dataset_choice, dv, predictions_dict, func_data, obs_data, user_t, time_params, model_options, opttag, label, avg_series) # select_series could go in here, but it's already relative to the average  
+    filter!(r -> !(r.tag == model_options.tag && r.source == dataset_choice), DROPWAVE_SCORES)
+    plot_iterative_forecasts(dataset_choice, dv, predictions_dict, func_data, obs_data, user_t, time_params, model_options, opttag, nowcast ? label * "_nowcast" : label, avg_series) # select_series could go in here, but it's already relative to the average  
     # scores of the drop-one-wave predictions → <results>/<folder>/data/<dataset>_dropwave_scores.csv
     try
         sc = DataFrame(filter(r -> r.tag == model_options.tag && r.source == dataset_choice, DROPWAVE_SCORES))
         if nrow(sc) > 0
             spath = BASE_PATH * "/7_Results/$(measures_folder(measures))" * model_options.tag * "/$optfolder/data"
             mkpath(spath)
-            CSV.write(spath * "/" * dataset_choice * "_dropwave_scores.csv", sc)
+            CSV.write(spath * "/" * dataset_choice * (nowcast ? "_nowcast_scores.csv" : "_dropwave_scores.csv"), sc)
             @info "Drop-one-wave scores ($dataset_choice): " * join(["$(r.measure) $(r.group): rmse $(round(r.rmse; sigdigits=3)), cover $(round(r.cover; digits=2))" for r in eachrow(sc)], "; ")
         end
     catch e

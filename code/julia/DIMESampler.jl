@@ -264,7 +264,10 @@ function generate_marginals_for_hyperparameters(DIME_chains, m_label, tag; n_tre
 end
 
 function find_mode(DIME_chains, lprobs)
-    to_keep = size(DIME_chains, 1) - 1
+    # DIME_chains holds the last K iterations, lprobs ALL iterations; keep the last K rows of lprobs so row i of both is
+    # the same iteration (the old K−1 slice was shifted by one: argmax returned the state one iteration BEFORE the
+    # best draw — the pre-acceptance point; found 2026-10-22)
+    to_keep = size(DIME_chains, 1)
     lprobs2 = lprobs[end-to_keep+1:end, :]
 
     n_chains = size(DIME_chains, 2)

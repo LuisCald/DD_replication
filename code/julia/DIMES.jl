@@ -246,7 +246,7 @@ function RunDIME(
                 lprobcur = view(lprob, isplit+2:nchain)
             end
             cursz = size(xcur, 2)
-            refsz = nchain - cursz + 1      # +1 for mod1 indexing
+            refsz = size(xref, 2)           # the reference half (nchain − cursz); the old "+1 for mod1" dated from the overlapping split and read one column past the view under @inbounds (2026-10-22)
 
             # ---- differential evolution indices (in-place, no alloc)
             @inbounds for k = 1:cursz

@@ -96,7 +96,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 const MDD_AF_MAX = 15
-const MDD_INVALID = -1e5          # likelihood sentinel threshold (likeli returns −1e12 outside the support)
+const MDD_INVALID = -1e11         # sentinel threshold: likeli returns −1e12 (+ log prior) outside the support; real log posteriors are O(−1e4…−1e5), so −1e5 was too close (2026-10-22)
 
 _logsumexp(v) = (m = maximum(v); isfinite(m) ? m + log(sum(exp.(v .- m))) : m)
 _logmeanexp(v) = _logsumexp(v) - log(length(v))

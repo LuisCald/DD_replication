@@ -874,7 +874,10 @@ function check_observed_measures(A, measures)
 end
 
 
-function generate_copula_densities(X, measures, grid_size_data_cop; given_integrals=false, atom_dim=nothing, atom_π=nothing, atom_hyw=nothing)
+function generate_copula_densities(X, measures, grid_size_data_cop; given_integrals=false, atom_dim=nothing, atom_π=nothing, atom_hyw=nothing, normalise::Bool=true)
+    # normalise = false (FEVD, 2026-10-22): the cells are SIGNED deviations of a response, not a density — no clipping at
+    # zero and no rescaling to unit mass (which turned every response into the same unit-mass object and made the copula
+    # FEVD a shock count, q/(r+q))
     # In the case of the reconstructions, if the dataset ONCE had 3 measures observed, then predictions will be made for all 3 
 
     # 'd' has to be based on the coefficients that are obsered <==> the observed measures 
@@ -918,7 +921,7 @@ function generate_copula_densities(X, measures, grid_size_data_cop; given_integr
 
             cop_w = X[cop_ind..., t]
             cop_cdf = obs_d == 2 ? [copula_cdf_estimator(cop_w, integrals, [i, j]) for i in eachindex(x), j in eachindex(x)] : [copula_cdf_estimator(cop_w, integrals, [i, j, k]) for i in eachindex(x), j in eachindex(x), k in eachindex(x)]
-            new_dv[cop_ind..., t] .= cdf_to_pdf(cop_cdf)
+            new_dv[cop_ind..., t] .= cdf_to_pdf(cop_cdf; normalise = normalise)
         end
     end
 
@@ -946,7 +949,7 @@ function generate_copula_density(X, XX, id_x, integrals, measures, obs_meas, gri
         # cop_cdf = obs_d == 2 ? [copula_cdf_estimator(cop_w, integrals, [XX[i, j][1], XX[i, j][2]]) for i in id_x, j in id_x] : [copula_cdf_estimator(cop_w, integrals, [XX[i, j, k][1], XX[i, j, k][2], XX[i, j, k][3]]) for i in id_x, j in id_x, k in id_x]
         # New: pass integer indices directly (integrals is now an array, not a Dict)
         cop_cdf = obs_d == 2 ? [copula_cdf_estimator(cop_w, integrals, [i, j]) for i in id_x, j in id_x] : [copula_cdf_estimator(cop_w, integrals, [i, j, k]) for i in id_x, j in id_x, k in id_x]
-        new_dv[cop_ind...] .= cdf_to_pdf(cop_cdf)
+        new_dv[cop_ind...] .= cdf_to_pdf(cop_cdf; normalise = normalise)
 
         return new_dv
     end
@@ -2667,7 +2670,7 @@ function any_vectors_nan(vectors)
 end
 
 
-function cdf_to_pdf(cdf_matrix::Array{Float64,2})
+function cdf_to_pdf(cdf_matrix::Array{Float64,2}; normalise::Bool=true)
     # Initialize the PDF matrix with zeros
     pdf_matrix = zeros(size(cdf_matrix))
 
@@ -2681,14 +2684,16 @@ function cdf_to_pdf(cdf_matrix::Array{Float64,2})
         end
     end
 
-    # correct pdf_matrix 
-    pdf_matrix[pdf_matrix.<0] .= 0
-    pdf_matrix .= pdf_matrix ./ sum(pdf_matrix)
+    # correct pdf_matrix (a density: clip negatives, unit mass); skipped for signed deviation responses (normalise = false)
+    if normalise
+        pdf_matrix[pdf_matrix.<0] .= 0
+        pdf_matrix .= pdf_matrix ./ sum(pdf_matrix)
+    end
 
     return pdf_matrix
 end
 
-function cdf_to_pdf(cdf_matrix::Array{Float64,3})
+function cdf_to_pdf(cdf_matrix::Array{Float64,3}; normalise::Bool=true)
     # Initialize the PDF matrix with zeros
     pdf_matrix = zeros(size(cdf_matrix))
 
@@ -2709,9 +2714,11 @@ function cdf_to_pdf(cdf_matrix::Array{Float64,3})
         end
     end
 
-    # correct pdf_matrix 
-    pdf_matrix[pdf_matrix.<0] .= 0
-    pdf_matrix .= pdf_matrix ./ sum(pdf_matrix)
+    # correct pdf_matrix (a density: clip negatives, unit mass); skipped for signed deviation responses (normalise = false)
+    if normalise
+        pdf_matrix[pdf_matrix.<0] .= 0
+        pdf_matrix .= pdf_matrix ./ sum(pdf_matrix)
+    end
 
     return pdf_matrix
 end

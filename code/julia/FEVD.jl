@@ -239,7 +239,9 @@ function fevd_dist_vs_agg(
         # Compute the integrals first
         N = size(cop_coef_events, 1) - 1
         g_intg = precompute_integrals(N, x)
-        cop_dens_events = generate_copula_densities(cop_coef_events, measures, grid_data_size_cop; given_integrals=g_intg)
+        # normalise = false: responses are signed deviations (κ₀…₀ zeroed above); the density path's clip-and-renormalise
+        # made every event a unit-mass object and the copula share a shock count q/(r+q) (2026-10-22)
+        cop_dens_events = generate_copula_densities(cop_coef_events, measures, grid_data_size_cop; given_integrals=g_intg, normalise=false)
         cop_dens_events = reshape(cop_dens_events, :, n_events) # (grid_data_size_cop^D) × events
 
         # FEVD shares for the copula (overall, across the entire copula grid)
