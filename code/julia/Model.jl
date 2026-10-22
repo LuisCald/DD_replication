@@ -590,7 +590,7 @@ function get_priors(model_elements, model_options, hyper_params)
                 # V_prior otherwise throws PosDefException here EVERY likeli
                 # call, silently swallowed into -1e12 (review 2026-09-10)
                 MvNormal(prior_mean, Matrix(Hermitian(V_prior)) + 1e-8 * I),
-                [Normal(log(exp(1 - ρ^2) - 1), σ_ϕ) for ρ in ρ_F_vec],  # per-factor Ω_f prior centers 1-ρ_j²
+                [Normal(log(exp(1 - ρ^2) - 1), σ_ϕ) for ρ in ρ_F_vec],  # per-factor Ω_f prior: softplus(ϕ_j) = innovation STANDARD DEVIATION centred at 1-ρ_j² (Ω = Ω_var·R·Ω_var'), long-run variance centred at 1-ρ² — Appendix Bayesian.tex
                 pfa ? [Normal(log(exp(1 - ρ^2) - 1), σ_ϕ_Y) for ρ in ρ_Y_vec] : Normal(ϕ_Y, σ_ϕ_Y),
                 LKJCholesky(factor_count + agg_count, corr_Ω_shape),
             ]
@@ -620,9 +620,9 @@ function get_priors(model_elements, model_options, hyper_params)
         ρ_F = hyperparameters[6]        # κ₅  = persistence target for the  r-factor block
         ρ_Y = hyperparameters[7]        # κ₆  = persistence target for the  q-aggregate block
 
-        #  Same log-transform you already used for ρ_F, now applied to both blocks
-        ϕ_F = log(exp(1 - ρ_F^2) - 1)    # ⇒ Normal prior on ϕ_F  implies Beta prior on ρ_F
-        ϕ_Y = log(exp(1 - ρ_Y^2) - 1)    # ⇒ identical mapping for the aggregate persistence
+        #  softplus(ϕ) = innovation STANDARD DEVIATION centred at 1-ρ² (Ω = Ω_var·R·Ω_var'), long-run variance centred at 1-ρ² — Appendix Bayesian.tex
+        ϕ_F = log(exp(1 - ρ_F^2) - 1)
+        ϕ_Y = log(exp(1 - ρ_Y^2) - 1)
 
         # ───  Prior list  ──────────────────────────────────────────────────────────
         σ_ϕ = log(exp(hyper_params[4]) + 1) # These are already corrected

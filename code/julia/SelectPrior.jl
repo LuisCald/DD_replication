@@ -150,7 +150,7 @@ function estimate_prior(model_elements::StateSpaceModel, model_options::ModelOpt
             ϕ_Y = log(exp(1 - ρ_Y^2) - 1)
             priors = Any[
                 MvNormal(prior_mean, Matrix(Hermitian(V_prior)) + 1e-8 * I),
-                [Normal(log(exp(1 - ρ^2) - 1), σ_ϕ) for ρ in ρ_F_vec],  # per-factor Ω_f prior centers 1-ρ_j²
+                [Normal(log(exp(1 - ρ^2) - 1), σ_ϕ) for ρ in ρ_F_vec],  # per-factor Ω_f prior: softplus(ϕ_j) = innovation STANDARD DEVIATION centred at 1-ρ_j² (Ω = Ω_var·R·Ω_var'), so the long-run variance (1-ρ²)²/(1-ρ²) = 1-ρ² — Appendix Bayesian.tex
                 pfa ? [Normal(log(exp(1 - ρ^2) - 1), σ_ϕ_Y) for ρ in ρ_Y_vec] : Normal(ϕ_Y, σ_ϕ_Y),
                 LKJCholesky(factor_count + agg_count, corr_Ω_shape),
             ]
@@ -186,9 +186,10 @@ function estimate_prior(model_elements::StateSpaceModel, model_options::ModelOpt
         ρ_F = hyperparameters[6]        # κ₅  = persistence target for the  r-factor block
         ρ_Y = hyperparameters[7]        # κ₆  = persistence target for the  q-aggregate block
 
-        #  Same log-transform you already used for ρ_F, now applied to both blocks
-        ϕ_F = log(exp(1 - ρ_F^2) - 1)    # ⇒ Normal prior on ϕ_F  implies Beta prior on ρ_F
-        ϕ_Y = log(exp(1 - ρ_Y^2) - 1)    # ⇒ identical mapping for the aggregate persistence
+        #  softplus(ϕ) = innovation STANDARD DEVIATION centred at 1-ρ² (not the variance: Ω = Ω_var·R·Ω_var'),
+        #  so the long-run variance σ²/(1-ρ²) is centred at 1-ρ² — Appendix Bayesian.tex
+        ϕ_F = log(exp(1 - ρ_F^2) - 1)
+        ϕ_Y = log(exp(1 - ρ_Y^2) - 1)
 
         # ───  Prior list  ──────────────────────────────────────────────────────────
         σ_ϕ = hyper_params[4] # These are already corrected
@@ -698,10 +699,10 @@ function prioreval(par, priors, param_sizes; aggregate_rep=:as_states, agg_meas_
     else
         # ─── :as_states (default) ─── Original behavior ─────────────────────
         nf = param_sizes[1][1]
-        σ²_Ω = diag(par[2])
+        σ²_Ω = diag(par[2])          # raw softplus⁻¹ of the innovation STANDARD DEVIATIONS (Ω = Ω_var·R·Ω_var'); the name is historical
         σ²_Ωf = σ²_Ω[1:nf]
         σ²_Ωy = σ²_Ω[nf+1:end]
-        σ²_Σ = diag(par[4])
+        σ²_Σ = diag(par[4])          # raw softplus⁻¹ of the measurement-error VARIANCES
 
         ABCD_cond = all(insupport(priors[1], par[1]))
         # priors[2] is a Vector{Normal} (one per factor) under persistence_prior = :per_factor
