@@ -2069,18 +2069,13 @@ function sequential_kalman_update!(x_updated, sigma_updated, Y_u, t, G_u, x̂_F,
         eta .= Y_u[i] .- g' * x # forecast error
 
         for (e, p) in zip(eta, P)
-            try
-                log_c += (log(2π).+log(p)+(e*e).*inv(p))[1] * -0.5  # white noise case. # this is the likelihood contribution of 1 time period, given factors and θ
-            catch ee
-                # println("Error in log_c, $i, $t: ", ee)
-                log_c += 0 #-1.e12
-            end
+            # P ≤ 0 or non-finite: reject the draw (see sequential_kalman_update_fast!; 2026-10-22)
+            (isfinite(p) && p > 0) || return -1.e12
+            log_c += (log(2π).+log(p)+(e*e).*inv(p))[1] * -0.5  # white noise case. # this is the likelihood contribution of 1 time period, given factors and θ
         end
         # end
 
-        if isnan(log_c)
-            log_c += -1.e12
-        end
+        isnan(log_c) && return -1.e12
         mul!(K, sig_r, inv.(P))
 
         # Store updates and continue 
@@ -2125,12 +2120,10 @@ function sequential_kalman_update_fast!(x_updated, sigma_updated, Y_u, G_u, x̂_
         P = σ_g + diag_Σ[m]                # scalar variance
         η = Y_u[m] - dot(ws.g, x̂_F)       # scalar innovation
 
-        try
-            log_c += -0.5 * (log(2π) + log(P) + (η * η) / P)
-        catch ee
-            # println("Error in log_c, $m, $t: ", ee)
-            log_c += 0
-        end
+        # P ≤ 0 or non-finite (indefinite P_F after a rank-1 downdate, or an explosive draw with stationarity_cap = Inf):
+        # reject the draw instead of silently dropping the row (log(P) used to throw into a no-op catch; 2026-10-22)
+        (isfinite(P) && P > 0) || return -1.e12
+        log_c += -0.5 * (log(2π) + log(P) + (η * η) / P)
 
         invP = 1 / P
         @. ws.K = ws.sig_r * invP            # K = sig_r / P

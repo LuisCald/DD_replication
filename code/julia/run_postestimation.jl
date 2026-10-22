@@ -368,6 +368,16 @@ if !occursin("HANK", tag) && !skipstep("forecasts")
     catch e
         @warn "SCF iterative forecast failed" exception=(e, catch_backtrace())
     end
+    # real-time version: everything dated after the dropped wave removed (DD_NOWCAST=0 skips)
+    if get(ENV, "DD_NOWCAST", "1") == "1"
+        try
+            perform_forecast("SCF", par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, 1,
+                obs_data, model_options, model_elements, time_params, user_t, func_data,
+                kind_of_plots, ["iterative"]; nowcast = true)
+        catch e
+            @warn "SCF nowcast failed" exception=(e, catch_backtrace())
+        end
+    end
     try
         periods_to_remove = muted_quarters_between(QuarterlyDate(1984, 1), QuarterlyDate(2021, 4))
         filtering_criteria = Dict("periods_to_remove" => periods_to_remove)

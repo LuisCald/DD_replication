@@ -34,7 +34,7 @@
 #   DD_NAF     aggregate factor count (default 0 = the pinned 11). Tag suffix " <k> af".
 #   DD_TW      Tall–Wide loadings at this variance ratio (default 0 = PCA). Tag suffix " tw<r>".
 #   DD_AGG_MEAS tight (default) | published — prior on the aggregate measurement error (see below).
-#   DD_SCF_SHIFT 1 (default) | 0 — SCF income rows dated Q4 of the reference year (tag " scfq4").
+#   DD_INC_SHIFT 1 (default) | 0 — SCF and PSID income rows dated Q4 of the reference year (tag " incq4").
 #   DD_AGG_MODE pca | blocks | targeted, DD_AGG_SPEC — aggregate block construction (AggregateBlocks.jl).
 #              Tag suffix " agg-<spec>".
 #   DD_MUTE    cex_every_4_years | no_recent_20q | no_housing_wealth — the paper's data-removal
@@ -82,9 +82,11 @@ const TR_AGG_SPEC = get(ENV, "DD_AGG_SPEC", "")
 #   series), so the smoother absorbed most of the non-persistent aggregate PCs as noise (aggregate_block_diagnostics.jl).
 #   Every run before 2026-10-21 is "published". Tag " aggtight" while the comparison is open.
 const TR_AGG_MEAS = Symbol(lowercase(get(ENV, "DD_AGG_MEAS", "tight")))
-# DD_SCF_SHIFT (Oct 2026, default 1): SCF income rows observed at Q4 of the reference year (3 quarters before the wave's
-# Q3 survey-year date), so their ¼-average window covers the calendar year the income refers to. Tag " scfq4". 0 = published.
-const TR_SCF_SHIFT = get(ENV, "DD_SCF_SHIFT", "1") == "1"
+# DD_INC_SHIFT (Oct 2026, default 1): SCF and PSID income rows observed at Q4 of the reference year — the waves are dated
+# at the interview (SCF Q3, PSID Q2 of the survey year) while their income refers to the previous calendar year, so the
+# ¼-average window must cover that year (SCF −3, PSID −2 quarters). GrowthCorrection.jl only rescales the level by the
+# common per-household growth; the shape is the reference year's. Tag " incq4". 0 = published dating.
+const TR_INC_SHIFT = get(ENV, "DD_INC_SHIFT", "1") == "1"
 TR_AGG_MEAS in (:published, :tight) || error("DD_AGG_MEAS must be published or tight")
 TR_AGG_MODE in (:pca, :blocks, :targeted) || error("DD_AGG_MODE must be pca, blocks or targeted")
 (TR_AGG_MODE == :pca || !isempty(TR_AGG_SPEC)) || error("DD_AGG_SPEC is required with DD_AGG_MODE=$(TR_AGG_MODE)")
@@ -149,7 +151,7 @@ const TR_TAG = " transfer" * (TR_TREND == :stochastic ? " stochastic trend" : " 
                (TR_XCOVID ? " xcovid" : "") *
                (TR_NAF > 0 ? " $(TR_NAF) af" : "") *
                (TR_TW > 0 ? " tw$(TR_TW)" : "") *
-               TR_AGG_TAG * (TR_AGG_MEAS == :tight ? " aggtight" : "") * (TR_SCF_SHIFT ? " scfq4" : "") *
+               TR_AGG_TAG * (TR_AGG_MEAS == :tight ? " aggtight" : "") * (TR_INC_SHIFT ? " incq4" : "") *
                TR_MUTE_SPEC[TR_MUTE][1] *
                (isempty(TR_ITEM) ? "" : " $(TR_ITEM) economy") *
                (isempty(TR_MEAS_ENV) || !isempty(TR_ITEM) ? "" : " " * join(TR_MEASURES, "_")) *
@@ -181,7 +183,7 @@ const model_options = ModelOptions(
     agg_mode          = TR_AGG_MODE,
     agg_spec          = TR_AGG_SPEC,
     agg_meas_prior    = TR_AGG_MEAS,
-    obs_date_shift    = TR_SCF_SHIFT ? Dict("SCF" => Dict("income" => -3)) : Dict{String,Dict{String,Int}}(),
+    obs_date_shift    = TR_INC_SHIFT ? Dict("SCF" => Dict("income" => -3), "PSID" => Dict("income" => -2)) : Dict{String,Dict{String,Int}}(),
     data_to_mute      = TR_MUTE_SPEC[TR_MUTE][2],
     measures          = TR_MEASURES,
     atom_measures     = !isempty(TR_LIQ_ATOMS) ? TR_LIQ_ATOMS : (isempty(TR_ITEM) || !TR_ATOM) ? String[] : [TR_ITEM],

@@ -2297,7 +2297,13 @@ function shift_observation_dates!(MV, trend, stds, measures, estimator, df_names
             for t in cols
                 tn = t + s
                 1 <= tn <= T || continue
-                new[:, tn] .= MV[j][rows, t] .+ (trend[j][rows, t] .- trend[j][rows, tn]) ./ sd
+                # the HP trend is NaN before a coefficient's first observation (perform_detrending): a wave moved before
+                # that point keeps its own trend reference (flat extrapolation) and the trend entries at the new date
+                # are filled the same way so the reconstruction covers it
+                tr_old = trend[j][rows, t]
+                tr_new = [isfinite(trend[j][r, tn]) ? trend[j][r, tn] : trend[j][r, t] for r in rows]
+                trend[j][rows, tn] .= tr_new
+                new[:, tn] .= MV[j][rows, t] .+ (tr_old .- tr_new) ./ sd
                 kept += 1
             end
             MV[j][rows, :] .= new

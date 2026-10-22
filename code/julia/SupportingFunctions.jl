@@ -296,7 +296,12 @@ function draw_from_prior(param_sizes, priors, nchain)
     L_draws = [rand(priors[4]).L for _ in 1:nchain]
     ΩC      = hcat([Lcorr_to_u(L) for L in L_draws]...)
 
-    Σ = hcat([rand.(priors[5:4+nΣ])    for _ in 1:nchain]...)
+    # Σ: the first nΣ−ny entries are survey objects (generic prior), the last ny are the aggregate rows — pair them with the
+    # tight aggregate block that sits just before the hyperpriors in the rebuilt list (as prioreval does under
+    # agg_meas_prior = :tight; the plain 5:4+nΣ slice read generic priors for the aggregate rows; 2026-10-22)
+    n_h0 = n_hyper_block(param_sizes)
+    Σ_priors = length(priors) >= 4 + nΣ + n_h0 + ny ? vcat(priors[4 .+ (1:nΣ-ny)], priors[end-n_h0-ny+1:end-n_h0]) : priors[5:4+nΣ]
+    Σ = hcat([rand.(Σ_priors)    for _ in 1:nchain]...)
     # NB: the only caller (DIMESampler) passes a REBUILT priors list
     # (get_priors + push hyperpriors) whose tail IS the H-block hyperpriors —
     # the trend priors are never re-appended there, so slicing the last

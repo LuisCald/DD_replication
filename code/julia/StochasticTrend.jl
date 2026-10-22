@@ -249,7 +249,8 @@ function st_likeli(model_elements, param_vector, param_sizes, hyperpriors, Σ_id
 
     A, B, C, D, Ω_var, Ω_corr, Σ = matrisize(other_params, core_sizes; aggregate_rep=aggregate_rep)
 
-    log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Ω_var, Ω_corr, Matrix(Σ), hyper_params], priors, core_sizes)
+    log_P, alarm = prioreval([[A..., B..., C..., diag(D)...], Ω_var, Ω_corr, Matrix(Σ), hyper_params], priors, core_sizes;
+                             agg_meas_tight = hasproperty(model_options, :agg_meas_prior) && model_options.agg_meas_prior == :tight)
 
     # global–local hierarchy (evaluated on the positive scale, cf. header note)
     log_P += sum(logpdf.(Normal.(0.0, λ .* ψ), ω_τ)) + r * log(2)
