@@ -172,7 +172,9 @@ function mdd_harmonic_mean(chains, lprobs; α = 0.05)
         push!(mls, logpdf(g, X[i, :]) - log(1 - α) - lp[i])   # log f(θ) − log p(y|θ)p(θ), f truncated normal
     end
     isempty(mls) && (@warn "MDD (harmonic mean): no draw inside the truncation region"; return NaN)
-    return -_logmeanexp(mls)
+    # Geweke: (1/N)·Σ_i f(θ_i)/[p(y|θ_i)p(θ_i)] with f = 0 outside the region — divide by ALL valid draws N, not by
+    # the number inside (that overstated the mean by N/n_inside; found 2026-10-22)
+    return -(_logmeanexp(mls) + log(length(mls) / size(X, 1)))
 end
 
 """

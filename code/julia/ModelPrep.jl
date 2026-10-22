@@ -1418,6 +1418,13 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
         start += length(year_vec[j])  #TODO: very important parameter 
     end
 
+    # Observation-date shifts per dataset × measure (ModelOptions.obs_date_shift, Oct 2026): e.g. the SCF wave is dated
+    # Q3 of the SURVEY year while its income refers to the previous calendar year, so the SCF income rows move 3 quarters
+    # back and their ¼-average window [f_t..f_{t-3}] ends at Q4(Y−1). Empty = published behaviour.
+    if hasproperty(model_options, :obs_date_shift) && !isempty(model_options.obs_date_shift)
+        shift_observation_dates!(MV, trend, stds, measures, estimator, sort(collect(keys(files))), model_options.obs_date_shift)
+    end
+
     # Collect aggregate data
     u_proj, controls, agg_count = select_aggregates(agg_data, measures, tot_periods, tmin, tmax, agg_lags, tag, best_aggs)
 
@@ -2258,6 +2265,47 @@ function order_measures(pool, year_vec, tot_periods, freq, freq_type, tmin, time
     return meas_vec
 end
 
+
+"""
+    shift_observation_dates!(MV, trend, stds, measures, estimator, df_names, spec)
+
+Move the measurement rows of measure `m` of dataset `d` by `spec[d][m]` quarters (negative = earlier). The rows are
+detrended (raw trend at the ORIGINAL date), demeaned and scaled by the object's std, so the moved value is re-referenced
+to the trend at the new date: x_new = x_old + (trend_old − trend_new) / std. Columns that would leave the sample are dropped.
+"""
+function shift_observation_dates!(MV, trend, stds, measures, estimator, df_names, spec)
+    @unpack grid_pcf = estimator
+    dimension = length(measures)
+    cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
+    cop_rows = cop_part - imm_part
+    for (j, df_name) in enumerate(df_names)
+        haskey(spec, df_name) || continue
+        T = size(MV[j], 2)
+        if !(trend[j] isa AbstractMatrix) || size(trend[j], 2) != T
+            @warn "obs_date_shift: no full-period trend for $df_name (size $(size(trend[j]))); rows not shifted"
+            continue
+        end
+        for (m, s) in spec[df_name]
+            s == 0 && continue
+            mi = findfirst(==(m), measures)
+            mi === nothing && (@warn "obs_date_shift: $df_name has no measure $m"; continue)
+            rows = (cop_rows + grid_pcf * (mi - 1) + 1):(cop_rows + grid_pcf * mi)
+            sd = stds[1 + mi]
+            cols = [t for t in 1:T if any(!isnan, view(MV[j], rows, t))]
+            new = fill(NaN, length(rows), T)
+            kept = 0
+            for t in cols
+                tn = t + s
+                1 <= tn <= T || continue
+                new[:, tn] .= MV[j][rows, t] .+ (trend[j][rows, t] .- trend[j][rows, tn]) ./ sd
+                kept += 1
+            end
+            MV[j][rows, :] .= new
+            @info "obs_date_shift: $df_name $m rows moved by $s quarters ($kept of $(length(cols)) observations kept; trend re-referenced)"
+        end
+    end
+    return MV
+end
 
 function select_aggregates(aggregates, measures, tot_periods, tmin, tmax, agg_lags, tag, best_aggs; until=false)
 

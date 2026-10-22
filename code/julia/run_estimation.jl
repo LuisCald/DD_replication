@@ -42,6 +42,11 @@ const (param_vector, param_sizes, priors, meas_ind, Σ_ids) = set_params(model_e
 @info "Parameters set. Dimension: $(length(param_vector))"
 
 # ── Step 3: Run DIME sampler (black-box opt + MCMC) ───────────
+# DD_SEED (Oct 2026): seed the main task's RNG before BBO and DIME so two runs with the same switches give the same
+# chains and mode (threaded tasks derive their RNGs from the parent deterministically). Default fixed; DD_SEED=0 = none.
+let s = parse(Int, get(ENV, "DD_SEED", "20261022"))
+    s != 0 && (Random.seed!(s); @info "RNG seeded with DD_SEED = $s")
+end
 niter = parse(Int, get(ENV, "DD_NITER", "400"))   # DD_RESUME=1 DD_NITER=600 continues a finished 400-iter run
 bbo_opttime = length(param_vector) * 3 # seconds for black-box optimization
 @info "Starting DIME sampler with $niter iterations..."

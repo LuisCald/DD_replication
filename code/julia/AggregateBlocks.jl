@@ -36,6 +36,11 @@ const AGG_BLOCK_ALIASES = Dict(
     "b11"   => "1+5,2,3,4,6,7,8+11,9,10,13,14",                 # orders → NIPA, FX → rates (q = 11, as the baseline)
     "b11gs" => "1+5,3,6,8+11,9,10,4,2,7,13,14:gs",              # same blocks, Gram–Schmidt: NIPA, employment, prices, rates, credit, HH balance sheets, …
     "b2x"   => "1+5@2,3@2,6@2,8+11@2,2,4,7,9,10,13,14",         # two PCs for the four big blocks (15 factors; the diagnostic picks 11)
+    # Oct 21 (supervisor): a SMALL number of macro groups, two PCs each — real activity (NIPA, IP, orders), labour market
+    # (employment, earnings/productivity), prices, money & financial markets (rates, money/credit, FX, stocks), balance sheets &
+    # housing (household and non-household balance sheets, housing). b6x2 splits money/credit from rates & markets.
+    "b5x2"  => "1+2+5@2,3+7@2,6@2,8+9+11+13@2,4+10+14@2",        # 5 groups × 2 = 10 factors (DD_NAF=10)
+    "b6x2"  => "1+2+5@2,3+7@2,6@2,8+11+13@2,9@2,4+10+14@2",      # 6 groups × 2 = 12 factors (DD_NAF=12)
 )
 
 agg_series_names(aggregates) = String.(setdiff(names(aggregates), ["date", "time", "year", "quarter"]))
