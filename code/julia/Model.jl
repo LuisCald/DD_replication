@@ -1685,17 +1685,16 @@ function perform_backward_pass(L, P_F, sigma_updated, x_updated, x_smooth, x_fil
     t of the last measurement, computing the smoothed state estimate 
     from the intermediate results stored on the forward pass.
     """
-    # try
-    KS = sigma_updated * L' * inv(lu(P_F))  # Kalman smoothing gain 
+    # Kalman smoothing gain. P_F is singular when a state has zero predicted variance (a posterior draw with an
+    # innovation sd of exactly 0, i.e. a factor dead at that draw): fall back to the pseudo-inverse, the smoothing
+    # gain restricted to the states that do vary (Oct 2026; HANK economy 10 factor-draw export).
+    KS = sigma_updated * L' * (try inv(lu(P_F)) catch e; e isa SingularException ? pinv(P_F) : rethrow() end)
     x_s = x_updated .+ KS * (x_smooth .- x_filtered)
     sigma_s = sigma_updated + KS * (sigma_smooth - P_F) * KS'
 
     # Cross-covariance (Cov(x_t, x_{t-1} | T))
     sigma_cross = KS * sigma_smooth_prev
     return x_s, sigma_s, sigma_cross
-    # catch e
-    #     println(diag(P_F))
-    # end
 end
 
 

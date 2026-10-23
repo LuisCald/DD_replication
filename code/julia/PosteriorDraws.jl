@@ -108,11 +108,20 @@ function export_factor_draws(
 
     long = DataFrame()
     R = 0
+    n_skipped = 0
     pb = Progress(n_draws, desc = "Smoothing posterior draws")
     for (s, id) in enumerate(draw_ids)
         θ = collect(pool[id, :])
-        smoother_output, _, _ = likeli(model_elements, θ, param_sizes, hyperpriors,
-                                       Σ_ids, model_options; smooth = true)
+        # one numerically degenerate draw (singular filter covariance) must not abort the whole export
+        smoother_output = try
+            likeli(model_elements, θ, param_sizes, hyperpriors, Σ_ids, model_options; smooth = true)[1]
+        catch e
+            e isa InterruptException && rethrow()
+            n_skipped += 1
+            @warn "posterior draw $id skipped: smoother failed ($(sprint(showerror, e)))" maxlog = 5
+            next!(pb)
+            continue
+        end
         @unpack x_smoothed = smoother_output          # (factor_count, T)
         X = copy(x_smoothed)
         if state_draws == :joint
@@ -140,7 +149,8 @@ function export_factor_draws(
     out = joinpath(out_dir, filename)
     CSV.write(out, long)
     unc = state_draws == :joint ? "θ + joint state paths" : state_draws == :pointwise ? "θ + pointwise state" : "θ only"
-    @info "Wrote $n_draws posterior factor draws ($unc; $R factors × $(length(dts)) quarters) → $out"
+    n_skipped > 0 && @warn "$n_skipped of $n_draws posterior draws skipped (smoother failed); $(n_draws - n_skipped) written"
+    @info "Wrote $(n_draws - n_skipped) posterior factor draws ($unc; $R factors × $(length(dts)) quarters) → $out"
     return out
 end
 
