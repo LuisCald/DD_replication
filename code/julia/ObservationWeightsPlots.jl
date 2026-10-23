@@ -238,6 +238,7 @@ function plot_interpolation_share(sigma_smoothed, P∞; states=1:8, dates=nothin
     # main heatmap without GR's colorbar (its tick labels cannot be latexified)
     main = Plots.heatmap(x, ylabs, M;
                          c=Plots.cgrad([:white, "#3a3935"]), clims=(0, 1),
+                         yflip=true,   # f₁ on top, rows read f₁…f_r downward (Oct 2026)
                          colorbar=false, xformatter=:latex,
                          guidefontsize=22, xtickfontsize=20, ytickfontsize=20,
                          framestyle=:box,
@@ -250,7 +251,7 @@ function plot_interpolation_share(sigma_smoothed, P∞; states=1:8, dates=nothin
                        colorbar=false, legend=false, xticks=false, ymirror=true,
                        yticks=(collect(0.0:0.2:1.0),
                                [latexstring(string(v)) for v in 0.0:0.2:1.0]),
-                       ylabel=L"\sigma^2_{t\mid T}\,/\,P^{\infty}",
+                       ylabel=L"\textrm{Interpolation\ Share}",   # was σ²_{t|T}/P^∞ (Oct 2026: words in the figure, formula in the text)
                        guidefontsize=20, ytickfontsize=16, framestyle=:box,
                        left_margin=-2Plots.mm, right_margin=12Plots.mm,
                        bottom_margin=6Plots.mm)

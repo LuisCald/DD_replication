@@ -39,7 +39,8 @@ function fevd_dist_vs_agg(
     horizon=20,
     factor_names=nothing,
     shock_order=:dist_first,
-    data_tag="PSID"
+    data_tag="PSID",
+    quiet::Bool=false    # (Oct 2026) true: no printing, no files; return (factor table, stats_dict) — per-draw FEVD (fevd_draws.jl)
 )
     @unpack measures, case, equivalized, bottom_coded, estimator, tag = model_options
     @unpack grid_cop, grid_pcf, integral_pcf_grid, integral_cop_grid = estimator
@@ -117,8 +118,7 @@ function fevd_dist_vs_agg(
     tbl = DataFrame(Factor=names, Variation_from_Distributional=share_dist,
         Variation_from_Aggregates=share_agg)
 
-    lt = df_to_latex_fevd_factors(tbl)
-    println(lt)
+    quiet || println(df_to_latex_fevd_factors(tbl))
 
     #################################################
     # Map these contributions to the observable space
@@ -410,6 +410,7 @@ function fevd_dist_vs_agg(
     else
         error("FEVD stats not implemented for integral_pcf_grid = $integral_pcf_grid")
     end
+    quiet && return (tbl, stats_dict)
 
 
     # # Generate Latex Table. Include copula entries if present.

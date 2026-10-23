@@ -932,6 +932,9 @@ end
 # nowcast = true (2026-10-22): besides dropping the wave, drop EVERY observation dated after it (all surveys and the
 # aggregate rows), so the estimate at the wave date is the filtered (real-time) one rather than the full-sample smoother's
 # leave-one-out interpolation. Surveys dated before the wave but published after it are still used (publication lags ignored).
+# Both exercises keep the full-sample trend by default and are scored against benchmarks sharing that trend (trend only =
+# the same reconstruction with the factors at zero; last wave), see plot_iterative_forecasts. DD_NOWCAST_TREND=realtime
+# switches the nowcast to the real-time trend (realtime_trend_rows!; outputs *_nowcast_rt*).
 function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, obs_data, model_options, model_elements, time_params, func_data, opttag; nowcast::Bool=false)
     @unpack y, MV = model_elements
     @unpack data_sources, func_dict = func_data
@@ -949,11 +952,17 @@ function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hype
     diff = grid_cop + (dimension - 1) * (grid_cop - 1)
     n = grid_cop^dimension + grid_pcf * dimension - diff
     label = "$dimension" * "D" * "_$case"
-    orig_y = deepcopy(y) # for later 
+    orig_y = deepcopy(y) # for later
+    @unpack stds = model_elements
+    orig_trend = deepcopy(model_elements.trend)
+    realtime = nowcast && get(ENV, "DD_NOWCAST_TREND", "full") == "realtime"
+    realtime && model_options.trend_spec != :hp && error("nowcast real-time trend needs trend_spec = :hp")
+    nowcast_skipped = 0
+    suffix = nowcast ? (realtime ? "_nowcast_rt" : "_nowcast") : ""
     N(x) = length(x)
     cop_tup = ntuple(_ -> (:), dimension)
 
-    # First, get the original reconstruction 
+    # First, get the original reconstruction
     smoother_output, _ = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)
     @unpack x_smoothed = smoother_output
     @unpack proj = model_elements
@@ -966,6 +975,18 @@ function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hype
     # I run this only to get the object, so I can fill it with the predictions later 
     # predictions_dict[dataset_choice] = export_functional_data(dv[dataset_choice], dataset_choice, opttag, obs_data, func_data, time_params, user_t, model_options, false, false, :forecast)     
     predictions_dict[dataset_choice] = deepcopy(dv[dataset_choice]["normal"])
+
+    # Trend-only benchmark: the same reconstruction with no data at all, so the smoother returns the prior mean x = 0 and
+    # the coefficients are mean + trend (same trend as the predictions: it cancels in the skill scores)
+    y = fill(NaN, size(orig_y))
+    @pack! model_elements = y
+    let xb = likeli(model_elements, par_final, param_sizes, hyperpriors, Σ_ids, model_options; smooth=true)[1].x_smoothed
+        @info "trend-only benchmark: max |x̂| with no data = $(round(maximum(abs, xb); sigdigits = 3))"
+    end
+    dv_b, _ = reconstruct_data(par_final, param_sizes, hyperpriors, meas_ind, Σ_ids, model_elements, obs_data, model_options, time_params, data_sources)
+    bench, _ = export_functional_data(dv_b[dataset_choice]["normal"], "normal", dataset_choice, opttag, obs_data, func_data, time_params, user_t, model_options, false, false, :forecast)
+    y = deepcopy(orig_y)
+    @pack! model_elements = y
 
     # Second, generate the predictions, removing one observation at a time, keep prediction corresponding to that removed observation 
     # Now remove one observation at a time, for each dataset, calculate the MSE and store it in the dictionary
@@ -985,7 +1006,25 @@ function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hype
             y[data_indices, id] .= NaN
             nowcast && id < size(y, 2) && (y[:, id+1:end] .= NaN)
 
-            # Define this MV as our new measurement vector 
+            # DD_NOWCAST_TREND=realtime: real-time trend for this dataset's rows (only the waves still in y, up to id)
+            if realtime
+                trend_rt, ok_rt = realtime_trend_rows!(y, data_indices, orig_trend[data_id], id, isfinite.(orig_y[data_indices, id]), stds, estimator, dimension)
+                if !ok_rt
+                    nowcast_skipped += 1
+                    for m in measures
+                        predictions_dict[dataset_choice][m]["quantiles"]["data"][:, id] .= NaN
+                        for s in ["next40", "top10", "bottom50"]
+                            predictions_dict[dataset_choice][m]["quantiles"]["common series"][s][id] = NaN
+                        end
+                    end
+                    predictions_dict[dataset_choice]["copulas"]["data"][cop_tup..., id] .= NaN
+                    continue
+                end
+                trend = deepcopy(orig_trend); trend[data_id] = trend_rt
+                @pack! model_elements = trend
+            end
+
+            # Define this MV as our new measurement vector
             @pack! model_elements = y
 
             # Reconstruct data with new MV
@@ -1025,27 +1064,59 @@ function perform_iterative_forecast(dataset_choice, par_final, param_sizes, hype
     # dv[dataset_choice] = export_functional_data(dv[dataset_choice], dataset_choice, opttag, obs_data, func_data, time_params, user_t, model_options, false, false, :forecast)     
 
     filter!(r -> !(r.tag == model_options.tag && r.source == dataset_choice), DROPWAVE_SCORES)
-    plot_iterative_forecasts(dataset_choice, dv, predictions_dict, func_data, obs_data, user_t, time_params, model_options, opttag, nowcast ? label * "_nowcast" : label, avg_series) # select_series could go in here, but it's already relative to the average  
+    plot_iterative_forecasts(dataset_choice, dv, predictions_dict, func_data, obs_data, user_t, time_params, model_options, opttag, label * suffix, avg_series; data_dt_b = bench) # select_series could go in here, but it's already relative to the average
     # scores of the drop-one-wave predictions → <results>/<folder>/data/<dataset>_dropwave_scores.csv
     try
         sc = DataFrame(filter(r -> r.tag == model_options.tag && r.source == dataset_choice, DROPWAVE_SCORES))
         if nrow(sc) > 0
             spath = BASE_PATH * "/7_Results/$(measures_folder(measures))" * model_options.tag * "/$optfolder/data"
             mkpath(spath)
-            CSV.write(spath * "/" * dataset_choice * (nowcast ? "_nowcast_scores.csv" : "_dropwave_scores.csv"), sc)
-            @info "Drop-one-wave scores ($dataset_choice): " * join(["$(r.measure) $(r.group): rmse $(round(r.rmse; sigdigits=3)), cover $(round(r.cover; digits=2))" for r in eachrow(sc)], "; ")
+            CSV.write(spath * "/" * dataset_choice * (nowcast ? suffix * "_scores.csv" : "_dropwave_scores.csv"), sc)
+            @info "Drop-one-wave scores ($dataset_choice$suffix): " * join(["$(r.measure) $(r.group): rmse $(round(r.rmse; sigdigits=3)), cover $(round(r.cover; digits=2)), skill vs trend $(round(r.skill_trend; digits=2))" for r in eachrow(sc)], "; ")
         end
     catch e
         @warn "drop-one-wave scores failed: $e"
     end
     y = deepcopy(orig_y)
-    @pack! model_elements = y
+    trend = orig_trend
+    @pack! model_elements = y, trend
+    realtime && @info "nowcast ($dataset_choice): $nowcast_skipped waves not scored (fewer than 2 earlier waves for the real-time trend)"
+end
+
+# Real-time HP trend for the nowcast (2026-10-22). The published trend (ModelPrep.perform_detrending: HP(1600) on the
+# linearly interpolated waves) is computed from ALL waves, so at a wave date it already holds about half of that wave's
+# value (more near the sample end), which flatters a prediction whose cycle is close to zero. Here, row by row, the trend
+# is recomputed from the observations still in y (up to column id; the dropped wave is already NaN), extrapolated
+# linearly to id and HP-filtered over [first observation, id]; the kept observations are re-referenced to it
+# (y + (τ − τ_rt)/sd, standardisation means unchanged) and the reconstruction adds τ_rt back. Columns after id keep the
+# full-sample trend (y is NaN there). The drop-one-wave exercise keeps the full-sample trend on purpose.
+# Returns (trend matrix, ok): ok = false when a row observed at the dropped wave has fewer than 2 earlier observations
+# (that wave is then not scored).
+function realtime_trend_rows!(y, data_indices, trend_j, id, obs_at_id, stds, estimator, dimension)
+    cop_part, imm_part = retrieve_cop_and_imm_part(estimator, dimension)
+    cop_rows = cop_part - imm_part
+    grid_pcf = estimator.grid_pcf
+    tr = deepcopy(trend_j)
+    for (i, r) in enumerate(data_indices)
+        cols = findall(t -> isfinite(y[r, t]), 1:id)
+        if length(cols) < 2
+            obs_at_id[i] && return (trend_j, false)
+            continue
+        end
+        sd = i <= cop_rows ? stds[1] : stds[1 + (i - cop_rows - 1) ÷ grid_pcf + 1]
+        z = y[r, cols] .* sd .+ trend_j[i, cols]          # raw value minus the (unchanged) mean
+        t0 = cols[1]
+        itp = linear_interpolation(cols, z, extrapolation_bc = Line())
+        tr[i, t0:id] .= HP(itp.(t0:id), 1600)
+        y[r, cols] .= y[r, cols] .+ (trend_j[i, cols] .- tr[i, cols]) ./ sd
+    end
+    return (tr, true)
 end
 
 
 const DROPWAVE_SCORES = NamedTuple[]
 
-function plot_iterative_forecasts(dataset_choice, data_dt, data_dt_r, func_data, obs_data, user_params, time_params, model_options, type, label, avg_series)
+function plot_iterative_forecasts(dataset_choice, data_dt, data_dt_r, func_data, obs_data, user_params, time_params, model_options, type, label, avg_series; data_dt_b = nothing)
     @unpack measures, lags, estimator, tag = model_options
     @unpack tmin, tmax = time_params
     @unpack func_dict, year_vec, confidence_intervals = func_data
@@ -1193,8 +1264,11 @@ function plot_iterative_forecasts(dataset_choice, data_dt, data_dt_r, func_data,
             # dropped wave, the prediction vs the survey's own estimate. rmse/mae relative
             # to the average; cover = share of predictions inside the survey's 95% sampling
             # interval; rmse_insample = the same for the smoother WITH that wave (reference).
+            # Benchmarks sharing the prediction's trend (2026-10-22): rmse_trend = the factors at zero (data_dt_b: mean +
+            # trend), rmse_lastwave = the previous observed wave; skill_* = 1 − rmse/rmse_*; corr_cycle = correlation of
+            # the predicted and observed deviations from the trend-only path (does the factor part point the right way?).
             for source in data_sources
-                for (g, d) in (("bottom50", bot), ("next40", mid), ("top10", top))
+                for (g, d, key) in (("bottom50", bot, "bot"), ("next40", mid, "mid"), ("top10", top, "top"))
                     pr, ob = d === bot ? bot_r : d === mid ? mid_r : top_r, d
                     p_ = Float64.(pr[source][obj][meas]); o_ = Float64.(ob[source*"_obs"][obj][meas])
                     f_ = Float64.(ob[source][obj][meas])
@@ -1203,10 +1277,22 @@ function plot_iterative_forecasts(dataset_choice, data_dt, data_dt_r, func_data,
                     isempty(ok) && continue
                     e = p_[ok] .- o_[ok]
                     okc = filter(i -> isfinite(l_[i]) && isfinite(u_[i]), ok)
+                    rmse = sqrt(mean(abs2, e))
+                    b_ = data_dt_b === nothing ? fill(NaN, length(p_)) :
+                         Float64.(subset_to_cutoff(data_dt_b[meas][obj]["common series"][series[key]], dates[meas], tmin, tmax, obj, avg_series[!, meas*"_per_hh"]))
+                    okb = filter(i -> isfinite(b_[i]), ok)
+                    rmse_b = isempty(okb) ? NaN : sqrt(mean(abs2, b_[okb] .- o_[okb]))
+                    corr_c = length(okb) < 3 ? NaN : cor(p_[okb] .- b_[okb], o_[okb] .- b_[okb])
+                    obs_i = findall(isfinite, o_)
+                    lw = [(j = findlast(<(i), obs_i); j === nothing ? NaN : o_[obs_i[j]]) for i in ok]
+                    okl = findall(isfinite, lw)
+                    rmse_l = isempty(okl) ? NaN : sqrt(mean(abs2, lw[okl] .- o_[ok[okl]]))
                     push!(DROPWAVE_SCORES, (tag = tag, source = source, measure = meas, group = g, n = length(ok),
-                        rmse = sqrt(mean(abs2, e)), mae = mean(abs, e), bias = mean(e),
+                        rmse = rmse, mae = mean(abs, e), bias = mean(e),
                         cover = isempty(okc) ? NaN : mean(l_[okc] .<= p_[okc] .<= u_[okc]),
-                        rmse_insample = sqrt(mean(abs2, f_[ok] .- o_[ok]))))
+                        rmse_insample = sqrt(mean(abs2, f_[ok] .- o_[ok])),
+                        rmse_trend = rmse_b, skill_trend = 1 - rmse / rmse_b, corr_cycle = corr_c,
+                        rmse_lastwave = rmse_l, skill_lastwave = isempty(okl) ? NaN : 1 - sqrt(mean(abs2, e[okl])) / rmse_l))
                 end
             end
 
