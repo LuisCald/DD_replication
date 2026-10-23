@@ -4,10 +4,13 @@
 using CSV, DataFrames, Printf, Statistics
 
 const BASE = normpath(joinpath(@__DIR__, "..", "..", ".."))
-const B = " transfer hp 8 factors pf wr0.05 infl xcovid"
+# Tag = core * variant * suffix, as in run_mdd_table.jl (Oct 23 2026 re-run suffix " aggtight incq4 scf22"; DD_MDD_SUFFIX="" = old runs).
+const B0 = " transfer hp 8 factors pf wr0.05 infl xcovid"
+const SUF = get(ENV, "DD_MDD_SUFFIX", " aggtight incq4 scf22")
+const B = B0 * SUF
 const ROWS = [("Baseline", B), ("6 DF", replace(B, "8 factors" => "6 factors")), ("7 DF", replace(B, "8 factors" => "7 factors")),
-              ("Less AF", B * " 3 af"), ("More AF", B * " 15 af"), ("Less DF and AF", replace(B, "8 factors" => "3 factors") * " 3 af"),
-              ("\$\\Gamma\$ all", B * " tw0.8"), ("\$\\Gamma\$ all 85", B * " tw0.85"), ("EM loadings", replace(B, "pf wr" => "pf em wr"))]
+              ("Less AF", B0 * " 3 af" * SUF), ("More AF", B0 * " 15 af" * SUF), ("Less DF and AF", replace(B0, "8 factors" => "3 factors") * " 3 af" * SUF),
+              ("\$\\Gamma\$ all", B0 * " tw0.8" * SUF), ("\$\\Gamma\$ all 85", B0 * " tw0.85" * SUF), ("EM loadings", replace(B, "pf wr" => "pf em wr"))]
 
 all_ = DataFrame()
 for (lab, tag) in ROWS
