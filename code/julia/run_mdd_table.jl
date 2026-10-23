@@ -10,16 +10,22 @@ using JLD2, DataFrames, CSV, Printf
 
 const BASE = normpath(joinpath(@__DIR__, "..", "..", ".."))
 const MDD_DIR = joinpath(BASE, "7_Results", "MDD")
-const B = " transfer hp 8 factors pf wr0.05 infl xcovid"
+# Tag = core * variant * suffix. The suffix holds the switches every paper run shares (Oct 23 2026 re-run: tight
+# aggregate measurement-error prior "aggtight", SCF/PSID income rows at Q4 "incq4", the 2022 SCF "scf22"); the
+# variant words ("3 af", "tw0.8", …) sit between core and suffix, exactly where the Structures files put them.
+# DD_MDD_SUFFIX="" rebuilds the table of the runs before Oct 2026.
+const B0 = " transfer hp 8 factors pf wr0.05 infl xcovid"
+const SUF = get(ENV, "DD_MDD_SUFFIX", " aggtight incq4 scf22")
+const B = B0 * SUF
 const ROWS = [   # (label, DF, AF, projection, tag)
     ("Baseline",            "8",  "11", "PCA",            B),
     ("6 DF",                "6",  "11", "PCA",            replace(B, "8 factors" => "6 factors")),
     ("7 DF",                "7",  "11", "PCA",            replace(B, "8 factors" => "7 factors")),
-    ("Less AF",             "8",  "3",  "PCA",            B * " 3 af"),
-    ("More AF",             "8",  "15", "PCA",            B * " 15 af"),
-    ("Less DF and AF",      "3",  "3",  "PCA",            replace(B, "8 factors" => "3 factors") * " 3 af"),
-    ("\$\\Gamma\$ all",     "TW", "11", "Tall--Wide 80\\%", B * " tw0.8"),
-    ("\$\\Gamma\$ all 85",  "TW", "11", "Tall--Wide 85\\%", B * " tw0.85"),
+    ("Less AF",             "8",  "3",  "PCA",            B0 * " 3 af" * SUF),
+    ("More AF",             "8",  "15", "PCA",            B0 * " 15 af" * SUF),
+    ("Less DF and AF",      "3",  "3",  "PCA",            replace(B0, "8 factors" => "3 factors") * " 3 af" * SUF),
+    ("\$\\Gamma\$ all",     "TW", "11", "Tall--Wide 80\\%", B0 * " tw0.8" * SUF),
+    ("\$\\Gamma\$ all 85",  "TW", "11", "Tall--Wide 85\\%", B0 * " tw0.85" * SUF),
     ("EM loadings",         "8",  "11", "EM",             replace(B, "pf wr" => "pf em wr")),
 ]
 
