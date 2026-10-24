@@ -1545,16 +1545,24 @@ function set_measurements(MV, pcs, means, stds, agg_data, pool, proj, files, tim
     id_dict["copula"] = 1:cop_rows  # copula rows are always the first rows
     cop_proj = proj[id_dict["copula"], :]
 
+    # Annual surveys: a flow measure (consumption, income) is reported for the year, so its rows average the state
+    # and its three lags; a stock measure (wealth, the balance-sheet items, the liquidity and debt products) is a
+    # point in time and loads on the current state only. Until Oct 24 2026 only consum/income/wealth were handled
+    # and any other measure got all-zero rows in the SCF/PSID/CPS (code review A1): its marginal was never seen
+    # by the states in those surveys.
+    flow_measures = hasproperty(model_options, :flow_measures) ? model_options.flow_measures : ["consum", "income"]
+    if any(n -> n == "SCF" || n == "PSID" || occursin("CPS", n), df_vec.df_names)
+        @info "Annual-survey measurement rows: " * join(["$m = " * (m in flow_measures ? "flow (4-quarter average)" : "stock (point in time)") for m in measures], ", ")
+    end
     for (j, df_name) in enumerate(df_vec.df_names)
         if df_name == "SCF" || df_name == "PSID" || occursin("CPS", df_name)
-            # For these, income, consumption, wealth  is annual --- we have a timestamp for wealth
             for m in measures
                 id_tup = tuple(id_dict[m], :)
                 sub_proj = proj[id_tup...]
-                if m == "consum" || m == "income"
-                    Gⱼ[j][id_tup...] .= 1 / 4 .* hcat(sub_proj, [sub_proj for _ in 1:3]...)  # Each row has the projection, zeros for the lags, and zeros for the controls
-                elseif m == "wealth"
-                    Gⱼ[j][id_tup...] .= hcat(sub_proj, [zeros(size(sub_proj)) for _ in 1:3]...)  # Each row has the projection, zeros for the lags, and zeros for the controls
+                if m in flow_measures
+                    Gⱼ[j][id_tup...] .= 1 / 4 .* hcat(sub_proj, [sub_proj for _ in 1:3]...)  # projection on the state and its three lags, zeros for the controls
+                else
+                    Gⱼ[j][id_tup...] .= hcat(sub_proj, [zeros(size(sub_proj)) for _ in 1:3]...)  # projection on the current state, zeros for the lags and the controls
                 end
             end
             # Dealing with copula
