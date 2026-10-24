@@ -167,13 +167,16 @@ function gen_proof_of_concept_copulas(d_data_dict::Dict, r_data_dict::Dict, sour
     C̄_nocov_r = reshape(nanmean(r_data_dict["copulas"]["data"][colons..., b4_cov_ids], dims=D + 1), grid_tup)
     KL_nocov_r = [compute_Kullback_Leibler_divergence(r_data_dict["copulas"]["data"][colons..., y], C̄_nocov_r; compare_to_average=true)
                   for y in b4_cov_ids]
+    ov_int = source_of_id == "PSID" ? 2 * intval : intval   # PSID: biennial waves, label every other one
+    ov_top = 1.1 * maximum(filter(isfinite, vcat(KL_nocov_o, KL_nocov_r)))
     Plots.plot(
         xaxis[1:select_annual:end],
         KL_nocov_o[1:select_annual:end],
         ylabel=L"\textrm{Kullback–Leibler\,\, divergence}",
         xformatter=:latex,
         yformatter=:latex,
-        xticks=(xaxis[1:intval:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(dts[b4_cov_T_ids][1:intval:end])]),
+        xticks=(xaxis[1:ov_int:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(dts[b4_cov_T_ids][1:ov_int:end])]),
+        ylims=(0, ov_top),                                   # zero-based, like the published panels
         linewidth=3,
         xtickfontsize=16,
         ytickfontsize=16,
