@@ -204,17 +204,17 @@ report_mode_dynamics(x_opt, param_sizes, model_options; label = "Mode dynamics a
 if DO_HESS
     th = time()
     hh = 1e-3 .* max.(1.0, abs.(x_opt))
-    pairs = [(i, j) for i in 1:n for j in i:n]
-    Hv = zeros(length(pairs))
-    Threads.@threads for k in eachindex(pairs)
-        i, j = pairs[k]
+    ij_pairs = [(i, j) for i in 1:n for j in i:n]      # (not `pairs`: shadows Base.pairs at top level)
+    Hv = zeros(length(ij_pairs))
+    Threads.@threads for k in eachindex(ij_pairs)
+        i, j = ij_pairs[k]
         xpp = copy(x_opt); xpm = copy(x_opt); xmp = copy(x_opt); xmm = copy(x_opt)
         xpp[i] += hh[i]; xpp[j] += hh[j]; xpm[i] += hh[i]; xpm[j] -= hh[j]
         xmp[i] -= hh[i]; xmp[j] += hh[j]; xmm[i] -= hh[i]; xmm[j] -= hh[j]
         Hv[k] = (f(xpp) - f(xpm) - f(xmp) + f(xmm)) / (4 * hh[i] * hh[j])
     end
     H = zeros(n, n)
-    for (k, (i, j)) in enumerate(pairs); H[i, j] = Hv[k]; H[j, i] = Hv[k]; end
+    for (k, (i, j)) in enumerate(ij_pairs); H[i, j] = Hv[k]; H[j, i] = Hv[k]; end
     H = Symmetric(H)      # Hessian of −log-post: positive definite at a proper maximum
     ev = eigvals(H)
     JLD2.jldsave(joinpath(OUT, "hessian.jld2"); H = Matrix(H), x_opt = x_opt, h = hh)
