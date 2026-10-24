@@ -25,6 +25,8 @@ copies = meas == ["consum", "income", "wealth"] ? ["KL_divergence_no_covid.pdf" 
          meas == ["consum", "income"] ? ["KL_divergence_no_covid.pdf" => "KL_divergence_no_covid_CY.pdf",
                                          "consum_quantiles_bottom_quantiles.pdf" => "consum_quantiles_bottom_quantiles.pdf",
                                          "income_quantiles_middle_quantiles.pdf" => "income_quantiles_middle_quantiles.pdf"] : Pair{String,String}[]
+# overlay variant of the KL panel (data dynamics line + reconstruction circles), next to the published one
+copies = vcat(copies, [replace(a, ".pdf" => "_overlay.pdf") => replace(b, ".pdf" => "_overlay.pdf") for (a, b) in copies if startswith(a, "KL_")])
 for (a, b) in copies
     f = joinpath(src, a)
     isfile(f) ? cp(f, joinpath(dst, b); force = true) : @warn "proof of concept: $f not produced"

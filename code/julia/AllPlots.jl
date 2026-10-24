@@ -159,6 +159,36 @@ function gen_proof_of_concept_copulas(d_data_dict::Dict, r_data_dict::Dict, sour
 
     Plots.savefig(path * "KL_divergence_no_covid" * ".pdf")
 
+    # Overlay variant (Oct 24 2026), styled like the quantile panels: the copula dynamics of the survey data
+    # (KL of each wave's copula from the sample-average copula, black dashed line) and the same statistic computed on
+    # the reconstructed copulas (each against the average reconstruction, orange open circles). Circles on the line =
+    # the approximation preserves the copula's movements. Written as KL_divergence_no_covid_overlay.pdf; the panel
+    # above is unchanged.
+    C̄_nocov_r = reshape(nanmean(r_data_dict["copulas"]["data"][colons..., b4_cov_ids], dims=D + 1), grid_tup)
+    KL_nocov_r = [compute_Kullback_Leibler_divergence(r_data_dict["copulas"]["data"][colons..., y], C̄_nocov_r; compare_to_average=true)
+                  for y in b4_cov_ids]
+    Plots.plot(
+        xaxis[1:select_annual:end],
+        KL_nocov_o[1:select_annual:end],
+        ylabel=L"\textrm{Kullback–Leibler\,\, divergence}",
+        xformatter=:latex,
+        yformatter=:latex,
+        xticks=(xaxis[1:intval:end], [L"%$(date)"[1:5] * "\$" for (_, date) in enumerate(dts[b4_cov_T_ids][1:intval:end])]),
+        linewidth=3,
+        xtickfontsize=16,
+        ytickfontsize=16,
+        legendfontsize=16,
+        guidefontsize=16,
+        legend=false,
+        lc=:gray30,
+        ls=:dash,
+        label="",
+    )
+    Plots.scatter!(xaxis[1:select_annual:end], KL_nocov_r[1:select_annual:end], msc=:orange, mc=:white, ms=5, msw=2, label="", dpi=500)
+    Plots.savefig(path * "KL_divergence_no_covid_overlay" * ".pdf")
+    @info "KL overlay ($(source_of_id)): max |data − reconstruction| = $(round(maximum(abs.(KL_nocov_o .- KL_nocov_r)), digits=4)), " *
+          "corr = $(round(cor(KL_nocov_o, KL_nocov_r), digits=3))"
+
 
     # Plot this as a time series 
     Plots.plot(
