@@ -27,13 +27,39 @@ mkpath(OUT)
 func_data, time_params, model_elements = estimation_prep(obs_data, model_options)
 param_vector, param_sizes, priors, meas_ind, Σ_ids = set_params(model_elements, time_params, model_options)
 hyperpriors = st_hyperpriors(priors, param_sizes)
-x0 = Vector{Float64}(get_param_vector(model_options.measures, :mcmc, "3D_$(model_options.case)", model_options.data_cutoffs, START_TAG))
+# DD_MODEOPT_X0 = path of a one-value-per-row CSV (x_opt.csv / x_checkpoint.csv of an earlier climb) overrides the start
+const X0_PATH = get(ENV, "DD_MODEOPT_X0", "")
+x0 = isempty(X0_PATH) ?
+     Vector{Float64}(get_param_vector(model_options.measures, :mcmc, "3D_$(model_options.case)", model_options.data_cutoffs, START_TAG)) :
+     vec(readdlm(isabspath(X0_PATH) ? X0_PATH : joinpath(BASE_PATH, X0_PATH), ','))
+isempty(X0_PATH) || @info "start overridden: x0 from $X0_PATH"
 const n = length(x0)
 
 # ── objective ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 logpost(x) = likeli(model_elements, x, param_sizes, hyperpriors, Σ_ids, model_options)[1]
 const CLIFF = -1e11            # likeli returns −1e12 off the stationarity cap / on Cholesky failures: a wall, not a value
-f(x) = (v = logpost(x); (isfinite(v) && v > CLIFF) ? -v : Inf)
+# Stationarity cap: likeli's wall at max |eig[A B; C D]| > cap stalls the line search once a step lands on it (the 1,600
+# starts stopped at 0.9950 after 27 iterations). Points beyond the wall are projected back onto a surface just inside it —
+# A, B, C, D scaled like DIMESampler's shrink_to_cap! — so the objective is flat in the radial direction there and L-BFGS can
+# slide along the wall. The reported optimum is the projected point, so it is always a legal parameter vector.
+const CAPV = hasproperty(model_options, :stationarity_cap) && isfinite(model_options.stationarity_cap) ? model_options.stationarity_cap : Inf
+const N_ABCD = prod(param_sizes[1]) + prod(param_sizes[2]) + prod(param_sizes[3]) + param_sizes[4][1]
+function joint_radius(x)
+    r, q = param_sizes[2]
+    lA = r * r; lB = r * q; lC = q * r
+    all(isfinite, @view x[1:N_ABCD]) || return NaN
+    Φj = [reshape(x[1:lA], r, r) reshape(x[lA+1:lA+lB], r, q); reshape(x[lA+lB+1:lA+lB+lC], q, r) diagm(x[lA+lB+lC+1:N_ABCD])]
+    return maximum(abs, eigvals(Φj))
+end
+function project(x)
+    isfinite(CAPV) || return x
+    ρ = joint_radius(x)
+    (isfinite(ρ) && ρ > 0.999 * CAPV) || return x
+    xp = copy(x); @views xp[1:N_ABCD] .*= 0.999 * CAPV / ρ
+    return xp
+end
+f_raw(x) = (v = logpost(x); (isfinite(v) && v > CLIFF) ? -v : Inf)
+f(x) = f_raw(project(x))
 logpost(x0)                    # serial warm-up: fills the lazy G caches before the first threaded batch (as DIMESampler does)
 t0 = time()
 lp0 = logpost(x0)
@@ -110,10 +136,10 @@ function block_summary(x)
 end
 
 # ── L-BFGS ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
-best = Ref((f0, copy(x0)))
+best = Ref((f0, project(x0)))
 function fg!(F, G, x)
     v = f(x)
-    v < best[][1] && (best[] = (v, copy(x)))
+    v < best[][1] && (best[] = (v, project(x)))
     G === nothing || fd_gradient!(G, x, v)
     return v
 end
@@ -128,14 +154,25 @@ function cb(st)
     st.iteration % 25 == 0 && writedlm(joinpath(OUT, "x_checkpoint.csv"), xb, ',')
     return false
 end
-res = Optim.optimize(Optim.only_fg!(fg!), x0,
-                     Optim.LBFGS(m = 20, linesearch = LineSearches.BackTracking(order = 3)),
-                     Optim.Options(iterations = MAXIT, g_abstol = 1e-2, time_limit = HOURS * 3600, callback = cb,
-                                   show_trace = false, show_every = 1))   # Optim calls the callback only every show_every
+# Restart rounds: a stall (zero step after a failed line search reports "converged" with a large gradient) restarts L-BFGS
+# with fresh memory from the best point; stop when the gradient is small, a round gains < 1 log point, or time is up.
+n_iter = 0; rounds = 0; lp_round = lp0; res = nothing
+while true
+    remaining = HOURS * 3600 - (time() - t_start)
+    global res = Optim.optimize(Optim.only_fg!(fg!), best[][2],
+                                Optim.LBFGS(m = 20, linesearch = LineSearches.BackTracking(order = 3)),
+                                Optim.Options(iterations = MAXIT - n_iter, g_abstol = 1e-2, time_limit = remaining, callback = cb,
+                                              show_trace = false, show_every = 1))   # Optim calls the callback only every show_every
+    global n_iter += Optim.iterations(res); global rounds += 1
+    gained = -best[][1] - lp_round; global lp_round = -best[][1]
+    @info @sprintf("round %d: %d iterations, log-post %.2f (+%.2f), ‖g‖∞ %.3f, max|eig| %.4f, %.1f min elapsed", rounds, Optim.iterations(res),
+                   lp_round, gained, Optim.g_residual(res), joint_radius(best[][2]), (time() - t_start) / 60)
+    (HOURS * 3600 - (time() - t_start) < 120 || n_iter >= MAXIT || Optim.g_residual(res) <= 1e-2 || (rounds > 1 && gained < 1.0) || rounds >= 50) && break
+end
 x_opt = best[][2]
 writedlm(joinpath(OUT, "x_opt.csv"), x_opt, ',')
-@info "L-BFGS: $(Optim.iterations(res)) iterations in $(round((time() - t_start) / 60, digits = 1)) min; " *
-      "converged = $(Optim.converged(res)); log-post $(round(lp0, digits = 2)) → $(round(-best[][1], digits = 2))"
+@info "L-BFGS: $n_iter iterations in $rounds rounds, $(round((time() - t_start) / 60, digits = 1)) min; " *
+      "final ‖g‖∞ = $(round(Optim.g_residual(res), digits = 3)); log-post $(round(lp0, digits = 2)) → $(round(-best[][1], digits = 2))"
 
 # ── summary: start vs optimum ───────────────────────────────────────────────────────────────────────────────────────────
 rows = NamedTuple[]
@@ -147,7 +184,7 @@ for (lab, x) in (("start", x0), ("optimum", x_opt))
                  sd_f_vec = join(round.(b.sd_f_vec, digits = 3), " ")))
 end
 summ = DataFrame(identity.(rows))
-summ.start_tag .= strip(START_TAG); summ.name .= NAME; summ.iterations .= Optim.iterations(res)
+summ.start_tag .= strip(START_TAG); summ.name .= NAME; summ.iterations .= n_iter; summ.rounds .= rounds
 summ.minutes .= round((time() - t_start) / 60, digits = 1); summ.gnorm_final .= Optim.g_residual(res)
 summ.dist_from_start .= [0.0, norm(x_opt - x0)]
 CSV.write(joinpath(OUT, "summary.csv"), summ)
