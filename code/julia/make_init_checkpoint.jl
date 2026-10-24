@@ -16,7 +16,7 @@ const XOPT = ENV["DD_INIT_XOPT"]
 const ENS_TAG = model_options.tag[1:end-length(get(ENV, "DD_TAG", ""))] * get(ENV, "DD_INIT_ENSEMBLE", " it6000 scf22")
 const CLOUD = get(ENV, "DD_INIT_CLOUD", "ensemble")      # ensemble | laplace
 const NITER = parse(Int, get(ENV, "DD_NITER", "1600"))
-const INJECT_EVERY = parse(Int, get(ENV, "DD_INIT_INJECT", "10"))
+const INJECT_EVERY = parse(Int, get(ENV, "DD_INIT_INJECT", CLOUD == "laplace" ? "0" : "10"))
 
 func_data, time_params, model_elements = estimation_prep(obs_data, model_options)
 param_vector, param_sizes, priors, meas_ind, Σ_ids = set_params(model_elements, time_params, model_options)
@@ -51,14 +51,25 @@ function shrink_to_cap!(col)
 end
 
 if CLOUD == "laplace"
-    hz = JLD2.load(joinpath(dirname(isabspath(XOPT) ? XOPT : joinpath(BASE_PATH, XOPT)), "hessian.jld2"))
-    H = Symmetric(hz["H"]); ev = eigvals(H)
-    minimum(ev) > 0 || error("Hessian has $(count(<=(0), ev)) non-positive eigenvalues; Laplace cloud not defined, use DD_INIT_CLOUD=ensemble")
-    nchain = 4 * length(x_opt)
-    L = cholesky(Symmetric(inv(H))).L
+    # Laplace cloud: x_opt + chol(H⁻¹) z, H the finite-difference Hessian of −log-post at the optimum (mode_lbfgs.jl,
+    # DD_MODEOPT_HESS=1; DD_INIT_HESS = its path, default hessian.jld2 next to x_opt). FD noise and flat ridge directions
+    # give small or negative eigenvalues: they are floored at DD_INIT_EIGFLOOR × λ_max (default 1e-4) before inverting, so
+    # the cloud is widest along the flat directions without running off. Chains land ~ndim/2 ≈ 243 log points below the
+    # optimum, i.e. in the typical set, which is what the DE and AIMH proposals need (an ensemble recentred on the optimum
+    # put the median chain 2 million log points down and 1,594 of 1,944 beyond the stationarity cap, 2026-10-24).
+    hpath = get(ENV, "DD_INIT_HESS", joinpath(dirname(isabspath(XOPT) ? XOPT : joinpath(BASE_PATH, XOPT)), "hessian.jld2"))
+    hz = JLD2.load(isabspath(hpath) ? hpath : joinpath(BASE_PATH, hpath))
+    H = Symmetric(hz["H"]); F = eigen(H)
+    floor_rel = parse(Float64, get(ENV, "DD_INIT_EIGFLOOR", "1e-4"))
+    λ = max.(F.values, floor_rel * maximum(F.values))
+    @info @sprintf("Hessian: %d eigenvalues, %d negative, %d floored at %.3g (max %.3g, median %.3g)", length(λ), count(<(0), F.values),
+                   count(F.values .< floor_rel * maximum(F.values)), floor_rel * maximum(F.values), maximum(F.values), median(F.values))
+    Lc = F.vectors * Diagonal(1 ./ sqrt.(λ))          # Lc Lcᵀ = (V Λ Vᵀ)⁻¹
+    nchain = parse(Int, get(ENV, "DD_INIT_NCHAIN", string(4 * length(x_opt))))
     Random.seed!(20261024)
-    x_init = x_opt .+ L * randn(length(x_opt), nchain)
-    @info "Laplace cloud: $nchain chains, sd range $(extrema(sqrt.(diag(inv(H)))))"
+    x_init = x_opt .+ Lc * randn(length(x_opt), nchain)
+    sds = sqrt.(vec(sum(Lc .^ 2, dims = 2)))
+    @info @sprintf("Laplace cloud: %d chains; parameter sd min %.4f, median %.4f, max %.4f", nchain, minimum(sds), median(sds), maximum(sds))
 else
     ens_path = joinpath(BASE_PATH, "posterior_draws", m_label * "_$(ENS_TAG)" * "_checkpoint.jld2")
     ck = JLD2.load(ens_path)
@@ -67,7 +78,11 @@ else
     @info @sprintf("ensemble cloud from %s (iteration %d, %d chains): mean |shift| %.3f, ensemble sd median %.3f",
                    ens_path, ck["it"], size(x_ens, 2), mean(abs, x_opt .- mean(x_ens, dims = 2)), median(std(x_ens, dims = 2)))
 end
-x_init[:, 1:INJECT_EVERY:end] .= x_opt
+# chain 1 is always the optimum (the resume path's donor = best chain); DD_INIT_INJECT=k > 0 also sets every k-th chain to it
+# (as the BBO mode on a fresh start). Default 0 for the Laplace cloud: a block of identical top chains dominates the
+# lprob-weighted AIMH covariance and degenerates the proposal.
+x_init[:, 1] .= x_opt
+INJECT_EVERY > 0 && (x_init[:, 1:INJECT_EVERY:end] .= x_opt)
 nshrunk = 0
 for j in axes(x_init, 2)
     col = x_init[:, j]
