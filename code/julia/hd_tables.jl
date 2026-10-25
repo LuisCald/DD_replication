@@ -30,7 +30,11 @@ hd = historical_decomp_factors_blockchol(Φ[ids_hd, ids_hd], r, q, smoother_res.
     splitting = :group, shock_order = :agg_first)
 @info "Historical decomposition: max reconstruction error $(hd.maxerr)"
 dts_hd = QuarterlyDate(tmin["year"], tmin["quarter"]):Quarter(1):QuarterlyDate(tmax["year"], tmax["quarter"])
-rows_dec, rows_nber = make_hd_tables(hd.cube, hd.order, hd.ids, year.(dts_hd), quarter.(dts_hd); make_recession_plots = false, out_dir = OUT)
+# DD_HD_PLOTS=1 also redraws hd_recessions_f*.pdf into the run's plots folder (post-estimation Step 7 output) without a full post-estimation
+hd_plots = get(ENV, "DD_HD_PLOTS", "0") == "1"
+plot_dir = joinpath(RESULTS_DIR, measures_folder(model_options.measures) * model_options.tag, "from_mcmc", "plots", "historical_decomposition")
+hd_plots && mkpath(plot_dir)
+rows_dec, rows_nber = make_hd_tables(hd.cube, hd.order, hd.ids, year.(dts_hd), quarter.(dts_hd); make_recession_plots = hd_plots, out_dir = plot_dir)
 CSV.write(joinpath(OUT, "hd_recessions.csv"), rows_nber)
 CSV.write(joinpath(OUT, "hd_decades.csv"), rows_dec)
 println("HDTABLE " * strip(model_options.tag))

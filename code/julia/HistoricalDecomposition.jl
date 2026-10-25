@@ -514,7 +514,7 @@ function make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=
             p1 = groupedbar(cats[1:4], X[1:4, :];
                 bar_position=:dodge, bar_width=0.8,
                 label=[L"\textrm{Distribution}" L"\textrm{Aggregates}"],
-                ylabel=L"\textrm{Historical\,\, share\, (\%)}",
+                ylabel=L"\textrm{Historical\,\, share}",
                 xformatter=:latex,
                 yformatter=:latex,
                 legend=false,
@@ -532,7 +532,7 @@ function make_hd_tables(cube, order, ids, years, quarters; make_recession_plots=
                 bar_position=:dodge, bar_width=0.8,
                 label=[L"\textrm{Distribution}" L"\textrm{Aggregates}"],
                 legend=false,
-                ylabel=L"\textrm{Historical\,\, share\, (\%)}",
+                ylabel=L"\textrm{Historical\,\, share}",
                 xformatter=:latex,
                 yformatter=:latex,
                 color=color_for_plot,
