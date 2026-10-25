@@ -117,7 +117,8 @@ const model_options = ModelOptions(
           (HANK_SHOCKS == :levels ? " lvl" : "") *
           (HANK_LOAD == :block ? " blk$(HANK_NMF)x$(HANK_NCB)" : "") *
           (isempty(HANK_OBJF) ? "" : " of" * replace(HANK_OBJF, ":" => "", "," => "-", "@" => "p", " " => "")) *
-          (HANK_WRIDGE > 0 ? " wr$(HANK_WRIDGE)" : "") * (HANK_XS == "50" ? " x50" : ""),
+          (HANK_WRIDGE > 0 ? " wr$(HANK_WRIDGE)" : "") * (HANK_XS == "50" ? " x50" : "") *
+          get(ENV, "DD_TAG", ""),   # extra suffix last, as Structures_transfer.jl (e.g. " init" for an L-BFGS-seeded re-run)
     trend_spec = HANK_TREND,
     persistence_prior = HANK_PERS,
     trend_lambda_scale = HANK_TLS,

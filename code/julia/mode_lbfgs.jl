@@ -27,12 +27,15 @@ mkpath(OUT)
 func_data, time_params, model_elements = estimation_prep(obs_data, model_options)
 param_vector, param_sizes, priors, meas_ind, Σ_ids = set_params(model_elements, time_params, model_options)
 hyperpriors = st_hyperpriors(priors, param_sizes)
-# DD_MODEOPT_X0 = path of a one-value-per-row CSV (x_opt.csv / x_checkpoint.csv of an earlier climb) overrides the start
+# DD_MODEOPT_X0 = path of a one-value-per-row CSV (x_opt.csv / x_checkpoint.csv of an earlier climb) overrides the start;
+# DD_MODEOPT_X0=prior starts from one random prior draw instead (no earlier run needed; DD_MODEOPT_SEED, default 1), drawn as
+# DIMESampler draws its initial ensemble (hyperparameters at their initial values, cap violations shrunk) and redrawn until
+# the log-posterior is finite
 const X0_PATH = get(ENV, "DD_MODEOPT_X0", "")
-x0 = isempty(X0_PATH) ?
+const FROM_PRIOR = X0_PATH == "prior"
+x0 = FROM_PRIOR ? copy(param_vector) : isempty(X0_PATH) ?
      Vector{Float64}(get_param_vector(model_options.measures, :mcmc, "3D_$(model_options.case)", model_options.data_cutoffs, START_TAG)) :
      vec(readdlm(isabspath(X0_PATH) ? X0_PATH : joinpath(BASE_PATH, X0_PATH), ','))
-isempty(X0_PATH) || @info "start overridden: x0 from $X0_PATH"
 const n = length(x0)
 
 # ── objective ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -60,6 +63,25 @@ function project(x)
 end
 f_raw(x) = (v = logpost(x); (isfinite(v) && v > CLIFF) ? -v : Inf)
 f(x) = f_raw(project(x))
+if FROM_PRIOR
+    pri0 = get_priors(model_elements, model_options, st_hyper_params(param_vector, param_sizes)); push!(pri0, hyperpriors...)
+    Random.seed!(parse(Int, get(ENV, "DD_MODEOPT_SEED", "1")))
+    logpost(param_vector)      # serial warm-up of the lazy caches
+    for k in 1:500
+        xk = vec(draw_from_prior(param_sizes, pri0, 1))
+        all(isfinite, xk) || continue
+        ρk = joint_radius(xk)
+        isfinite(CAPV) && isfinite(ρk) && ρk > CAPV && (@views xk[1:N_ABCD] .*= 0.98 * CAPV / ρk)
+        v = logpost(xk)
+        if isfinite(v) && v > CLIFF
+            global x0 = xk
+            @info @sprintf("start: random prior draw %d (log-post %.1f)", k, v)
+            break
+        end
+        k == 500 && error("no prior draw with a finite log-posterior in 500 tries")
+    end
+end
+FROM_PRIOR || isempty(X0_PATH) || @info "start overridden: x0 from $X0_PATH"
 logpost(x0)                    # serial warm-up: fills the lazy G caches before the first threaded batch (as DIMESampler does)
 t0 = time()
 lp0 = logpost(x0)
